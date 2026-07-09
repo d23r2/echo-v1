@@ -65,7 +65,10 @@ class ModelRouter:
         available, reason = provider.available()
         if not available:
             raise ProviderUnavailableError(f"{provider.label} is unavailable: {reason}")
-        return provider.chat(system_prompt, messages), provider.name
+        try:
+            return provider.chat(system_prompt, messages), provider.name
+        except Exception as exc:
+            raise ProviderUnavailableError(f"{provider.label} request failed: {exc}") from exc
 
 
 router = ModelRouter()
