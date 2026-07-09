@@ -55,6 +55,11 @@ to disk with no bridge involved. There is a stray empty `.git/` folder here from
 failed attempt; safe to delete manually in Explorer, or just overwrite with a fresh
 `git init` locally.
 
+Retried from a Cowork sandbox shell again on 2026-07-09 (~16:00) — same failure mode
+(`.git/config` intermittently unreadable, `fatal: unknown error occurred while reading
+the configuration files`). Confirms this is still a sandbox/FUSE limitation, not
+something that self-resolved. Still needs to be done locally.
+
 ## Notes for the daily check-in task
 - This file is the source of truth for "where things stand." Update the **Last check-in**
   date and the **Next up** list each time significant progress is made.
