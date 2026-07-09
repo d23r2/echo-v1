@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     xai_api_key: str | None = None
     xai_model: str = "grok-4"
 
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-2.5-flash"
+
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
 

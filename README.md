@@ -20,9 +20,9 @@ backend/   FastAPI + SQLAlchemy (SQLite) + ChromaDB (local embeddings)
 frontend/  React + TypeScript + Tailwind (Vite)
 ```
 
-Model routing supports Anthropic (Claude), OpenAI, xAI (Grok), and a local Ollama
-fallback. "auto" mode tries them in that order and uses the first available one;
-you can also pin a specific provider from the model picker.
+Model routing supports Anthropic (Claude), OpenAI, Gemini (Google), xAI (Grok), and a
+local Ollama fallback. "auto" mode tries them in that order and uses the first available
+one; you can also pin a specific provider from the model picker.
 
 ## Running locally (no Docker)
 
@@ -71,6 +71,7 @@ Desktop for Windows/Mac). This only matters for Docker — running the backend d
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | Claude |
 | `OPENAI_API_KEY` / `OPENAI_MODEL` | GPT |
 | `XAI_API_KEY` / `XAI_MODEL` | Grok (OpenAI-compatible endpoint) |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | Gemini (Google, REST API) |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | Local fallback, no key needed |
 | `DEFAULT_PROVIDER` | `auto` or a specific provider name |
 | `CORS_ORIGINS` | Comma-separated origins allowed to call the API |
