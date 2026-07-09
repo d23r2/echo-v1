@@ -1,0 +1,28 @@
+{
+  "entries": [
+    {
+      "id": "atlas-0001",
+      "content": "The user is building the God Tear AI Brain project: Echo persona, Atlas memory system, Guardian Council governance, on a $0-40/mo budget, using Claude Code and Cowork scheduled tasks.",
+      "epistemic_status": "Verified",
+      "created_at": "2026-07-09T00:00:00Z",
+      "source": "conversation:2026-07-09",
+      "tags": ["project-meta", "budget", "constitution"]
+    },
+    {
+      "id": "atlas-0002",
+      "content": "v0 architecture decision: memory stored as flat atlas.json in git, no hosted database, no autonomous self-modification of constitution.md or CLAUDE.md.",
+      "epistemic_status": "Verified",
+      "created_at": "2026-07-09T00:00:00Z",
+      "source": "roadmap.md",
+      "tags": ["architecture", "decision"]
+    },
+    {
+      "id": "atlas-0003",
+      "content": "Semantic search over Atlas will use local sentence-transformer embeddings + brute-force cosine similarity at v1, before considering any hosted vector DB.",
+      "epistemic_status": "Hypothesis",
+      "created_at": "2026-07-09T00:00:00Z",
+      "source": "atlas-memory-design.md",
+      "tags": ["architecture", "future"]
+    }
+  ]
+}
