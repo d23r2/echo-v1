@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # Server
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:5174,http://127.0.0.1:5174"
 
     # Storage
     database_url: str = f"sqlite:///{(DATA_DIR / 'echo.db').as_posix()}"
