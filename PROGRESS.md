@@ -1,6 +1,6 @@
 # Echo (God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-09
+Last check-in: 2026-07-10
 
 ## Snapshot (as of 2026-07-09, corrected after full review)
 
@@ -12,7 +12,11 @@ not just a scaffold.
   Council amendment guard + voting
 - `atlas.py` (107) — memory system (epistemic status, tags, semantic search)
 - `persona.py`, `router.py`, `schemas.py`, `models.py`, `db.py` — core plumbing
-- `providers/` — Anthropic, OpenAI, Grok, Ollama fallback all implemented
+- `providers/` — Anthropic, OpenAI, Gemini, Grok, Ollama fallback all implemented
+  (Gemini added since last check-in: `gemini_provider.py`, wired into `router.py`
+  priority order and `config.py`; smoke-tested end-to-end 2026-07-10 with a real key
+  and a real chat turn through `docker compose` — `provider_used: "gemini"`, correct
+  `REASONING:`/`ANSWER:` envelope, `auto` mode correctly prefers it over Ollama)
 - `routers/` — chat, amendments, atlas, constitution, models endpoints all implemented
 - Confirmed working: `backend/.env` has real keys set, `backend/data/echo.db` and
   `backend/data/chroma/` contain real persisted data — this has actually been run and used.
@@ -34,13 +38,17 @@ not just a scaffold.
 ## Gaps / next up (working priority order)
 1. **No automated tests anywhere** (backend or frontend) — highest priority given the
    Guardian Council invariant guard is safety-critical logic worth locking down with tests.
-2. **No version control** — attempted `git init` from the Cowork sandbox but it isn't
-   reliable on this bridged folder (see note below); do this from Claude Code / a local
-   terminal instead.
-3. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
-4. Decide on a deployment target (Docker Compose is ready — has this been run end-to-end
-   with `docker compose up --build`?).
-5. Consider streaming chat responses (currently single request/response per turn).
+2. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
+3. Consider streaming chat responses (currently single request/response per turn).
+
+**Resolved since 2026-07-09:**
+- Version control: git repo initialized and committed from Claude Code (not the Cowork
+  sandbox — see note below), multiple commits in, working normally.
+- Gemini provider: smoke-tested end-to-end (see above).
+- Deployment target: `docker compose up --build` run end-to-end successfully — both
+  containers healthy, nginx correctly proxies `/api` to the backend, confirmed a full
+  chat round-trip through the containerized stack (including the host-run Ollama
+  fallback via `host.docker.internal`).
 
 ## Blockers
 - (none recorded yet)
@@ -59,6 +67,14 @@ Retried from a Cowork sandbox shell again on 2026-07-09 (~16:00) — same failur
 (`.git/config` intermittently unreadable, `fatal: unknown error occurred while reading
 the configuration files`). Confirms this is still a sandbox/FUSE limitation, not
 something that self-resolved. Still needs to be done locally.
+
+Checked again on 2026-07-10: `.git/` still present with a stale lock file
+(`_stale_lock_1783578633`, `config.lock.bak`, `index.lock.bak`) and `git log` still
+fails with the same config-read error. No change — still needs a local `git init`.
+
+Resolved 2026-07-10 via the recommended workaround: initialized and committed from
+Claude Code running locally (not the Cowork sandbox), which confirmed this was purely
+the sandbox/FUSE bridge limitation described above. Repo now has normal git history.
 
 ## Notes for the daily check-in task
 - This file is the source of truth for "where things stand." Update the **Last check-in**
