@@ -22,6 +22,13 @@ class AtlasCitation(BaseModel):
     confidence: float
 
 
+class MemoryUpdate(BaseModel):
+    saved: bool
+    explicit: bool
+    content: str | None = None
+    error: str | None = None
+
+
 class ChatResponse(BaseModel):
     conversation_id: str
     message_id: str
@@ -29,6 +36,7 @@ class ChatResponse(BaseModel):
     reasoning: str | None = None
     provider_used: str
     atlas_citations: list[AtlasCitation] = Field(default_factory=list)
+    memory_update: MemoryUpdate | None = None
 
 
 class MessageOut(BaseModel):

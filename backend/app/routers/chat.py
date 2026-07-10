@@ -1,15 +1,66 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app import persona, schemas
+from app import atlas, memory_extraction, persona, schemas
 from app.db import get_db
 from app.models import Conversation, Message
-from app.providers.base import ChatMessage
+from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError, router as model_router
 
 router = APIRouter(prefix="/api", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 _ROLE_MAP = {"user": "user", "echo": "assistant"}
+
+
+def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
+    try:
+        entry = atlas.create_entry(
+            db,
+            schemas.AtlasEntryCreate(
+                content=content,
+                epistemic_status=epistemic_status,
+                confidence=confidence,
+                tags=tags,
+                source=source,
+            ),
+        )
+        return schemas.MemoryUpdate(saved=True, explicit=explicit, content=entry.content)
+    except Exception as exc:
+        logger.warning("Atlas memory save failed (explicit=%s): %s", explicit, exc)
+        return schemas.MemoryUpdate(saved=False, explicit=explicit, content=content, error=str(exc))
+
+
+def _extract_memory(db: Session, payload_message: str, result: ChatResult) -> schemas.MemoryUpdate | None:
+    if memory_extraction.is_explicit_remember_request(payload_message):
+        content = memory_extraction.extract_explicit_memory(payload_message)
+        # Bypasses the model's own MEMORY: judgment entirely — an explicit ask is
+        # saved directly from the user's words, so it can't be silently dropped by a
+        # flaky extraction call or rate limiting.
+        return _save_memory(
+            db,
+            content=content,
+            explicit=True,
+            epistemic_status="Verified",
+            confidence=0.95,
+            tags=["user-stated"],
+            source="explicit user request",
+        )
+
+    parsed = memory_extraction.parse_memory_json(result.memory_json)
+    if parsed is None:
+        return None
+    return _save_memory(
+        db,
+        content=parsed["content"],
+        explicit=False,
+        epistemic_status=parsed["epistemic_status"],
+        confidence=parsed["confidence"],
+        tags=[*parsed["tags"], "auto-extracted"],
+        source="auto-extracted from conversation",
+    )
 
 
 @router.post("/chat", response_model=schemas.ChatResponse)
@@ -30,7 +81,10 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
     ]
     turn_count = len(conversation.messages)
 
-    system_prompt, citations = persona.build_system_prompt(db, payload.message, turn_count)
+    explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
+    system_prompt, citations = persona.build_system_prompt(
+        db, payload.message, turn_count, explicit_remember_request=explicit_remember
+    )
     history.append(ChatMessage(role="user", content=payload.message))
 
     try:
@@ -39,6 +93,8 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    memory_update = _extract_memory(db, payload.message, result)
 
     user_msg = Message(conversation_id=conversation.id, role="user", content=payload.message)
     echo_msg = Message(
@@ -61,6 +117,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         reasoning=result.reasoning,
         provider_used=provider_used,
         atlas_citations=citations,
+        memory_update=memory_update,
     )
 
 

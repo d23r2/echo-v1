@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ConversationOut,
+  MemoryUpdate,
   MessageOut,
   getConversation,
   listConversations,
@@ -11,11 +12,15 @@ import { useRole } from "../../state/roleContext";
 import MessageBubble from "./MessageBubble";
 import ModelPicker from "./ModelPicker";
 
+export interface DisplayMessage extends MessageOut {
+  memory_update?: MemoryUpdate | null;
+}
+
 export default function ChatView() {
   const { provider } = useRole();
   const [conversations, setConversations] = useState<ConversationOut[]>([]);
   const [conversationId, setConversationId] = useState<string | undefined>(undefined);
-  const [messages, setMessages] = useState<MessageOut[]>([]);
+  const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -54,7 +59,7 @@ export default function ChatView() {
     if (!text || loading) return;
     setInput("");
 
-    const optimisticUser: MessageOut = {
+    const optimisticUser: DisplayMessage = {
       id: `pending-${Date.now()}`,
       role: "user",
       content: text,
@@ -78,6 +83,7 @@ export default function ChatView() {
         reasoning: result.reasoning,
         provider: result.provider_used,
         atlas_citations: result.atlas_citations,
+        memory_update: result.memory_update,
         created_at: new Date().toISOString(),
       },
     ]);

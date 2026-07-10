@@ -44,6 +44,13 @@ export interface AtlasCitation {
   confidence: number;
 }
 
+export interface MemoryUpdate {
+  saved: boolean;
+  explicit: boolean;
+  content: string | null;
+  error: string | null;
+}
+
 export interface ChatResponse {
   conversation_id: string;
   message_id: string;
@@ -51,6 +58,7 @@ export interface ChatResponse {
   reasoning: string | null;
   provider_used: string;
   atlas_citations: AtlasCitation[];
+  memory_update: MemoryUpdate | null;
 }
 
 export interface MessageOut {

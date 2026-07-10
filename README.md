@@ -6,7 +6,13 @@ core values, immutable Value Invariants, and a simulated Guardian Council amendm
 - **Echo** — the chat persona: truth-seeking, transparent reasoning, resists sycophancy
   and jailbreaks, actively discourages dependency.
 - **Atlas** — persistent memory with epistemic status (Verified / Inferred / Hypothesis /
-  Narrative), tags, confidence, and semantic search (ChromaDB + local embeddings).
+  Narrative), tags, confidence, and semantic search (ChromaDB + local embeddings). Any
+  Atlas entry is retrievable in any future conversation, regardless of which one it was
+  created in. Writes happen two ways: explicitly ("remember that I prefer tea" is
+  detected and saved directly from your own words, no model judgment involved), or
+  opportunistically (Echo's single chat-completion call also emits a `MEMORY:` section
+  alongside its reasoning/answer — no second model call, so it can't double your rate
+  limit — which gets parsed and saved when it decides something's worth keeping).
 - **Constitution** — ranked values, immutable invariants, edge-case protocols, amendment log.
 - **Guardian Council** — Founder proposes an amendment; it must clear an automatic
   Value-Invariant guard, then be approved by 2-of-3 Guardians *and* the Verifier to be
