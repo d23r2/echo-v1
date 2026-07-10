@@ -11,23 +11,47 @@ export class ApiError extends Error {
   }
 }
 
+// Distinct from ApiError: the request never got an HTTP response at all
+// (DNS failure, connection refused, CORS block, mixed-content block, etc).
+// Carries the URL that was attempted so a remote/mobile repro is diagnosable
+// from the on-screen message alone, without needing devtools.
+export class NetworkError extends Error {
+  url: string;
+  constructor(url: string, cause: unknown) {
+    const causeMessage = cause instanceof Error ? cause.message : String(cause);
+    super(`Network error reaching ${url}: ${causeMessage}`);
+    this.url = url;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
+  const url = `${BASE_URL}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (err) {
+    console.error(`[api] fetch failed for ${url}`, err);
+    throw new NetworkError(url, err);
+  }
   if (!res.ok) {
     let detail = res.statusText;
+    let bodyText: string | null = null;
     try {
-      const body = await res.json();
-      detail = body.detail || detail;
+      bodyText = await res.text();
+      detail = JSON.parse(bodyText).detail || detail;
     } catch {
-      // ignore parse failure, fall back to statusText
+      // response wasn't JSON (e.g. an nginx/proxy error page) — fall back to
+      // whatever text we got, or statusText if we couldn't even read that.
+      if (bodyText) detail = bodyText.slice(0, 300);
     }
-    throw new ApiError(res.status, detail);
+    console.error(`[api] ${res.status} from ${url}: ${detail}`);
+    throw new ApiError(res.status, `${res.status} ${detail}`);
   }
   if (res.status === 204) return undefined as T;
   return res.json();
