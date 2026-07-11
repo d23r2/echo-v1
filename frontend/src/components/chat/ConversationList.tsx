@@ -11,6 +11,11 @@ export default function ConversationList({
 }) {
   const { conversations, conversationId, selectConversation, startNewConversation } = useConversations();
   const rowSizing = compact ? "" : "min-h-[44px] flex items-center";
+  // Nested flex containers each need their own min-h-0 to shrink below content size and
+  // become independently scrollable, rather than growing past their parent and getting
+  // clipped by it. Desktop's aside has no overflow-hidden ancestor so this was never
+  // visible there; the mobile drawer does, so without this the list was invisible.
+  const listSizing = compact ? "" : "min-h-0";
 
   return (
     <>
@@ -23,7 +28,7 @@ export default function ConversationList({
       >
         + New conversation
       </button>
-      <div className="flex-1 space-y-1 overflow-y-auto">
+      <div className={`flex-1 space-y-1 overflow-y-auto ${listSizing}`}>
         {conversations.map((c) => (
           <button
             key={c.id}
