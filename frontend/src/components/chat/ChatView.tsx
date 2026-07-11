@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import {
-  ConversationOut,
-  MemoryUpdate,
-  MessageOut,
-  getConversation,
-  listConversations,
-  sendChatMessage,
-} from "../../api/client";
+import { MemoryUpdate, MessageOut, getConversation, sendChatMessage } from "../../api/client";
 import { useApi } from "../../api/useApi";
+import { useConversations } from "../../state/conversationsContext";
 import { useRole } from "../../state/roleContext";
+import ConversationList from "./ConversationList";
 import MessageBubble from "./MessageBubble";
 import ModelPicker from "./ModelPicker";
 
@@ -18,41 +13,28 @@ export interface DisplayMessage extends MessageOut {
 
 export default function ChatView() {
   const { provider } = useRole();
-  const [conversations, setConversations] = useState<ConversationOut[]>([]);
-  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+  const { conversationId, selectConversation, refreshConversations } = useConversations();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { run: runSend, loading, error } = useApi(sendChatMessage);
-  const { run: runLoadConversations } = useApi(listConversations);
   const { run: runLoadConversation } = useApi(getConversation);
 
   useEffect(() => {
-    refreshConversations();
-  }, []);
+    if (!conversationId) {
+      setMessages([]);
+      return;
+    }
+    runLoadConversation(conversationId).then((detail) => {
+      if (detail) setMessages(detail.messages);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
-
-  async function refreshConversations() {
-    const list = await runLoadConversations();
-    if (list) setConversations(list);
-  }
-
-  async function openConversation(id: string) {
-    const detail = await runLoadConversation(id);
-    if (detail) {
-      setConversationId(detail.id);
-      setMessages(detail.messages);
-    }
-  }
-
-  function startNewConversation() {
-    setConversationId(undefined);
-    setMessages([]);
-  }
 
   async function handleSend() {
     const text = input.trim();
@@ -73,7 +55,7 @@ export default function ChatView() {
     const result = await runSend(text, provider, conversationId);
     if (!result) return;
 
-    setConversationId(result.conversation_id);
+    selectConversation(result.conversation_id);
     setMessages((prev) => [
       ...prev,
       {
@@ -93,27 +75,7 @@ export default function ChatView() {
   return (
     <div className="flex h-full">
       <aside className="hidden lg:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950 p-3">
-        <button
-          onClick={startNewConversation}
-          className="mb-3 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900"
-        >
-          + New conversation
-        </button>
-        <div className="flex-1 space-y-1 overflow-y-auto">
-          {conversations.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => openConversation(c.id)}
-              className={`w-full truncate rounded-lg px-3 py-2 text-left text-sm ${
-                c.id === conversationId
-                  ? "bg-accent/15 text-accent"
-                  : "text-zinc-400 hover:bg-zinc-900"
-              }`}
-            >
-              {c.title}
-            </button>
-          ))}
-        </div>
+        <ConversationList compact />
       </aside>
 
       <div className="flex flex-1 flex-col">
