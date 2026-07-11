@@ -17,8 +17,8 @@ def _get_entry_or_404(db: Session, entry_id: str) -> AtlasEntry:
 
 
 @router.get("", response_model=list[schemas.AtlasEntryOut])
-def list_entries(db: Session = Depends(get_db)):
-    return atlas_store.list_entries(db)
+def list_entries(memory_type: str | None = Query(None), db: Session = Depends(get_db)):
+    return atlas_store.list_entries(db, memory_type=memory_type)
 
 
 @router.get("/search", response_model=list[schemas.AtlasSearchResult])

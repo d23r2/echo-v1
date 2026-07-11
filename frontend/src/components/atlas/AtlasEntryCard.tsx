@@ -7,6 +7,18 @@ const STATUS_COLORS: Record<string, string> = {
   Narrative: "bg-fuchsia-500/15 text-fuchsia-400",
 };
 
+const MEMORY_TYPE_COLORS: Record<string, string> = {
+  fact: "bg-zinc-700/50 text-zinc-300",
+  preference: "bg-sky-500/15 text-sky-400",
+  mood: "bg-pink-500/15 text-pink-400",
+  goal: "bg-emerald-500/15 text-emerald-400",
+  fear: "bg-red-500/15 text-red-400",
+  capability: "bg-indigo-500/15 text-indigo-400",
+  project: "bg-amber-500/15 text-amber-400",
+  relationship: "bg-purple-500/15 text-purple-400",
+  event: "bg-teal-500/15 text-teal-400",
+};
+
 export default function AtlasEntryCard({
   entry,
   distance,
@@ -27,6 +39,13 @@ export default function AtlasEntryCard({
           }`}
         >
           {entry.epistemic_status}
+        </span>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+            MEMORY_TYPE_COLORS[entry.memory_type] || "bg-zinc-800 text-zinc-400"
+          }`}
+        >
+          {entry.memory_type}
         </span>
         <span className="text-[10px] text-zinc-500">
           confidence {Math.round(entry.confidence * 100)}%

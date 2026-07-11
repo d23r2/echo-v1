@@ -40,6 +40,7 @@ def create_entry(db: Session, data: schemas.AtlasEntryCreate) -> models.AtlasEnt
     entry = models.AtlasEntry(
         content=data.content,
         epistemic_status=data.epistemic_status,
+        memory_type=data.memory_type,
         tags=data.tags,
         confidence=data.confidence,
         source=data.source,
@@ -80,10 +81,13 @@ def delete_entry(db: Session, entry: models.AtlasEntry) -> None:
         pass
 
 
-def list_entries(db: Session, limit: int = 200) -> list[models.AtlasEntry]:
-    return (
-        db.query(models.AtlasEntry).order_by(models.AtlasEntry.created_at.desc()).limit(limit).all()
-    )
+def list_entries(
+    db: Session, limit: int = 200, memory_type: str | None = None
+) -> list[models.AtlasEntry]:
+    query = db.query(models.AtlasEntry)
+    if memory_type:
+        query = query.filter(models.AtlasEntry.memory_type == memory_type)
+    return query.order_by(models.AtlasEntry.created_at.desc()).limit(limit).all()
 
 
 def search(db: Session, query: str, top_k: int = 5) -> list[tuple[models.AtlasEntry, float]]:

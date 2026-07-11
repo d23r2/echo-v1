@@ -60,6 +60,27 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 // ---- Types ----
 export type EpistemicStatus = "Verified" | "Inferred" | "Hypothesis" | "Narrative";
 export type Role = "founder" | "guardian_a" | "guardian_b" | "guardian_c" | "verifier";
+export type MemoryType =
+  | "fact"
+  | "preference"
+  | "mood"
+  | "goal"
+  | "fear"
+  | "capability"
+  | "project"
+  | "relationship"
+  | "event";
+export const MEMORY_TYPES: MemoryType[] = [
+  "fact",
+  "preference",
+  "mood",
+  "goal",
+  "fear",
+  "capability",
+  "project",
+  "relationship",
+  "event",
+];
 
 export interface AtlasCitation {
   id: string;
@@ -105,10 +126,16 @@ export interface ConversationDetailOut extends ConversationOut {
   messages: MessageOut[];
 }
 
+export interface WelcomeResponse {
+  greeting: string;
+  referenced_memories: string[];
+}
+
 export interface AtlasEntryOut {
   id: string;
   content: string;
   epistemic_status: EpistemicStatus;
+  memory_type: MemoryType;
   tags: string[];
   confidence: number;
   source: string | null;
@@ -201,11 +228,16 @@ export const sendChatMessage = (message: string, provider: string, conversationI
 
 export const listConversations = () => request<ConversationOut[]>("/api/conversations");
 
+export const getWelcomeGreeting = () => request<WelcomeResponse>("/api/chat/welcome");
+
 export const getConversation = (id: string) =>
   request<ConversationDetailOut>(`/api/conversations/${id}`);
 
 // ---- Atlas ----
-export const listAtlasEntries = () => request<AtlasEntryOut[]>("/api/atlas");
+export const listAtlasEntries = (memoryType?: MemoryType) =>
+  request<AtlasEntryOut[]>(
+    `/api/atlas${memoryType ? `?memory_type=${encodeURIComponent(memoryType)}` : ""}`
+  );
 
 export const searchAtlas = (q: string, topK = 5) =>
   request<AtlasSearchResult[]>(`/api/atlas/search?q=${encodeURIComponent(q)}&top_k=${topK}`);

@@ -48,6 +48,8 @@ class AtlasEntry(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     content: Mapped[str] = mapped_column(Text)
     epistemic_status: Mapped[str] = mapped_column(String)  # Verified | Inferred | Hypothesis | Narrative
+    # fact | preference | mood | goal | fear | capability | project | relationship | event
+    memory_type: Mapped[str] = mapped_column(String, default="fact")
     tags: Mapped[list] = mapped_column(JSON, default=list)
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     source: Mapped[str | None] = mapped_column(String, nullable=True)

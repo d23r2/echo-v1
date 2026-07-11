@@ -14,6 +14,20 @@ logger = logging.getLogger(__name__)
 
 _ROLE_MAP = {"user": "user", "echo": "assistant"}
 
+_WELCOME_PROMPT_WITH_MEMORIES = """You are Echo, a warm, precise AI with persistent memory. The \
+user just reopened the app after being away. Below are a few things you remember about them \
+from Atlas. Write ONE short, natural sentence welcoming them back — you may reference one or \
+two of these naturally if it fits, but don't just list facts robotically, and never state \
+anything as fact that isn't listed below. Output only that one sentence: no quotes, no preamble.
+
+Remembered:
+{memories}"""
+
+_WELCOME_PROMPT_EMPTY = """You are Echo, a warm, precise AI. The user just opened the app with \
+no memories on file yet. Write ONE short, natural, inviting sentence welcoming them and \
+inviting them to start talking — don't reference any specific facts since none exist yet. \
+Output only that one sentence: no quotes, no preamble."""
+
 
 def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
     try:
@@ -118,6 +132,32 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         provider_used=provider_used,
         atlas_citations=citations,
         memory_update=memory_update,
+    )
+
+
+@router.get("/chat/welcome", response_model=schemas.WelcomeResponse)
+def get_welcome_greeting(db: Session = Depends(get_db)):
+    memories = atlas.list_entries(db, limit=3)
+    # No separate "title" field on Atlas entries — truncate content as a stand-in,
+    # matching the same truncation convention used for conversation titles above.
+    referenced = [m.content[:60] + ("…" if len(m.content) > 60 else "") for m in memories]
+
+    if memories:
+        memory_lines = "\n".join(f"- {m.content}" for m in memories)
+        system_prompt = _WELCOME_PROMPT_WITH_MEMORIES.format(memories=memory_lines)
+    else:
+        system_prompt = _WELCOME_PROMPT_EMPTY
+
+    try:
+        result, _provider_used = model_router.chat(
+            "auto", system_prompt, [ChatMessage(role="user", content="Greet me.")]
+        )
+    except (NoProviderAvailableError, ProviderUnavailableError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return schemas.WelcomeResponse(
+        greeting=result.text,
+        referenced_memories=referenced if memories else [],
     )
 
 

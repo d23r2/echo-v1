@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { AtlasEntryOut, EpistemicStatus } from "../../api/client";
+import { AtlasEntryOut, EpistemicStatus, MEMORY_TYPES, MemoryType } from "../../api/client";
 
 const STATUSES: EpistemicStatus[] = ["Verified", "Inferred", "Hypothesis", "Narrative"];
 
 export interface AtlasEntryFormValue {
   content: string;
   epistemic_status: EpistemicStatus;
+  memory_type: MemoryType;
   tags: string[];
   confidence: number;
   source: string;
@@ -22,6 +23,7 @@ export default function AtlasEntryForm({
 }) {
   const [content, setContent] = useState(initial?.content ?? "");
   const [status, setStatus] = useState<EpistemicStatus>(initial?.epistemic_status ?? "Hypothesis");
+  const [memoryType, setMemoryType] = useState<MemoryType>(initial?.memory_type ?? "fact");
   const [tags, setTags] = useState(initial?.tags.join(", ") ?? "");
   const [confidence, setConfidence] = useState(initial?.confidence ?? 0.5);
   const [source, setSource] = useState(initial?.source ?? "");
@@ -46,6 +48,20 @@ export default function AtlasEntryForm({
             {STATUSES.map((s) => (
               <option key={s} value={s}>
                 {s}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-2 text-xs text-zinc-400">
+          Type
+          <select
+            value={memoryType}
+            onChange={(e) => setMemoryType(e.target.value as MemoryType)}
+            className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-zinc-200"
+          >
+            {MEMORY_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </select>
@@ -86,6 +102,7 @@ export default function AtlasEntryForm({
             onSubmit({
               content,
               epistemic_status: status,
+              memory_type: memoryType,
               tags: tags
                 .split(",")
                 .map((t) => t.trim())

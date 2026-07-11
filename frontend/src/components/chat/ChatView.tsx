@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { MemoryUpdate, MessageOut, getConversation, sendChatMessage } from "../../api/client";
+import {
+  MemoryUpdate,
+  MessageOut,
+  WelcomeResponse,
+  getConversation,
+  getWelcomeGreeting,
+  sendChatMessage,
+} from "../../api/client";
 import { useApi } from "../../api/useApi";
 import { useConversations } from "../../state/conversationsContext";
 import { useRole } from "../../state/roleContext";
@@ -11,23 +18,45 @@ export interface DisplayMessage extends MessageOut {
   memory_update?: MemoryUpdate | null;
 }
 
+// Module-level (not component state): persists across ChatView remounts caused by
+// switching nav sections and back, but naturally resets on an actual page reload —
+// which is exactly the "once per app load" semantics this needs.
+let welcomeFetchedThisLoad = false;
+
 export default function ChatView() {
   const { provider } = useRole();
   const { conversationId, selectConversation, refreshConversations } = useConversations();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
+  const [welcome, setWelcome] = useState<WelcomeResponse | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const { run: runSend, loading, error } = useApi(sendChatMessage);
   const { run: runLoadConversation } = useApi(getConversation);
+  // Errors intentionally not surfaced anywhere — a failed welcome fetch should be
+  // invisible and just leave the plain empty-state placeholder in place.
+  const { run: runWelcome, loading: welcomeLoading } = useApi(getWelcomeGreeting);
 
   useEffect(() => {
     if (!conversationId) {
       setMessages([]);
       return;
     }
+    // Once the user has opened/started any conversation, the one-time welcome
+    // greeting is "used up" — don't resurrect it on a later empty state (e.g.
+    // after clicking "+ New conversation" mid-session).
+    setWelcome(null);
     runLoadConversation(conversationId).then((detail) => {
       if (detail) setMessages(detail.messages);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (conversationId || welcomeFetchedThisLoad) return;
+    welcomeFetchedThisLoad = true;
+    runWelcome().then((res) => {
+      if (res) setWelcome(res);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
@@ -86,9 +115,31 @@ export default function ChatView() {
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {messages.length === 0 && (
-            <div className="mx-auto max-w-md pt-16 text-center text-sm text-zinc-500">
-              Ask Echo anything. It will show its reasoning and cite any relevant Atlas memories
-              it draws on.
+            <div className="mx-auto max-w-md pt-16">
+              {welcome ? (
+                <div className="flex justify-start">
+                  <div className="flex max-w-[90%] flex-col items-start">
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm leading-relaxed text-zinc-100 whitespace-pre-wrap">
+                      {welcome.greeting}
+                    </div>
+                    {welcome.referenced_memories.length > 0 && (
+                      <div className="mt-1 px-1 text-[10px] text-zinc-600">
+                        recalling: {welcome.referenced_memories.join(" · ")}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : welcomeLoading ? (
+                <div className="flex items-center gap-2 text-xs text-zinc-500">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
+                  Echo is remembering…
+                </div>
+              ) : (
+                <div className="text-center text-sm text-zinc-500">
+                  Ask Echo anything. It will show its reasoning and cite any relevant Atlas
+                  memories it draws on.
+                </div>
+              )}
             </div>
           )}
           {messages.map((m) => (

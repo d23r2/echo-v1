@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   AtlasEntryOut,
   AtlasSearchResult,
+  MEMORY_TYPES,
+  MemoryType,
   createAtlasEntry,
   deleteAtlasEntry,
   listAtlasEntries,
@@ -17,6 +19,7 @@ export default function AtlasView() {
   const [entries, setEntries] = useState<AtlasEntryOut[]>([]);
   const [searchResults, setSearchResults] = useState<AtlasSearchResult[] | null>(null);
   const [query, setQuery] = useState("");
+  const [memoryTypeFilter, setMemoryTypeFilter] = useState<MemoryType | "">("");
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -27,13 +30,16 @@ export default function AtlasView() {
   const { run: runDelete } = useApi(deleteAtlasEntry);
 
   async function refresh() {
-    const list = await runList();
+    const list = await runList(memoryTypeFilter || undefined);
     if (list) setEntries(list);
   }
 
+  // Re-fetch (server-side filter) whenever the memory_type filter changes, including
+  // the initial mount.
   useEffect(() => {
     refresh();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memoryTypeFilter]);
 
   async function handleSearch() {
     if (!query.trim()) {
@@ -66,7 +72,11 @@ export default function AtlasView() {
   }
 
   const editingEntry = entries.find((e) => e.id === editingId);
-  const displayed = searchResults ?? entries;
+  // Search doesn't support server-side memory_type filtering, so filter results
+  // client-side; the plain list is already filtered server-side via refresh().
+  const displayed = searchResults
+    ? searchResults.filter((r) => !memoryTypeFilter || r.memory_type === memoryTypeFilter)
+    : entries;
   const loading = loadingList || loadingSearch;
   const error = listError || searchError;
 
@@ -85,14 +95,30 @@ export default function AtlasView() {
         </button>
       </div>
 
-      <AtlasSearchBar
-        value={query}
-        onChange={(v) => {
-          setQuery(v);
-          if (!v.trim()) setSearchResults(null);
-        }}
-        onSubmit={handleSearch}
-      />
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="flex-1">
+          <AtlasSearchBar
+            value={query}
+            onChange={(v) => {
+              setQuery(v);
+              if (!v.trim()) setSearchResults(null);
+            }}
+            onSubmit={handleSearch}
+          />
+        </div>
+        <select
+          value={memoryTypeFilter}
+          onChange={(e) => setMemoryTypeFilter(e.target.value as MemoryType | "")}
+          className="rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-300 focus:border-accent focus:outline-none"
+        >
+          <option value="">All types</option>
+          {MEMORY_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {creating && (
         <AtlasEntryForm onCancel={() => setCreating(false)} onSubmit={handleCreate} />

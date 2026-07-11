@@ -4,6 +4,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 EpistemicStatus = Literal["Verified", "Inferred", "Hypothesis", "Narrative"]
+MemoryType = Literal[
+    "fact", "preference", "mood", "goal", "fear", "capability", "project", "relationship", "event"
+]
 Role = Literal["founder", "guardian_a", "guardian_b", "guardian_c", "verifier"]
 VoteDecision = Literal["approve", "reject"]
 
@@ -63,10 +66,18 @@ class ConversationDetailOut(ConversationOut):
     messages: list[MessageOut]
 
 
+class WelcomeResponse(BaseModel):
+    greeting: str
+    # Atlas has no separate "title" field for entries (just `content`), so these are
+    # truncated content excerpts standing in for titles.
+    referenced_memories: list[str] = Field(default_factory=list)
+
+
 # ---- Atlas ----
 class AtlasEntryCreate(BaseModel):
     content: str
     epistemic_status: EpistemicStatus = "Hypothesis"
+    memory_type: MemoryType = "fact"
     tags: list[str] = Field(default_factory=list)
     confidence: float = Field(0.5, ge=0.0, le=1.0)
     source: str | None = None
@@ -76,6 +87,7 @@ class AtlasEntryCreate(BaseModel):
 class AtlasEntryUpdate(BaseModel):
     content: str | None = None
     epistemic_status: EpistemicStatus | None = None
+    memory_type: MemoryType | None = None
     tags: list[str] | None = None
     confidence: float | None = Field(None, ge=0.0, le=1.0)
     source: str | None = None
@@ -86,6 +98,7 @@ class AtlasEntryOut(BaseModel):
     id: str
     content: str
     epistemic_status: EpistemicStatus
+    memory_type: MemoryType
     tags: list[str]
     confidence: float
     source: str | None
