@@ -1,6 +1,6 @@
 # Echo (God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-10
+Last check-in: 2026-07-11
 
 ## Snapshot (as of 2026-07-09, corrected after full review)
 
@@ -38,8 +38,20 @@ not just a scaffold.
 ## Gaps / next up (working priority order)
 1. **No automated tests anywhere** (backend or frontend) — highest priority given the
    Guardian Council invariant guard is safety-critical logic worth locking down with tests.
+   New `memory_extraction.py` (below) raises the stakes here: explicit-memory regex
+   matching and MEMORY: JSON parsing are exactly the kind of logic that silently rots
+   without tests.
 2. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
 3. Consider streaming chat responses (currently single request/response per turn).
+
+**New since 2026-07-10 (inferred from file activity, not yet in a prior snapshot):**
+- `backend/app/memory_extraction.py` (98 lines, added 2026-07-10 evening) — turns
+  conversation into Atlas memory writes without a second model call. Explicit path
+  (regex-detected "remember that..." phrasing) writes directly from user text; implicit
+  path parses a MEMORY: JSON block that persona.py's chat completion emits. Confirmed
+  wired into `routers/chat.py` (imported, `is_explicit_remember_request`,
+  `extract_explicit_memory`, `parse_memory_json` all called there) — this is a real,
+  integrated feature, not a stray file.
 
 **Resolved since 2026-07-09:**
 - Version control: git repo initialized and committed from Claude Code (not the Cowork
