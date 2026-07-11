@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     # Storage
     database_url: str = f"sqlite:///{(DATA_DIR / 'echo.db').as_posix()}"
     chroma_dir: str = str(DATA_DIR / "chroma")
+    attachments_dir: str = str(DATA_DIR / "attachments")
+    max_attachment_bytes: int = 15 * 1024 * 1024  # 15MB total per request, enforced server-side too
 
     # Model providers
     anthropic_api_key: str | None = None

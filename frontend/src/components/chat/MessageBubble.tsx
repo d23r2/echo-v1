@@ -31,6 +31,38 @@ function MemoryNote({ message }: { message: DisplayMessage }) {
   return null;
 }
 
+function fileTypeIcon(mime: string): string {
+  if (mime.startsWith("image/")) return "🖼️";
+  if (mime.startsWith("audio/")) return "🎵";
+  if (mime.startsWith("video/")) return "🎬";
+  if (mime === "application/pdf") return "📄";
+  if (mime.startsWith("text/")) return "📝";
+  return "📎";
+}
+
+function AttachmentChips({ message }: { message: DisplayMessage }) {
+  if (!message.attachments || message.attachments.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {message.attachments.map((a, i) => (
+        <div
+          key={i}
+          title={a.understood ? a.filename : `${a.filename} — Echo couldn't read this file's content`}
+          className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${
+            a.understood
+              ? "border-zinc-700 bg-zinc-900 text-zinc-300"
+              : "border-zinc-800 bg-zinc-900/50 text-zinc-500"
+          }`}
+        >
+          <span>{fileTypeIcon(a.mime_type)}</span>
+          <span className="max-w-[120px] truncate">{a.filename}</span>
+          {!a.understood && <span aria-label="Not readable by Echo">⚠️</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function MessageBubble({ message }: { message: DisplayMessage }) {
   const isUser = message.role === "user";
   return (
@@ -44,6 +76,9 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
           }`}
         >
           {message.content}
+        </div>
+        <div className="w-full px-1">
+          <AttachmentChips message={message} />
         </div>
         {!isUser && (
           <div className="w-full px-1">

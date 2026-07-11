@@ -42,6 +42,15 @@ class ChatResponse(BaseModel):
     memory_update: MemoryUpdate | None = None
 
 
+class AttachmentOut(BaseModel):
+    filename: str
+    mime_type: str
+    size_bytes: int
+    understood: bool
+
+    model_config = {"from_attributes": True}
+
+
 class MessageOut(BaseModel):
     id: str
     role: str
@@ -49,9 +58,15 @@ class MessageOut(BaseModel):
     reasoning: str | None
     provider: str | None
     atlas_citations: list[dict]
+    attachments: list[AttachmentOut] = Field(default_factory=list)
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SendWithFilesResponse(BaseModel):
+    conversation_id: str
+    message: MessageOut
 
 
 class ConversationOut(BaseModel):
@@ -71,6 +86,11 @@ class WelcomeResponse(BaseModel):
     # Atlas has no separate "title" field for entries (just `content`), so these are
     # truncated content excerpts standing in for titles.
     referenced_memories: list[str] = Field(default_factory=list)
+
+
+class DeleteConversationResponse(BaseModel):
+    ok: bool
+    deleted_id: str
 
 
 # ---- Atlas ----

@@ -24,21 +24,7 @@ export class NetworkError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const url = `${BASE_URL}${path}`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(init?.headers || {}),
-      },
-    });
-  } catch (err) {
-    console.error(`[api] fetch failed for ${url}`, err);
-    throw new NetworkError(url, err);
-  }
+async function _handleResponse<T>(res: Response, url: string): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText;
     let bodyText: string | null = null;
@@ -55,6 +41,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init?.headers || {}),
+      },
+    });
+  } catch (err) {
+    console.error(`[api] fetch failed for ${url}`, err);
+    throw new NetworkError(url, err);
+  }
+  return _handleResponse<T>(res, url);
+}
+
+// No Content-Type header here — the browser must set its own multipart boundary,
+// which it can only do if fetch() computes the header itself from the FormData body.
+async function requestMultipart<T>(path: string, formData: FormData): Promise<T> {
+  const url = `${BASE_URL}${path}`;
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", body: formData });
+  } catch (err) {
+    console.error(`[api] fetch failed for ${url}`, err);
+    throw new NetworkError(url, err);
+  }
+  return _handleResponse<T>(res, url);
 }
 
 // ---- Types ----
@@ -106,6 +124,13 @@ export interface ChatResponse {
   memory_update: MemoryUpdate | null;
 }
 
+export interface AttachmentOut {
+  filename: string;
+  mime_type: string;
+  size_bytes: number;
+  understood: boolean;
+}
+
 export interface MessageOut {
   id: string;
   role: string;
@@ -113,6 +138,7 @@ export interface MessageOut {
   reasoning: string | null;
   provider: string | null;
   atlas_citations: AtlasCitation[];
+  attachments: AttachmentOut[];
   created_at: string;
 }
 
@@ -129,6 +155,16 @@ export interface ConversationDetailOut extends ConversationOut {
 export interface WelcomeResponse {
   greeting: string;
   referenced_memories: string[];
+}
+
+export interface DeleteConversationResponse {
+  ok: boolean;
+  deleted_id: string;
+}
+
+export interface SendWithFilesResponse {
+  conversation_id: string;
+  message: MessageOut;
 }
 
 export interface AtlasEntryOut {
@@ -225,6 +261,23 @@ export const sendChatMessage = (message: string, provider: string, conversationI
     method: "POST",
     body: JSON.stringify({ message, provider, conversation_id: conversationId ?? null }),
   });
+
+export const sendChatMessageWithFiles = (
+  message: string,
+  provider: string,
+  files: File[],
+  conversationId?: string
+) => {
+  const form = new FormData();
+  form.append("message", message);
+  form.append("provider", provider);
+  if (conversationId) form.append("conversation_id", conversationId);
+  for (const file of files) form.append("files", file);
+  return requestMultipart<SendWithFilesResponse>("/api/chat/send-with-files", form);
+};
+
+export const deleteConversation = (id: string) =>
+  request<DeleteConversationResponse>(`/api/conversations/${id}`, { method: "DELETE" });
 
 export const listConversations = () => request<ConversationOut[]>("/api/conversations");
 
