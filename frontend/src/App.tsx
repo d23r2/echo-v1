@@ -6,6 +6,7 @@ import AmendmentsView from "./components/amendments/AmendmentsView";
 import AtlasView from "./components/atlas/AtlasView";
 import ChatView from "./components/chat/ChatView";
 import ConstitutionView from "./components/constitution/ConstitutionView";
+import SelfImprovementView from "./components/SelfImprovementView";
 
 export default function App() {
   const [view, setView] = useState<View>("chat");
@@ -39,6 +40,7 @@ export default function App() {
           {view === "atlas" && <AtlasView />}
           {view === "constitution" && <ConstitutionView />}
           {view === "amendments" && <AmendmentsView />}
+          {view === "self-improvement" && <SelfImprovementView />}
         </main>
       </div>
     </div>

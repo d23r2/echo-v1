@@ -1,6 +1,6 @@
 # Echo (God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-12
+Last check-in: 2026-07-13
 
 ## Snapshot (as of 2026-07-09, corrected after full review)
 
@@ -73,6 +73,36 @@ not just a scaffold.
   wired into `routers/chat.py` (imported, `is_explicit_remember_request`,
   `extract_explicit_memory`, `parse_memory_json` all called there) — this is a real,
   integrated feature, not a stray file.
+
+**New since 2026-07-12 — PWA + native app wrappers (frontend functionality unchanged):**
+- PWA: `frontend/public/manifest.webmanifest` + `sw.js` (app-shell caching only, `/api/`
+  always bypassed to hit the live backend), icons generated from the `EchoPresence` orb
+  identity (no tear-drop glyph exists anywhere in the codebase, contrary to earlier
+  assumptions — orb design reused instead). App name/short_name: "Echo". Verified: manifest
+  parses with correct `application/manifest+json` MIME (required an nginx fix — default
+  MIME table has no `.webmanifest` entry), service worker registers/activates/caches
+  correctly, zero regressions on Atlas/chat. Not verified: the actual Chrome "Install"
+  button click — no real Chrome instance was available to this session's browser tooling.
+- Capacitor Android: `frontend/android/`, `frontend/capacitor.config.ts` (appId
+  `com.godtear.echo`). Built and genuinely tested on the `Pixel_7_Pro` emulator — sent a
+  real chat message, confirmed `POST /api/chat` reached the backend over the real Tailscale
+  IP and a reply rendered. Found and fixed a real bug along the way: Capacitor's default
+  `https://localhost` WebView origin mixed-content-blocks its own calls to the plain-HTTP
+  backend regardless of `usesCleartextTraffic`; fixed via `androidScheme: 'http'`.
+- Tauri Windows: `frontend/src-tauri/`. Built and launched `app.exe`, confirmed
+  `POST /api/chat` succeeds end-to-end via backend logs + direct API verification. Found and
+  fixed a second real bug: Tauri serves the app from `http://tauri.localhost`, which wasn't
+  in `backend/.env`'s `CORS_ORIGINS`, so every request 400'd on preflight until added.
+- Environment fixes needed along the way (this machine only, not app config): Avast
+  Antivirus does TLS/SSL interception, which blocked both Gradle (Android deps) and Cargo
+  (Rust crates) from downloading — fixed narrowly (JDK truststore import for Gradle,
+  `CARGO_HTTP_CHECK_REVOKE=false` for Cargo, both user-approved) rather than disabling
+  Avast. Rust toolchain was already installed but not on PATH; reinstall via winget no-op'd.
+- Caution for next session: desktop-screenshot-based verification (PowerShell
+  `CopyFromScreen`) captures the real live desktop in this environment, not an isolated
+  app window — it twice caught unrelated sensitive browser content (an API key page, a
+  billing dialog) mid-task. Screenshots were deleted immediately; avoid that verification
+  method going forward and prefer backend-log/API-level verification instead.
 
 **Resolved since 2026-07-09:**
 - Version control: git repo initialized and committed from Claude Code (not the Cowork

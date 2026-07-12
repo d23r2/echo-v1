@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import init_db
-from app.routers import amendments, atlas, chat, constitution, models
+from app.routers import amendments, atlas, chat, constitution, models, self_improvement
 
 settings = get_settings()
 
@@ -28,6 +28,7 @@ app.include_router(atlas.router)
 app.include_router(constitution.router)
 app.include_router(amendments.router)
 app.include_router(models.router)
+app.include_router(self_improvement.router)
 
 
 @app.get("/api/health")

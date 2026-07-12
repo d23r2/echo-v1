@@ -1,10 +1,11 @@
-export type View = "chat" | "atlas" | "constitution" | "amendments";
+export type View = "chat" | "atlas" | "constitution" | "amendments" | "self-improvement";
 
 export const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "chat", label: "Chat", icon: "💬" },
   { id: "atlas", label: "Atlas", icon: "🗺️" },
   { id: "constitution", label: "Constitution", icon: "📜" },
   { id: "amendments", label: "Amendments", icon: "⚖️" },
+  { id: "self-improvement", label: "Self-Improvement", icon: "🛠️" },
 ];
 
 export default function Sidebar({

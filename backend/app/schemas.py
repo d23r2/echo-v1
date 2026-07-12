@@ -93,6 +93,32 @@ class DeleteConversationResponse(BaseModel):
     deleted_id: str
 
 
+class SelfImprovementRequestOut(BaseModel):
+    id: str
+    title: str
+    description: str
+    proposed_by: str
+    status: str
+    patch_summary: str | None = None
+    verification_status: str = "pending"
+    verification_notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SelfImprovementRequestCreate(BaseModel):
+    title: str
+    description: str
+    proposed_by: str = "founder"
+
+
+class SelfImprovementRequestApprove(BaseModel):
+    approved: bool
+    note: str | None = None
+
+
 # ---- Atlas ----
 class AtlasEntryCreate(BaseModel):
     content: str

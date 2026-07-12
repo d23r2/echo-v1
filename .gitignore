@@ -9,4 +9,15 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 
+# Capacitor Android — generated project's machine-specific/build output
+frontend/android/local.properties
+frontend/android/cacerts-with-avast
+frontend/android/app/build/
+frontend/android/build/
+frontend/android/.gradle/
+frontend/android/capacitor-cordova-android-plugins/build/
+
+# Tauri Windows — build output
+frontend/src-tauri/target/
+
 .DS_Store

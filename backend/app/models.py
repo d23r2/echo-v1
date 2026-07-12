@@ -77,6 +77,21 @@ class AtlasEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class SelfImprovementRequest(Base):
+    __tablename__ = "self_improvement_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text)
+    proposed_by: Mapped[str] = mapped_column(String, default="founder")
+    status: Mapped[str] = mapped_column(String, default="draft")  # draft | proposed | approved | rejected | applied | failed
+    patch_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verification_status: Mapped[str] = mapped_column(String, default="pending")  # pending | passed | failed
+    verification_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
 class Amendment(Base):
     __tablename__ = "amendments"
 

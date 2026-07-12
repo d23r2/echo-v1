@@ -162,6 +162,19 @@ export interface DeleteConversationResponse {
   deleted_id: string;
 }
 
+export interface SelfImprovementRequestOut {
+  id: string;
+  title: string;
+  description: string;
+  proposed_by: string;
+  status: string;
+  patch_summary: string | null;
+  verification_status: string;
+  verification_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SendWithFilesResponse {
   conversation_id: string;
   message: MessageOut;
@@ -278,6 +291,24 @@ export const sendChatMessageWithFiles = (
 
 export const deleteConversation = (id: string) =>
   request<DeleteConversationResponse>(`/api/conversations/${id}`, { method: "DELETE" });
+
+export const listSelfImprovementRequests = () =>
+  request<SelfImprovementRequestOut[]>('/api/self-improvement');
+
+export const createSelfImprovementRequest = (payload: { title: string; description: string; proposed_by?: string }) =>
+  request<SelfImprovementRequestOut>('/api/self-improvement', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const approveSelfImprovementRequest = (id: string, approved: boolean, note?: string) =>
+  request<SelfImprovementRequestOut>(`/api/self-improvement/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ approved, note }),
+  });
+
+export const verifySelfImprovementRequest = (id: string) =>
+  request<SelfImprovementRequestOut>(`/api/self-improvement/${id}/verify`, { method: 'POST' });
 
 export const listConversations = () => request<ConversationOut[]>("/api/conversations");
 
