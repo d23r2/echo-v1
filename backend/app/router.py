@@ -1,9 +1,13 @@
+import logging
+
 from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.base import ChatMessage, ChatResult, ModelProvider
 from app.providers.gemini_provider import GeminiProvider
 from app.providers.grok_provider import GrokProvider
 from app.providers.ollama_provider import OllamaProvider
 from app.providers.openai_provider import OpenAIProvider
+
+logger = logging.getLogger(__name__)
 
 # Priority order for "auto" mode.
 _PROVIDERS: list[ModelProvider] = [
@@ -48,7 +52,13 @@ class ModelRouter:
                     continue
                 try:
                     return provider.chat(system_prompt, messages), provider.name
-                except Exception as exc:  # try next provider in the fallback chain
+                except Exception as exc:
+                    # Previously silent — a provider failing (e.g. a rate limit) and
+                    # auto mode quietly falling back to a weaker provider (like one
+                    # with no vision support) was completely invisible in the logs.
+                    logger.warning(
+                        "auto mode: %s failed, trying next provider: %s", provider.name, exc
+                    )
                     last_error = exc
                     continue
             if last_error:

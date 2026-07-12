@@ -30,6 +30,22 @@ no memories on file yet. Write ONE short, natural, inviting sentence welcoming t
 inviting them to start talking — don't reference any specific facts since none exist yet. \
 Output only that one sentence: no quotes, no preamble."""
 
+# Keep in sync with which providers actually read ChatMessage.images (currently just
+# Gemini — see gemini_provider.py). Used only to decide whether the image note in the
+# prompt should invite genuine description or an honest "I can't see images" fallback;
+# getting this wrong for a real routing change just costs an honesty nudge, not safety.
+_VISION_CAPABLE_PROVIDERS = {"gemini"}
+
+
+def _will_use_vision_capable_provider(preferred: str) -> bool:
+    if preferred != "auto":
+        return preferred in _VISION_CAPABLE_PROVIDERS
+    for p in model_router.providers:
+        available, _ = p.available()
+        if available:
+            return p.name in _VISION_CAPABLE_PROVIDERS
+    return False
+
 
 def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
     try:
@@ -182,19 +198,51 @@ async def send_chat_message_with_files(
         db, message, turn_count, explicit_remember_request=explicit_remember
     )
 
+    if uploads:
+        # Deterministic, rather than hoping the model happens to mention this on its
+        # own — the reasoning trace should always state how many files were attached
+        # and name any that couldn't be natively read.
+        system_prompt += (
+            f"\n\nATTACHMENT INSTRUCTIONS: This turn has {len(uploads)} file(s) attached. Your "
+            "REASONING section MUST begin by stating this count in the form 'N file(s) attached' "
+            "and, if any could not be natively read (see the per-file notes below), name them "
+            "explicitly there."
+        )
+
     # Fold attachment content into what the model actually sees: real extracted text
-    # for files we can read (text/code/PDF), an explicit "not yet readable" note for
-    # types we don't extract from today (see attachments.py docstring), so the model
-    # never silently pretends to have seen something it didn't.
+    # for files we can read (text/code/PDF), the actual image bytes for images (only
+    # Gemini currently has real vision wiring — see gemini_provider.py — other
+    # providers just get the text note and will honestly say they can't see it), and
+    # an explicit "unsupported" note for anything else, so the model never silently
+    # pretends to have read something it didn't.
     prompt_parts = [message] if message.strip() else []
     attachment_records: list[Attachment] = []
+    image_payloads: list[tuple[str, bytes]] = []
     device_note = f" (from {device_label})" if device_label else ""
+    vision_capable = _will_use_vision_capable_provider(provider)
     for upload, content in uploads:
         filename = upload.filename or "file"
         mime_type = attachments_lib.guess_mime_type(filename, upload.content_type)
         understood = attachments_lib.classify(filename, mime_type)
         extracted = attachments_lib.extract_text_for_prompt(filename, mime_type, content)
-        if extracted:
+        if mime_type.startswith("image/"):
+            image_payloads.append((mime_type, content))
+            if vision_capable:
+                # Don't hand the model an "I can't see it" excuse when it genuinely can —
+                # a prior version of this note included that framing unconditionally, and
+                # the model reflexively took the honest-sounding opt-out even though the
+                # actual image bytes were right there in the request.
+                prompt_parts.append(
+                    f"\n[Attached file: {filename} ({mime_type}) — an image, attached below for "
+                    "you to look at directly.]"
+                )
+            else:
+                prompt_parts.append(
+                    f"\n[Attached file: {filename} ({mime_type}) — an image. You do not have "
+                    "image-viewing capability in this context; say so honestly rather than "
+                    "guessing at its contents.]"
+                )
+        elif extracted:
             prompt_parts.append(f"\n--- Attached file: {filename} ---\n{extracted}")
         elif understood:
             prompt_parts.append(
@@ -215,7 +263,13 @@ async def send_chat_message_with_files(
         )
 
     combined_message = "\n".join(prompt_parts) if prompt_parts else "(no message text, files attached)"
-    history.append(ChatMessage(role="user", content=combined_message + device_note))
+    history.append(
+        ChatMessage(
+            role="user",
+            content=combined_message + device_note,
+            images=image_payloads or None,
+        )
+    )
 
     try:
         result, provider_used = model_router.chat(provider, system_prompt, history)
@@ -245,9 +299,17 @@ async def send_chat_message_with_files(
     db.commit()
     db.refresh(echo_msg)
 
+    # The response's `message` is Echo's reply (for the frontend to append/render),
+    # but the attachments themselves live on the *user's* message (they uploaded the
+    # files, not Echo) — echo_msg.attachments is genuinely empty. Overlay the just-
+    # uploaded file list onto the response payload so `message.attachments` matches
+    # the documented contract instead of always coming back empty.
+    message_out = schemas.MessageOut.model_validate(echo_msg)
+    message_out.attachments = [schemas.AttachmentOut.model_validate(a) for a in attachment_records]
+
     return schemas.SendWithFilesResponse(
         conversation_id=conversation.id,
-        message=schemas.MessageOut.model_validate(echo_msg),
+        message=message_out,
     )
 
 

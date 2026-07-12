@@ -1,6 +1,6 @@
 # Echo (God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-11
+Last check-in: 2026-07-12
 
 ## Snapshot (as of 2026-07-09, corrected after full review)
 
@@ -36,13 +36,34 @@ not just a scaffold.
 - Static import-resolution check passed (no broken relative imports, 2026-07-09).
 
 ## Gaps / next up (working priority order)
-1. **No automated tests anywhere** (backend or frontend) — highest priority given the
-   Guardian Council invariant guard is safety-critical logic worth locking down with tests.
-   New `memory_extraction.py` (below) raises the stakes here: explicit-memory regex
-   matching and MEMORY: JSON parsing are exactly the kind of logic that silently rots
-   without tests.
+1. **No automated tests anywhere** (backend or frontend) — still zero test files
+   repo-wide as of 2026-07-12. Highest priority given the Guardian Council invariant
+   guard is safety-critical, and the surface area needing coverage has grown
+   (memory_extraction.py, plus the new attachments/conversation-deletion/voice code below).
 2. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
-3. Consider streaming chat responses (currently single request/response per turn).
+   (Partially underway — mobile hamburger drawer landed 2026-07-11 — but not complete.)
+3. Consider streaming chat responses (still single request/response per turn as of
+   2026-07-12 — not started).
+4. Attachments: text/code and PDF content is genuinely extracted and injected into the
+   prompt. Images now get real vision too, but only via Gemini (`gemini_provider.py`'s
+   `inline_data` wiring, 2026-07-12) — Anthropic/OpenAI/Grok/Ollama still can't see
+   images at all, so the "understood: true" label is only fully honest when Gemini ends
+   up handling the request. Audio/video still aren't read by anything. Also worth
+   noting: the Gemini free-tier key hit its daily quota during this session's testing —
+   auto mode falls back to Ollama (no vision) when that happens, now at least visible
+   via a log line instead of silently.
+
+**New since 2026-07-11 (inferred from git log, not yet in a prior snapshot):**
+- Conversation deletion, file attachments, and voice input/output added (773030e) —
+  largest commit of the batch: `backend/app/attachments.py` (new), ~180 lines added to
+  `routers/chat.py`, new `ConversationList.tsx` and `conversationsContext.tsx` on the
+  frontend, voice hooks in `ChatView.tsx`.
+- Atlas entries now have a `memory_type` field; chat shows a one-time welcome greeting
+  (fbfbf02).
+- Mobile hamburger drawer for nav + conversation list added, then a follow-up fix for
+  the drawer's conversation list being clipped instead of scrolling (7eb9980, 43d21b6).
+- CORS config consolidated to a single source of truth; Tailscale setup documented
+  (d1ed4e4).
 
 **New since 2026-07-10 (inferred from file activity, not yet in a prior snapshot):**
 - `backend/app/memory_extraction.py` (98 lines, added 2026-07-10 evening) — turns
@@ -64,29 +85,6 @@ not just a scaffold.
 
 ## Blockers
 - (none recorded yet)
-
-## Environment note: git
-Tried to `git init` this folder from a Cowork session's sandboxed shell — it failed
-repeatedly (corrupted `.git/config`, and delete/unlink operations are blocked on this
-bridged mount). This looks like a limitation of the FUSE bridge between the sandbox and
-this Windows folder, not a problem with the project. **Run `git init` / first commit
-locally** (Claude Code, or a plain terminal in this folder) instead — that writes directly
-to disk with no bridge involved. There is a stray empty `.git/` folder here from the
-failed attempt; safe to delete manually in Explorer, or just overwrite with a fresh
-`git init` locally.
-
-Retried from a Cowork sandbox shell again on 2026-07-09 (~16:00) — same failure mode
-(`.git/config` intermittently unreadable, `fatal: unknown error occurred while reading
-the configuration files`). Confirms this is still a sandbox/FUSE limitation, not
-something that self-resolved. Still needs to be done locally.
-
-Checked again on 2026-07-10: `.git/` still present with a stale lock file
-(`_stale_lock_1783578633`, `config.lock.bak`, `index.lock.bak`) and `git log` still
-fails with the same config-read error. No change — still needs a local `git init`.
-
-Resolved 2026-07-10 via the recommended workaround: initialized and committed from
-Claude Code running locally (not the Cowork sandbox), which confirmed this was purely
-the sandbox/FUSE bridge limitation described above. Repo now has normal git history.
 
 ## Notes for the daily check-in task
 - This file is the source of truth for "where things stand." Update the **Last check-in**

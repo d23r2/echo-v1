@@ -19,6 +19,10 @@ class ChatResult:
 class ChatMessage:
     role: str  # "user" | "assistant"
     content: str
+    # (mime_type, raw_bytes) pairs — only meaningful on a user message, and only a
+    # provider with real vision support (currently just Gemini) does anything with
+    # this; others simply ignore it and rely on the text content alone.
+    images: list[tuple[str, bytes]] | None = None
 
 
 def split_reasoning_and_answer(raw: str) -> ChatResult:

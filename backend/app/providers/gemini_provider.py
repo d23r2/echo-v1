@@ -1,9 +1,22 @@
+import base64
+
 import httpx
 
 from app.config import get_settings
 from app.providers.base import ChatMessage, ChatResult, ModelProvider, split_reasoning_and_answer
 
 _GEMINI_ROLE_MAP = {"user": "user", "assistant": "model"}
+
+
+def _message_to_parts(message: ChatMessage) -> list[dict]:
+    parts: list[dict] = []
+    if message.content:
+        parts.append({"text": message.content})
+    for mime_type, raw_bytes in message.images or []:
+        parts.append(
+            {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(raw_bytes).decode("ascii")}}
+        )
+    return parts
 
 
 class GeminiProvider(ModelProvider):
@@ -25,7 +38,7 @@ class GeminiProvider(ModelProvider):
         payload = {
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [
-                {"role": _GEMINI_ROLE_MAP[m.role], "parts": [{"text": m.content}]} for m in messages
+                {"role": _GEMINI_ROLE_MAP[m.role], "parts": _message_to_parts(m)} for m in messages
             ],
         }
         resp = httpx.post(
