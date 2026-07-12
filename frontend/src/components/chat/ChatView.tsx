@@ -60,6 +60,28 @@ const SpeechRecognitionCtor: any =
   typeof window !== "undefined" && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 const speechSynthesisSupported = typeof window !== "undefined" && "speechSynthesis" in window;
 
+const VOICE_LANG = "en-US";
+const SILENCE_STOP_MS = 1800;
+
+// Strip markdown so SpeechSynthesis doesn't read out literal asterisks/backticks/
+// header hashes/link syntax — only the reply's actual words should be spoken.
+function stripMarkdownForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, " code block omitted ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^>\s+/gm, "")
+    .replace(/^[-*+]\s+/gm, "")
+    .replace(/\n{2,}/g, ". ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export default function ChatView() {
   const { provider } = useRole();
   const { conversationId, selectConversation, refreshConversations } = useConversations();
@@ -69,11 +91,14 @@ export default function ChatView() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
 
   const { run: runSend, loading: sendingText, error: sendError } = useApi(sendChatMessage);
   const { run: runSendWithFiles, loading: sendingFiles, error: filesError } = useApi(sendChatMessageWithFiles);
@@ -117,13 +142,46 @@ export default function ChatView() {
   useEffect(() => {
     return () => {
       if (speechSynthesisSupported) window.speechSynthesis.cancel();
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        // already stopped
+      }
+    };
+  }, []);
+
+  // getVoices() is notoriously async in some browsers — the list is empty until
+  // the voiceschanged event fires, so this needs both an immediate attempt and a
+  // listener for when the real list shows up.
+  useEffect(() => {
+    if (!speechSynthesisSupported) return;
+    function pickVoice() {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+      const preferred =
+        voices.find((v) => /natural|enhanced/i.test(v.name) && v.lang.startsWith("en")) ||
+        voices.find((v) => /natural|enhanced/i.test(v.name)) ||
+        voices.find((v) => v.lang.startsWith("en") && v.default) ||
+        voices.find((v) => v.lang.startsWith("en")) ||
+        voices[0];
+      preferredVoiceRef.current = preferred ?? null;
+    }
+    pickVoice();
+    window.speechSynthesis.onvoiceschanged = pickVoice;
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
     };
   }, []);
 
   function speak(text: string) {
     if (!speakEnabled || !speechSynthesisSupported) return;
+    const cleaned = stripMarkdownForSpeech(text);
+    if (!cleaned) return;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
+    utterance.rate = 0.97;
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
@@ -139,27 +197,101 @@ export default function ChatView() {
     setSpeakEnabled((v) => !v);
   }
 
-  function toggleListening() {
-    if (!SpeechRecognitionCtor) return;
-    if (listening) {
-      recognitionRef.current?.stop();
-      return;
+  function clearSilenceTimer() {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
     }
+  }
+
+  // Resets on every result (interim or final) — only fires after genuine silence,
+  // so someone mid-thought with pauses between phrases doesn't get cut off, but a
+  // real stop (~1.5-2s of nothing) ends listening automatically.
+  function armSilenceTimer() {
+    clearSilenceTimer();
+    silenceTimerRef.current = setTimeout(() => {
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        // already stopped
+      }
+    }, SILENCE_STOP_MS);
+  }
+
+  function stopListening() {
+    clearSilenceTimer();
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // already stopped
+    }
+    // Belt-and-suspenders: onend should fire and do this too, but a tap-to-stop
+    // must always feel immediate regardless of current recognition internal state.
+    setListening(false);
+  }
+
+  function startListening() {
+    setVoiceError(null);
     const recognition = new SpeechRecognitionCtor();
-    recognition.lang = "en-US";
-    recognition.interimResults = false;
-    recognition.continuous = false;
+    recognition.lang = VOICE_LANG;
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    let finalTranscript = "";
+    const baseInput = input.trim();
+
     recognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results)
-        .map((r: any) => r[0].transcript)
-        .join(" ");
-      setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      armSilenceTimer();
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          finalTranscript += (finalTranscript ? " " : "") + result[0].transcript;
+        } else {
+          interim += result[0].transcript;
+        }
+      }
+      const pieces = [baseInput, finalTranscript, interim].filter(Boolean);
+      setInput(pieces.join(" "));
     };
-    recognition.onend = () => setListening(false);
-    recognition.onerror = () => setListening(false);
+
+    recognition.onerror = (event: any) => {
+      clearSilenceTimer();
+      if (event.error === "no-speech") {
+        setVoiceError("Didn't catch any speech — try again.");
+      } else if (event.error === "audio-capture") {
+        setVoiceError("No microphone found.");
+      } else if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        setVoiceError("Microphone access was denied.");
+      } else {
+        setVoiceError(`Voice input error: ${event.error}`);
+      }
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognition.onend = () => {
+      clearSilenceTimer();
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
     recognitionRef.current = recognition;
     recognition.start();
     setListening(true);
+    // Also arm on start, not just after the first result — otherwise a session
+    // with genuinely zero speech would rely solely on the no-speech error event,
+    // which not all browsers fire promptly.
+    armSilenceTimer();
+  }
+
+  function toggleListening() {
+    if (!SpeechRecognitionCtor) return;
+    if (listening) {
+      stopListening();
+      return;
+    }
+    startListening();
   }
 
   function handleFilesSelected(fileList: FileList | null) {
@@ -321,6 +453,11 @@ export default function ChatView() {
           {attachmentError && (
             <div className="mb-2 rounded-lg border border-red-900 bg-red-950/50 px-3 py-1.5 text-xs text-red-300">
               {attachmentError}
+            </div>
+          )}
+          {voiceError && (
+            <div className="mb-2 rounded-lg border border-red-900 bg-red-950/50 px-3 py-1.5 text-xs text-red-300">
+              {voiceError}
             </div>
           )}
           {attachedFiles.length > 0 && (
