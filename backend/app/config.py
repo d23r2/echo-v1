@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
+    # Distinct paid model (Imagen) — never used for normal chat, only explicit
+    # image-generation requests. Separate from gemini_model, which stays free-tier.
+    gemini_image_model: str = "imagen-4.0-fast-generate-001"
 
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"

@@ -1,5 +1,7 @@
+import base64
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -37,6 +39,9 @@ class Message(Base):
     reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     provider: Mapped[str | None] = mapped_column(String, nullable=True)
     atlas_citations: Mapped[list] = mapped_column(JSON, default=list)
+    # Set when auto mode's actual reply came from a lower-priority provider because a
+    # higher-priority one 429'd on this same turn — surfaced in the UI near "via X".
+    fallback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
@@ -55,9 +60,25 @@ class Attachment(Base):
     size_bytes: Mapped[int] = mapped_column(Integer)
     storage_path: Mapped[str] = mapped_column(String)
     understood: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True only for images produced by POST /api/chat/generate-image, never for
+    # user-uploaded files.
+    generated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     message: Mapped["Message"] = relationship(back_populates="attachments")
+
+    @property
+    def base64_preview(self) -> str | None:
+        # Only generated images carry an inline preview — computed on read from the
+        # on-disk file rather than stored in the DB, so this stays cheap for the
+        # normal (non-generated) attachment case and never bloats the database.
+        if not self.generated:
+            return None
+        try:
+            data = Path(self.storage_path).read_bytes()
+        except OSError:
+            return None
+        return base64.b64encode(data).decode("ascii")
 
 
 class AtlasEntry(Base):
@@ -119,3 +140,20 @@ class Vote(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     amendment: Mapped["Amendment"] = relationship(back_populates="votes")
+
+
+class ProviderUsageDaily(Base):
+    """One row per (provider, date_key) — date_key is a YYYY-MM-DD string computed in
+    whatever timezone that provider resets its own quota in (see app/usage.py), not
+    necessarily UTC today. Deliberately no fixed rate-limit numbers here: this only
+    ever records real request counts and real 429 timestamps."""
+
+    __tablename__ = "provider_usage_daily"
+    __table_args__ = (UniqueConstraint("provider", "date_key", name="uq_provider_usage_date"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String)
+    date_key: Mapped[str] = mapped_column(String)
+    request_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_429_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
