@@ -1,0 +1,28 @@
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+exclude = [".venv", "data"]
+
+[tool.ruff.lint]
+# Ruff's own defaults (pyflakes + a small pycodestyle error subset) plus a few
+# well-known, low-noise additions: import sorting (I), common bug patterns (B),
+# and outdated-syntax modernization (UP). Deliberately NOT enabling docstring
+# (D), type-annotation-coverage (ANN), or other high-noise rule families on an
+# existing codebase that doesn't follow those conventions — the goal is useful
+# signal without hundreds of errors on day one.
+extend-select = ["I", "B", "UP"]
+ignore = [
+    "B008",  # function call in a default argument — FastAPI's Depends()/Query() rely on exactly this
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+# Gentle mode: no --strict, no forced annotations on untyped functions, missing
+# third-party stubs (chromadb, sentence-transformers) silenced rather than
+# blocking. As of 2026-07-13 this surfaces ~10 real-but-minor findings (mostly
+# passing a plain `str` where a narrower Pydantic Literal is expected) on a
+# ~34-file codebase — informational, not a gate. See DEVELOPMENT.md.
+ignore_missing_imports = true
+check_untyped_defs = false

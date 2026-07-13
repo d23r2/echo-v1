@@ -77,6 +77,7 @@ async function requestMultipart<T>(path: string, formData: FormData): Promise<T>
 
 // ---- Types ----
 export type EpistemicStatus = "Verified" | "Inferred" | "Hypothesis" | "Narrative";
+export const EPISTEMIC_STATUSES: EpistemicStatus[] = ["Verified", "Inferred", "Hypothesis", "Narrative"];
 export type Role = "founder" | "guardian_a" | "guardian_b" | "guardian_c" | "verifier";
 export type MemoryType =
   | "fact"
@@ -110,8 +111,19 @@ export interface AtlasCitation {
 export interface MemoryUpdate {
   saved: boolean;
   explicit: boolean;
+  pending_review: boolean;
   content: string | null;
   error: string | null;
+}
+
+export interface ConversationSnippetOut {
+  message_id: string;
+  conversation_id: string;
+  conversation_title: string;
+  role: string;
+  created_at: string | null;
+  snippet: string;
+  relevance: number | null;
 }
 
 export interface ChatResponse {
@@ -123,13 +135,18 @@ export interface ChatResponse {
   atlas_citations: AtlasCitation[];
   memory_update: MemoryUpdate | null;
   fallback_note: string | null;
+  independence_nudge_reason: string | null;
+  conversation_snippets: ConversationSnippetOut[];
 }
+
+export type AttachmentAnalysisStatus = "text_extracted" | "vision_analyzed" | "stored" | "unsupported";
 
 export interface AttachmentOut {
   filename: string;
   mime_type: string;
   size_bytes: number;
   understood: boolean;
+  analysis_status: AttachmentAnalysisStatus;
   generated: boolean;
   base64_preview: string | null;
 }
@@ -143,6 +160,8 @@ export interface MessageOut {
   atlas_citations: AtlasCitation[];
   attachments: AttachmentOut[];
   fallback_note: string | null;
+  independence_nudge_reason: string | null;
+  conversation_snippets: ConversationSnippetOut[];
   created_at: string;
 }
 
@@ -166,6 +185,15 @@ export interface DeleteConversationResponse {
   deleted_id: string;
 }
 
+export interface VerificationCheckOut {
+  command: string;
+  status: "passed" | "failed" | "unavailable";
+  exit_code: number | null;
+  stdout_summary: string;
+  stderr_summary: string;
+  timestamp: string;
+}
+
 export interface SelfImprovementRequestOut {
   id: string;
   title: string;
@@ -175,6 +203,8 @@ export interface SelfImprovementRequestOut {
   patch_summary: string | null;
   verification_status: string;
   verification_notes: string | null;
+  verification_checks: VerificationCheckOut[];
+  verified_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -194,12 +224,45 @@ export interface AtlasEntryOut {
   source: string | null;
   observed_at: string;
   valid_until: string | null;
+  outdated: boolean;
   created_at: string;
   updated_at: string;
 }
 
 export interface AtlasSearchResult extends AtlasEntryOut {
   distance: number | null;
+}
+
+export interface MemoryExtractionLogOut {
+  id: string;
+  conversation_id: string | null;
+  message_id: string | null;
+  explicit_request: boolean;
+  memory_block_present: boolean;
+  was_none: boolean;
+  json_detected: boolean;
+  parse_succeeded: boolean;
+  saved: boolean;
+  rejection_reason: string | null;
+  created_at: string;
+}
+
+export type MemoryCandidateStatus = "pending" | "accepted" | "rejected";
+
+export interface MemoryCandidateOut {
+  id: string;
+  content: string;
+  epistemic_status: EpistemicStatus;
+  memory_type: MemoryType;
+  tags: string[];
+  confidence: number;
+  source: string | null;
+  conversation_id: string | null;
+  status: MemoryCandidateStatus;
+  conflict_with: string[];
+  review_note: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CoreValueOut {
@@ -272,6 +335,23 @@ export interface ProviderStatus {
   reason: string | null;
 }
 
+export interface VisionAvailability {
+  available: boolean;
+  provider: string;
+  reason: string | null;
+}
+
+export interface FeatureAvailability {
+  chat: boolean;
+  voice_input: boolean;
+  file_upload: boolean;
+  image_generation: boolean;
+  vision: VisionAvailability;
+  providers: Record<string, "available" | "not_configured" | "unavailable">;
+}
+
+export const getFeatureAvailability = () => request<FeatureAvailability>("/api/features");
+
 export interface ConversationSearchResult {
   conversation_id: string;
   title: string;
@@ -293,6 +373,87 @@ export const sendChatMessage = (message: string, provider: string, conversationI
     method: "POST",
     body: JSON.stringify({ message, provider, conversation_id: conversationId ?? null }),
   });
+
+export interface StreamDoneEvent {
+  conversation_id: string;
+  message_id: string;
+  content: string;
+  reasoning: string | null;
+  provider_used: string;
+  atlas_citations: AtlasCitation[];
+  memory_update: MemoryUpdate | null;
+  fallback_note: string | null;
+  independence_nudge_reason: string | null;
+  conversation_snippets: ConversationSnippetOut[];
+}
+
+export interface StreamCallbacks {
+  onToken?: (text: string) => void;
+  onDone?: (data: StreamDoneEvent) => void;
+  onError?: (detail: string) => void;
+}
+
+// Manual SSE parsing (not the native EventSource API) because this needs a POST
+// body — EventSource only supports GET. Falls silently through on AbortError:
+// that's the expected shape of a deliberate user cancellation, not a failure to
+// surface via onError.
+export async function streamChatMessage(
+  message: string,
+  provider: string,
+  conversationId: string | null | undefined,
+  callbacks: StreamCallbacks,
+  signal?: AbortSignal
+): Promise<void> {
+  const url = `${BASE_URL}/api/chat/stream`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, provider, conversation_id: conversationId ?? null }),
+      signal,
+    });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    callbacks.onError?.(err instanceof Error ? err.message : String(err));
+    return;
+  }
+
+  if (!res.ok || !res.body) {
+    callbacks.onError?.(`Stream request failed (${res.status} ${res.statusText})`);
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let sepIndex: number;
+      while ((sepIndex = buffer.indexOf("\n\n")) !== -1) {
+        const block = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + 2);
+        const lines = block.split("\n");
+        const eventLine = lines.find((l) => l.startsWith("event: "));
+        const dataLine = lines.find((l) => l.startsWith("data: "));
+        if (!eventLine || !dataLine) continue;
+        const event = eventLine.slice("event: ".length);
+        const data = JSON.parse(dataLine.slice("data: ".length));
+        if (event === "token") callbacks.onToken?.(data.text);
+        else if (event === "done") callbacks.onDone?.(data as StreamDoneEvent);
+        else if (event === "error") callbacks.onError?.(data.detail);
+      }
+    }
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") return;
+    callbacks.onError?.(err instanceof Error ? err.message : String(err));
+  }
+}
 
 export const sendChatMessageWithFiles = (
   message: string,
@@ -369,6 +530,39 @@ export const updateAtlasEntry = (id: string, payload: Partial<AtlasEntryOut>) =>
 
 export const deleteAtlasEntry = (id: string) =>
   request<void>(`/api/atlas/${id}`, { method: "DELETE" });
+
+export const getAtlasConflicts = () => request<Record<string, string[]>>("/api/atlas/conflicts");
+
+export const mergeAtlasEntries = (keepId: string, removeId: string, mergedContent?: string) =>
+  request<AtlasEntryOut>("/api/atlas/merge", {
+    method: "POST",
+    body: JSON.stringify({ keep_id: keepId, remove_id: removeId, merged_content: mergedContent }),
+  });
+
+export const listMemoryDiagnostics = (limit = 50) =>
+  request<MemoryExtractionLogOut[]>(`/api/atlas/diagnostics?limit=${limit}`);
+
+// ---- Memory candidates ----
+export const listMemoryCandidates = (status: MemoryCandidateStatus | "" = "pending") =>
+  request<MemoryCandidateOut[]>(`/api/memory-candidates${status ? `?status=${status}` : ""}`);
+
+export const editMemoryCandidate = (id: string, payload: Partial<MemoryCandidateOut>) =>
+  request<MemoryCandidateOut>(`/api/memory-candidates/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+export const acceptMemoryCandidate = (id: string, note?: string) =>
+  request<AtlasEntryOut>(`/api/memory-candidates/${id}/accept`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
+
+export const rejectMemoryCandidate = (id: string, note?: string) =>
+  request<MemoryCandidateOut>(`/api/memory-candidates/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ note }),
+  });
 
 // ---- Constitution ----
 export const getConstitution = () => request<ConstitutionOut>("/api/constitution");

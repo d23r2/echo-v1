@@ -1,14 +1,26 @@
+import json
 import logging
 from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app import atlas, attachments as attachments_lib, memory_extraction, persona, schemas
+from app import (
+    atlas,
+    attachments as attachments_lib,
+    conversation_search,
+    memory_conflicts,
+    memory_extraction,
+    persona,
+    preference_detection,
+    schemas,
+)
 from app.config import get_settings
 from app.db import get_db
-from app.models import Attachment, Conversation, Message
+from app.envelope_stream import EnvelopeStreamParser
+from app.models import Attachment, Conversation, MemoryCandidate, MemoryExtractionLog, Message
 from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError, router as model_router
@@ -17,6 +29,10 @@ router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
 
 _ROLE_MAP = {"user": "user", "echo": "assistant"}
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 _WELCOME_PROMPT_WITH_MEMORIES = """You are Echo, a warm, precise AI with persistent memory. The \
 user just reopened the app after being away. Below are a few things you remember about them \
@@ -87,13 +103,58 @@ def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status:
         return schemas.MemoryUpdate(saved=False, explicit=explicit, content=content, error=str(exc))
 
 
-def _extract_memory(db: Session, payload_message: str, result: ChatResult) -> schemas.MemoryUpdate | None:
+def _log_memory_diagnostic(
+    db: Session,
+    *,
+    conversation_id: str | None,
+    message_id: str | None,
+    explicit_request: bool,
+    memory_block_present: bool,
+    was_none: bool,
+    json_detected: bool,
+    parse_succeeded: bool,
+    saved: bool,
+    rejection_reason: str | None,
+) -> None:
+    """Records one row per chat turn's memory-extraction attempt for
+    GET /api/atlas/diagnostics — best-effort only, must never break the chat
+    turn itself if writing the log row fails for some reason."""
+    try:
+        db.add(
+            MemoryExtractionLog(
+                conversation_id=conversation_id,
+                message_id=message_id,
+                explicit_request=explicit_request,
+                memory_block_present=memory_block_present,
+                was_none=was_none,
+                json_detected=json_detected,
+                parse_succeeded=parse_succeeded,
+                saved=saved,
+                rejection_reason=rejection_reason,
+            )
+        )
+        db.commit()
+    except Exception:
+        logger.warning("Failed to record memory-extraction diagnostic", exc_info=True)
+        db.rollback()
+
+
+def _extract_memory(
+    db: Session,
+    payload_message: str,
+    result: ChatResult,
+    *,
+    conversation_id: str | None = None,
+    message_id: str | None = None,
+) -> schemas.MemoryUpdate | None:
     if memory_extraction.is_explicit_remember_request(payload_message):
         content = memory_extraction.extract_explicit_memory(payload_message)
         # Bypasses the model's own MEMORY: judgment entirely — an explicit ask is
         # saved directly from the user's words, so it can't be silently dropped by a
-        # flaky extraction call or rate limiting.
-        return _save_memory(
+        # flaky extraction call or rate limiting. Also bypasses the memory-candidate
+        # review queue below: the user already deliberately asked, there's nothing
+        # to review.
+        update = _save_memory(
             db,
             content=content,
             explicit=True,
@@ -102,19 +163,117 @@ def _extract_memory(db: Session, payload_message: str, result: ChatResult) -> sc
             tags=["user-stated"],
             source="explicit user request",
         )
+        _log_memory_diagnostic(
+            db,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            explicit_request=True,
+            memory_block_present=True,
+            was_none=False,
+            json_detected=False,
+            parse_succeeded=True,
+            saved=update.saved,
+            rejection_reason=None if update.saved else update.error,
+        )
+        return update
 
-    parsed = memory_extraction.parse_memory_json(result.memory_json)
+    preference = preference_detection.detect_preference_statement(payload_message)
+    if preference is not None:
+        # A durable preference/learning-style statement, detected from the
+        # user's own words — not "remember that" (handled above), but still
+        # deterministic, not dependent on the model choosing to emit a
+        # MEMORY: block. Queued for review like any other candidate rather
+        # than saved directly: this is an inference about durability from
+        # phrasing, not something the user explicitly asked to be remembered.
+        conflicts = memory_conflicts.find_conflicts(
+            db, content=preference.content, memory_type="preference", tags=preference.tags
+        )
+        candidate = MemoryCandidate(
+            content=preference.content,
+            epistemic_status="Verified",
+            memory_type="preference",
+            tags=preference.tags,
+            confidence=0.9,
+            source=preference.source,
+            conversation_id=conversation_id,
+            conflict_with=[c.id for c in conflicts],
+        )
+        db.add(candidate)
+        db.commit()
+        _log_memory_diagnostic(
+            db,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            explicit_request=False,
+            memory_block_present=False,
+            was_none=False,
+            json_detected=False,
+            parse_succeeded=True,
+            saved=False,
+            rejection_reason=(
+                f"Queued as a pending preference candidate ({preference.source}, "
+                f"{len(conflicts)} possible conflict(s))"
+                if conflicts
+                else f"Queued as a pending preference candidate ({preference.source})"
+            ),
+        )
+        return schemas.MemoryUpdate(
+            saved=False, explicit=False, pending_review=True, content=preference.content
+        )
+
+    parsed, diag = memory_extraction.parse_memory_json_with_diagnostics(result.memory_json)
     if parsed is None:
+        _log_memory_diagnostic(
+            db,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            explicit_request=False,
+            memory_block_present=diag.memory_block_present,
+            was_none=diag.was_none,
+            json_detected=diag.json_detected,
+            parse_succeeded=False,
+            saved=False,
+            rejection_reason=diag.rejection_reason,
+        )
         return None
-    return _save_memory(
-        db,
-        content=parsed["content"],
-        explicit=False,
-        epistemic_status=parsed["epistemic_status"],
-        confidence=parsed["confidence"],
-        tags=[*parsed["tags"], "auto-extracted"],
-        source="auto-extracted from conversation",
+
+    # A valid opportunistic candidate is NOT saved straight to Atlas — it's queued
+    # for human review (with any plausible conflicts flagged) rather than trusted
+    # outright, per the memory-candidate workflow. Explicit requests above are the
+    # only path that still saves directly.
+    conflicts = memory_conflicts.find_conflicts(
+        db, content=parsed["content"], memory_type="fact", tags=parsed["tags"]
     )
+    candidate = MemoryCandidate(
+        content=parsed["content"],
+        epistemic_status=parsed["epistemic_status"],
+        memory_type="fact",
+        tags=[*parsed["tags"], "auto-extracted"],
+        confidence=parsed["confidence"],
+        source="auto-extracted from conversation",
+        conversation_id=conversation_id,
+        conflict_with=[c.id for c in conflicts],
+    )
+    db.add(candidate)
+    db.commit()
+
+    _log_memory_diagnostic(
+        db,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        explicit_request=False,
+        memory_block_present=True,
+        was_none=False,
+        json_detected=True,
+        parse_succeeded=True,
+        saved=False,
+        rejection_reason=(
+            f"Queued as a pending memory candidate for review ({len(conflicts)} possible conflict(s))"
+            if conflicts
+            else "Queued as a pending memory candidate for review"
+        ),
+    )
+    return schemas.MemoryUpdate(saved=False, explicit=False, pending_review=True, content=parsed["content"])
 
 
 @router.post("/chat", response_model=schemas.ChatResponse)
@@ -134,10 +293,16 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         ChatMessage(role=_ROLE_MAP[m.role], content=m.content) for m in conversation.messages
     ]
     turn_count = len(conversation.messages)
+    prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
-    system_prompt, citations = persona.build_system_prompt(
-        db, payload.message, turn_count, explicit_remember_request=explicit_remember
+    system_prompt, citations, nudge_reason, conversation_snippets = persona.build_system_prompt(
+        db,
+        payload.message,
+        turn_count,
+        explicit_remember_request=explicit_remember,
+        prior_user_messages=prior_user_messages,
+        conversation_id=conversation.id,
     )
     history.append(ChatMessage(role="user", content=payload.message))
 
@@ -150,7 +315,8 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    memory_update = _extract_memory(db, payload.message, result)
+    memory_update = _extract_memory(db, payload.message, result, conversation_id=conversation.id)
+    snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
 
     user_msg = Message(conversation_id=conversation.id, role="user", content=payload.message)
     echo_msg = Message(
@@ -161,11 +327,15 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         provider=provider_used,
         atlas_citations=[c.model_dump() for c in citations],
         fallback_note=fallback_note,
+        independence_nudge_reason=nudge_reason,
+        conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
     )
     db.add(user_msg)
     db.add(echo_msg)
     db.commit()
     db.refresh(echo_msg)
+    conversation_search.index_message(user_msg)
+    conversation_search.index_message(echo_msg)
 
     return schemas.ChatResponse(
         conversation_id=conversation.id,
@@ -176,7 +346,121 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         atlas_citations=citations,
         memory_update=memory_update,
         fallback_note=fallback_note,
+        independence_nudge_reason=nudge_reason,
+        conversation_snippets=snippets_out,
     )
+
+
+@router.post("/chat/stream")
+def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends(get_db)):
+    """Server-Sent Events counterpart to POST /api/chat. Streams only the
+    user-facing ANSWER text as `token` events while REASONING/MEMORY stay
+    buffered server-side (see app/envelope_stream.py) — never exposed to the
+    client, malformed or not. Once the provider's reply is complete, parses the
+    full envelope exactly like the non-streaming endpoint, saves the same
+    Message rows, and emits one final `done` event carrying everything the
+    non-streaming response would have returned. Text-only — attachments still
+    go through POST /api/chat/send-with-files."""
+    if payload.conversation_id:
+        conversation = db.get(Conversation, payload.conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        title = payload.message.strip()[:60] or "New conversation"
+        conversation = Conversation(title=title)
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+
+    history = [
+        ChatMessage(role=_ROLE_MAP[m.role], content=m.content) for m in conversation.messages
+    ]
+    turn_count = len(conversation.messages)
+    prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
+
+    explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
+    system_prompt, citations, nudge_reason, conversation_snippets = persona.build_system_prompt(
+        db,
+        payload.message,
+        turn_count,
+        explicit_remember_request=explicit_remember,
+        prior_user_messages=prior_user_messages,
+        conversation_id=conversation.id,
+    )
+    history.append(ChatMessage(role="user", content=payload.message))
+
+    conversation_id = conversation.id
+    user_message = payload.message
+    snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
+
+    def event_stream():
+        parser = EnvelopeStreamParser()
+        provider_used: str | None = None
+        fallback_note: str | None = None
+
+        try:
+            for raw_chunk, provider, fb_note in model_router.stream_chat(
+                payload.provider, system_prompt, history, db=db
+            ):
+                if provider_used is None:
+                    provider_used = provider.name
+                    fallback_note = fb_note
+                answer_piece = parser.feed(raw_chunk)
+                if answer_piece:
+                    yield _sse("token", {"text": answer_piece})
+        except (NoProviderAvailableError, ProviderUnavailableError, ValueError) as exc:
+            yield _sse("error", {"detail": str(exc)})
+            return
+        except Exception as exc:
+            logger.exception("Streaming chat turn failed mid-stream")
+            yield _sse("error", {"detail": f"Streaming failed: {exc}"})
+            return
+
+        try:
+            result = parser.result()
+            memory_update = _extract_memory(db, user_message, result, conversation_id=conversation_id)
+
+            user_msg = Message(conversation_id=conversation_id, role="user", content=user_message)
+            echo_msg = Message(
+                conversation_id=conversation_id,
+                role="echo",
+                content=result.text,
+                reasoning=result.reasoning,
+                provider=provider_used,
+                atlas_citations=[c.model_dump() for c in citations],
+                fallback_note=fallback_note,
+                independence_nudge_reason=nudge_reason,
+                conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
+            )
+            db.add(user_msg)
+            db.add(echo_msg)
+            db.commit()
+            db.refresh(echo_msg)
+            conversation_search.index_message(user_msg)
+            conversation_search.index_message(echo_msg)
+        except Exception as exc:
+            logger.exception("Failed to save streamed chat turn")
+            db.rollback()
+            yield _sse("error", {"detail": f"Failed to save the completed reply: {exc}"})
+            return
+
+        yield _sse(
+            "done",
+            {
+                "conversation_id": conversation_id,
+                "message_id": echo_msg.id,
+                "content": result.text,
+                "reasoning": result.reasoning,
+                "provider_used": provider_used,
+                "atlas_citations": [c.model_dump() for c in citations],
+                "memory_update": memory_update.model_dump() if memory_update else None,
+                "conversation_snippets": [s.model_dump(mode="json") for s in snippets_out],
+                "fallback_note": fallback_note,
+                "independence_nudge_reason": nudge_reason,
+            },
+        )
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/chat/send-with-files", response_model=schemas.SendWithFilesResponse)
@@ -218,10 +502,16 @@ async def send_chat_message_with_files(
         ChatMessage(role=_ROLE_MAP[m.role], content=m.content) for m in conversation.messages
     ]
     turn_count = len(conversation.messages)
+    prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(message)
-    system_prompt, citations = persona.build_system_prompt(
-        db, message, turn_count, explicit_remember_request=explicit_remember
+    system_prompt, citations, nudge_reason, conversation_snippets = persona.build_system_prompt(
+        db,
+        message,
+        turn_count,
+        explicit_remember_request=explicit_remember,
+        prior_user_messages=prior_user_messages,
+        conversation_id=conversation.id,
     )
 
     if uploads:
@@ -235,6 +525,22 @@ async def send_chat_message_with_files(
             "explicitly there."
         )
 
+    # If the user attached an image and left the provider on auto, route this turn
+    # to Gemini (the only vision-capable provider) when it's actually available,
+    # rather than letting auto-mode's normal priority order land on a text-only
+    # provider that would have to guess at the image. An explicit pin to a
+    # different provider is left alone — that's a deliberate choice, not something
+    # to silently override (same "pinned means pinned" rule as the router itself).
+    image_mimes = [attachments_lib.guess_mime_type(u.filename or "file", u.content_type) for u, _ in uploads]
+    has_image_upload = any(m.startswith("image/") for m in image_mimes)
+    effective_provider = provider
+    if provider == "auto" and has_image_upload:
+        gemini = next((p for p in model_router.providers if p.name == "gemini"), None)
+        if gemini is not None:
+            available, _ = gemini.available()
+            if available:
+                effective_provider = "gemini"
+
     # Fold attachment content into what the model actually sees: real extracted text
     # for files we can read (text/code/PDF), the actual image bytes for images (only
     # Gemini currently has real vision wiring — see gemini_provider.py — other
@@ -245,12 +551,15 @@ async def send_chat_message_with_files(
     attachment_records: list[Attachment] = []
     image_payloads: list[tuple[str, bytes]] = []
     device_note = f" (from {device_label})" if device_label else ""
-    vision_capable = _will_use_vision_capable_provider(provider)
+    vision_capable = _will_use_vision_capable_provider(effective_provider)
     for upload, content in uploads:
         filename = upload.filename or "file"
         mime_type = attachments_lib.guess_mime_type(filename, upload.content_type)
         understood = attachments_lib.classify(filename, mime_type)
         extracted = attachments_lib.extract_text_for_prompt(filename, mime_type, content)
+        analysis_status = attachments_lib.determine_analysis_status(
+            mime_type=mime_type, understood=understood, extracted=extracted, vision_capable=vision_capable
+        )
         if mime_type.startswith("image/"):
             image_payloads.append((mime_type, content))
             if vision_capable:
@@ -285,6 +594,7 @@ async def send_chat_message_with_files(
                 size_bytes=len(content),
                 storage_path=storage_path,
                 understood=understood,
+                analysis_status=analysis_status,
             )
         )
 
@@ -299,14 +609,15 @@ async def send_chat_message_with_files(
 
     try:
         result, provider_used, fallback_note = model_router.chat(
-            provider, system_prompt, history, db=db
+            effective_provider, system_prompt, history, db=db
         )
     except (NoProviderAvailableError, ProviderUnavailableError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    _extract_memory(db, message, result)
+    _extract_memory(db, message, result, conversation_id=conversation.id)
+    snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
 
     user_msg = Message(
         conversation_id=conversation.id,
@@ -322,11 +633,15 @@ async def send_chat_message_with_files(
         provider=provider_used,
         atlas_citations=[c.model_dump() for c in citations],
         fallback_note=fallback_note,
+        independence_nudge_reason=nudge_reason,
+        conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
     )
     db.add(user_msg)
     db.add(echo_msg)
     db.commit()
     db.refresh(echo_msg)
+    conversation_search.index_message(user_msg)
+    conversation_search.index_message(echo_msg)
 
     # The response's `message` is Echo's reply (for the frontend to append/render),
     # but the attachments themselves live on the *user's* message (they uploaded the
@@ -368,8 +683,15 @@ async def generate_image(
     try:
         image_bytes = gemini_provider.generate_image(prompt)
     except Exception as exc:
+        # Full technical detail (including any raw Imagen API response text) stays
+        # server-side only — the chat UI never shows raw provider/API error text.
         logger.warning("Image generation failed: %s", exc)
-        raise HTTPException(status_code=502, detail=f"Image generation failed: {exc}") from exc
+        clean_detail = (
+            "Image generation is unavailable — Gemini isn't configured."
+            if "not set" in str(exc).lower()
+            else "Image generation is unavailable right now."
+        )
+        raise HTTPException(status_code=502, detail=clean_detail) from exc
 
     filename = f"generated-{uuid4().hex[:8]}.png"
     storage_path = attachments_lib.save_to_disk(filename, image_bytes)

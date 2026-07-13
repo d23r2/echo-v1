@@ -11,3 +11,15 @@ openai==1.59.6
 python-multipart==0.0.20
 python-dotenv==1.0.1
 pypdf==5.1.0
+# app/usage.py uses zoneinfo("America/Los_Angeles") — Windows has no system IANA tz
+# database for zoneinfo to read, so this is required there (harmless no-op on Linux,
+# which is why this was never caught running under Docker).
+tzdata==2025.2
+
+# Testing (dev-only, free/local — see tests/README.md)
+pytest==8.3.4
+pytest-asyncio==0.25.2
+
+# Linting (dev-only, free/local — see DEVELOPMENT.md)
+ruff==0.15.21
+mypy==1.14.1

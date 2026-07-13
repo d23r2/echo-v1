@@ -1,3 +1,6 @@
+import json
+from collections.abc import Iterator
+
 import httpx
 
 from app.config import get_settings
@@ -30,3 +33,25 @@ class OllamaProvider(ModelProvider):
         resp.raise_for_status()
         raw = resp.json().get("message", {}).get("content", "")
         return split_reasoning_and_answer(raw)
+
+    def stream_chat(self, system_prompt: str, messages: list[ChatMessage]) -> Iterator[str]:
+        """Real token-level streaming via Ollama's `stream: true`, which returns
+        newline-delimited JSON objects, each carrying the next content fragment."""
+        settings = get_settings()
+        payload = {
+            "model": settings.ollama_model,
+            "messages": [{"role": "system", "content": system_prompt}]
+            + [{"role": m.role, "content": m.content} for m in messages],
+            "stream": True,
+        }
+        with httpx.stream(
+            "POST", f"{settings.ollama_base_url}/api/chat", json=payload, timeout=120
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                piece = chunk.get("message", {}).get("content", "")
+                if piece:
+                    yield piece

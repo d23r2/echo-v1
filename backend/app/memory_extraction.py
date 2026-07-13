@@ -12,6 +12,7 @@ Two paths:
 
 import json
 import re
+from dataclasses import dataclass
 
 _EXPLICIT_PATTERNS = [
     re.compile(r"\bplease remember\b", re.IGNORECASE),
@@ -42,25 +43,77 @@ def extract_explicit_memory(message: str) -> str:
     return cleaned or message.strip()
 
 
+@dataclass(frozen=True)
+class MemoryParseDiagnostic:
+    """Why a MEMORY: block did or didn't produce a saved memory — for diagnostics
+    only (see app.routers.chat._log_memory_diagnostic). Never changes what gets
+    saved; parse_memory_json() below has the exact same save/reject behavior it
+    always had, just now expressed as a thin wrapper over the diagnostic-tracking
+    version."""
+
+    memory_block_present: bool
+    was_none: bool
+    json_detected: bool
+    parse_succeeded: bool
+    rejection_reason: str | None
+
+
 def parse_memory_json(raw: str | None) -> dict | None:
     """Parse the model's MEMORY: section into Atlas fields, or None if there's nothing
     worth saving (including on any parse/validation failure — fails closed, never raises).
     """
-    if not raw:
-        return None
+    data, _diagnostic = parse_memory_json_with_diagnostics(raw)
+    return data
+
+
+def parse_memory_json_with_diagnostics(raw: str | None) -> tuple[dict | None, MemoryParseDiagnostic]:
+    """Same parsing/validation as parse_memory_json(), but also reports *why*
+    nothing was saved when that happens — used for the memory-extraction
+    diagnostics log, never to change save/reject behavior."""
+    if not raw or not raw.strip():
+        return None, MemoryParseDiagnostic(
+            memory_block_present=False,
+            was_none=False,
+            json_detected=False,
+            parse_succeeded=False,
+            rejection_reason="No MEMORY: block in the model's reply",
+        )
+
     text = raw.strip()
-    if not text or text.strip('."\' ').upper() == "NONE":
-        return None
+    if text.strip('."\' ').upper() == "NONE":
+        return None, MemoryParseDiagnostic(
+            memory_block_present=True,
+            was_none=True,
+            json_detected=False,
+            parse_succeeded=False,
+            rejection_reason="MEMORY was NONE",
+        )
 
     # Try the raw text first, then fall back to the first {...} block — models
     # frequently wrap the JSON in a code fence or a sentence of preamble/postamble.
+    json_detected = bool(text.lstrip().startswith("{") or _first_json_block(text))
+    fail_reason: str | None = None
     for candidate in (text, _first_json_block(text)):
         if not candidate:
             continue
-        data = _try_parse(candidate)
+        data, reason = _try_parse(candidate)
         if data is not None:
-            return data
-    return None
+            return data, MemoryParseDiagnostic(
+                memory_block_present=True,
+                was_none=False,
+                json_detected=True,
+                parse_succeeded=True,
+                rejection_reason=None,
+            )
+        fail_reason = fail_reason or reason
+
+    return None, MemoryParseDiagnostic(
+        memory_block_present=True,
+        was_none=False,
+        json_detected=json_detected,
+        parse_succeeded=False,
+        rejection_reason=fail_reason or "MEMORY: block did not contain a JSON object",
+    )
 
 
 def _first_json_block(text: str) -> str | None:
@@ -68,17 +121,19 @@ def _first_json_block(text: str) -> str | None:
     return match.group(0) if match else None
 
 
-def _try_parse(candidate: str) -> dict | None:
+def _try_parse(candidate: str) -> tuple[dict | None, str | None]:
+    """Returns (parsed_fields, None) on success, or (None, human_readable_reason)
+    on failure — the reason is what shows up in the diagnostics log."""
     try:
         data = json.loads(candidate)
     except json.JSONDecodeError:
-        return None
+        return None, "Malformed JSON"
     if not isinstance(data, dict):
-        return None
+        return None, "MEMORY JSON was not an object"
 
     content = str(data.get("content") or "").strip()
     if not content:
-        return None
+        return None, "Missing content field"
 
     status = data.get("epistemic_status")
     if status not in _VALID_STATUSES:
@@ -95,4 +150,4 @@ def _try_parse(candidate: str) -> dict | None:
         tags = []
     tags = [str(t) for t in tags if isinstance(t, (str, int, float))]
 
-    return {"content": content, "epistemic_status": status, "confidence": confidence, "tags": tags}
+    return {"content": content, "epistemic_status": status, "confidence": confidence, "tags": tags}, None

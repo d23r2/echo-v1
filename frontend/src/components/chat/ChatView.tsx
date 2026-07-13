@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  AttachmentAnalysisStatus,
+  FeatureAvailability,
   MemoryUpdate,
   MessageOut,
+  StreamDoneEvent,
   WelcomeResponse,
   generateImage,
   getConversation,
+  getFeatureAvailability,
   getWelcomeGreeting,
   sendChatMessage,
   sendChatMessageWithFiles,
+  streamChatMessage,
 } from "../../api/client";
 import { useApi } from "../../api/useApi";
 import { useConversations } from "../../state/conversationsContext";
 import { useRole } from "../../state/roleContext";
+import ChatActionMenu from "./ChatActionMenu";
 import ConversationList from "./ConversationList";
 import EchoPresence, { PresenceState } from "./EchoPresence";
 import MessageBubble from "./MessageBubble";
@@ -20,6 +26,10 @@ import UsageStatus from "./UsageStatus";
 
 export interface DisplayMessage extends MessageOut {
   memory_update?: MemoryUpdate | null;
+  // True only while this specific reply is still receiving tokens from
+  // POST /api/chat/stream — lets MessageBubble show a live typing indicator
+  // and lets a cancel wipe just this one message's in-progress state.
+  streaming?: boolean;
 }
 
 // Module-level (not component state): persists across ChatView remounts caused by
@@ -48,6 +58,16 @@ function guessUnderstood(file: File): boolean {
   ];
   const name = file.name.toLowerCase();
   return codeExts.some((ext) => name.endsWith(ext));
+}
+
+// Best-effort cosmetic guess for the optimistic chip only — the server's real
+// analysis_status (set once it knows which provider actually handled the turn)
+// is what gets shown for every message that came back from the backend.
+function guessAnalysisStatus(file: File, understood: boolean): AttachmentAnalysisStatus {
+  if (!understood) return "unsupported";
+  const mime = file.type;
+  if (mime.startsWith("text/") || mime === "application/pdf") return "text_extracted";
+  return "stored";
 }
 
 function fileTypeIcon(mime: string): string {
@@ -93,15 +113,19 @@ export default function ChatView() {
   const [welcome, setWelcome] = useState<WelcomeResponse | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [features, setFeatures] = useState<FeatureAvailability | null>(null);
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+  const streamAbortRef = useRef<AbortController | null>(null);
 
   const { run: runSend, loading: sendingText, error: sendError } = useApi(sendChatMessage);
   const { run: runSendWithFiles, loading: sendingFiles, error: filesError } = useApi(sendChatMessageWithFiles);
@@ -114,8 +138,8 @@ export default function ChatView() {
   const { run: runGenerateImage, loading: generatingImage, error: generateImageError } =
     useApi(generateImage);
 
-  const sending = sendingText || sendingFiles;
-  const error = sendError || filesError;
+  const sending = sendingText || sendingFiles || isStreaming;
+  const error = sendError || filesError || streamError;
   const presenceState: PresenceState = listening
     ? "listening"
     : isSpeaking
@@ -151,6 +175,26 @@ export default function ChatView() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, sending]);
+
+  useEffect(() => {
+    getFeatureAvailability()
+      .then(setFeatures)
+      .catch(() => setFeatures(null));
+  }, []);
+
+  const geminiAvailable = features ? features.vision.available : null;
+  const hasImageAttached = attachedFiles.some((f) => f.type.startsWith("image/"));
+  const visionWarning =
+    hasImageAttached && geminiAvailable === false
+      ? "Image understanding is unavailable right now (Gemini isn't configured/reachable) — Echo won't be able to see this image's contents."
+      : hasImageAttached && geminiAvailable === true && provider !== "auto" && provider !== "gemini"
+        ? "This provider can't see images. Switch to Auto or Gemini above to have this image analyzed."
+        : null;
+
+  const canGenerateImage = features?.image_generation ?? true; // default permissive until the fetch resolves
+  const imageGenerationUnavailableReason = features && !features.image_generation
+    ? features.vision.reason || "not configured"
+    : null;
 
   // Stop any in-flight speech when navigating away from Chat entirely.
   useEffect(() => {
@@ -342,15 +386,21 @@ export default function ChatView() {
       reasoning: null,
       provider: null,
       atlas_citations: [],
-      attachments: filesToSend.map((f) => ({
-        filename: f.name,
-        mime_type: f.type || "application/octet-stream",
-        size_bytes: f.size,
-        understood: guessUnderstood(f),
-        generated: false,
-        base64_preview: null,
-      })),
+      attachments: filesToSend.map((f) => {
+        const understood = guessUnderstood(f);
+        return {
+          filename: f.name,
+          mime_type: f.type || "application/octet-stream",
+          size_bytes: f.size,
+          understood,
+          analysis_status: guessAnalysisStatus(f, understood),
+          generated: false,
+          base64_preview: null,
+        };
+      }),
       fallback_note: null,
+      independence_nudge_reason: null,
+      conversation_snippets: [],
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
@@ -365,27 +415,92 @@ export default function ChatView() {
       return;
     }
 
-    const result = await runSend(text, provider, conversationId);
-    if (!result) return;
-
-    selectConversation(result.conversation_id);
+    // Streaming path (text-only — file uploads use the non-streaming branch
+    // above, since POST /api/chat/stream doesn't accept attachments).
+    const streamingId = `streaming-${Date.now()}`;
     setMessages((prev) => [
       ...prev,
       {
-        id: result.message_id,
+        id: streamingId,
         role: "echo",
-        content: result.content,
-        reasoning: result.reasoning,
-        provider: result.provider_used,
-        atlas_citations: result.atlas_citations,
+        content: "",
+        reasoning: null,
+        provider: null,
+        atlas_citations: [],
         attachments: [],
-        memory_update: result.memory_update,
-        fallback_note: result.fallback_note,
+        fallback_note: null,
+        independence_nudge_reason: null,
+        conversation_snippets: [],
         created_at: new Date().toISOString(),
+        streaming: true,
       },
     ]);
-    speak(result.content);
-    refreshConversations();
+
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+    setIsStreaming(true);
+    setStreamError(null);
+
+    await streamChatMessage(
+      text,
+      provider,
+      conversationId,
+      {
+        onToken: (piece) => {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === streamingId ? { ...m, content: m.content + piece } : m))
+          );
+        },
+        onDone: (data: StreamDoneEvent) => {
+          selectConversation(data.conversation_id);
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === streamingId
+                ? {
+                    id: data.message_id,
+                    role: "echo",
+                    content: data.content,
+                    reasoning: data.reasoning,
+                    provider: data.provider_used,
+                    atlas_citations: data.atlas_citations,
+                    attachments: [],
+                    memory_update: data.memory_update,
+                    fallback_note: data.fallback_note,
+                    independence_nudge_reason: data.independence_nudge_reason,
+                    conversation_snippets: data.conversation_snippets,
+                    created_at: m.created_at,
+                  }
+                : m
+            )
+          );
+          speak(data.content);
+          refreshConversations();
+          setIsStreaming(false);
+          streamAbortRef.current = null;
+        },
+        onError: (detail) => {
+          setStreamError(detail);
+          setMessages((prev) =>
+            prev.map((m) => (m.id === streamingId ? { ...m, streaming: false } : m))
+          );
+          setIsStreaming(false);
+          streamAbortRef.current = null;
+        },
+      },
+      controller.signal
+    );
+  }
+
+  // Aborts the in-flight stream request. The server-side generator sees the
+  // dropped connection and stops before saving anything (see
+  // POST /api/chat/stream) — so on cancel, nothing gets persisted for this
+  // turn; the partial text stays visible locally for reference this session
+  // only, clearly marked as no longer streaming.
+  function handleStopStreaming() {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+    setIsStreaming(false);
+    setMessages((prev) => prev.map((m) => (m.streaming ? { ...m, streaming: false } : m)));
   }
 
   // Deliberately separate action from handleSend — must only ever run from an
@@ -404,6 +519,8 @@ export default function ChatView() {
       atlas_citations: [],
       attachments: [],
       fallback_note: null,
+      independence_nudge_reason: null,
+      conversation_snippets: [],
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
@@ -525,6 +642,11 @@ export default function ChatView() {
               {attachmentError}
             </div>
           )}
+          {visionWarning && (
+            <div className="mb-2 rounded-lg border border-amber-900 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-300">
+              ⚠ {visionWarning}
+            </div>
+          )}
           {voiceError && (
             <div className="mb-2 rounded-lg border border-red-900 bg-red-950/50 px-3 py-1.5 text-xs text-red-300">
               {voiceError}
@@ -550,6 +672,12 @@ export default function ChatView() {
               ))}
             </div>
           )}
+          {listening && (
+            <div className="mb-2 flex items-center gap-1.5 pl-1 text-xs text-accent">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+              Listening…
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <input
               ref={fileInputRef}
@@ -561,13 +689,15 @@ export default function ChatView() {
                 e.target.value = "";
               }}
             />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              title="Attach files"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-            >
-              📎
-            </button>
+            <ChatActionMenu
+              onAttachFile={() => fileInputRef.current?.click()}
+              onToggleVoice={toggleListening}
+              onGenerateImage={handleGenerateImage}
+              voiceSupported={!!SpeechRecognitionCtor}
+              listening={listening}
+              canGenerateImage={canGenerateImage}
+              imageGenerationUnavailableReason={imageGenerationUnavailableReason}
+            />
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -581,38 +711,28 @@ export default function ChatView() {
               placeholder="Message Echo…"
               className="flex-1 resize-none rounded-xl border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-accent focus:outline-none"
             />
-            {SpeechRecognitionCtor && (
+            {isStreaming ? (
               <button
-                onClick={toggleListening}
-                title={listening ? "Stop listening" : "Speak your message"}
-                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border transition-colors ${
-                  listening
-                    ? "border-accent bg-accent/15 text-accent animate-pulse"
-                    : "border-zinc-700 text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-                }`}
+                onClick={handleStopStreaming}
+                className="rounded-xl border border-red-800 bg-red-950/40 px-4 py-2 text-sm font-medium text-red-300 hover:bg-red-950/70"
               >
-                🎤
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={handleSend}
+                disabled={sending || (!input.trim() && attachedFiles.length === 0)}
+                className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40"
+              >
+                Send
               </button>
             )}
-            <button
-              onClick={handleSend}
-              disabled={sending || (!input.trim() && attachedFiles.length === 0)}
-              className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-zinc-950 disabled:opacity-40"
-            >
-              Send
-            </button>
-            <button
-              onClick={handleGenerateImage}
-              disabled={generatingImage || sending || !input.trim()}
-              title="Uses a paid image model — a few cents per image. Type a description above, then click this to generate it (separate from Send)."
-              className="flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm font-medium text-amber-300 hover:bg-amber-950/50 disabled:opacity-40"
-            >
-              🎨 <span className="hidden sm:inline">Generate image</span>
-            </button>
           </div>
-          <p className="mt-1.5 pl-1 text-[10px] text-amber-600/80">
-            "Generate image" uses a paid image model — a few cents per image — separate from normal chat.
-          </p>
+          {generatingImage && (
+            <p className="mt-1.5 pl-1 text-[10px] text-amber-600/80">
+              🎨 Generating image… uses a paid model, a few cents per image.
+            </p>
+          )}
         </div>
       </div>
     </div>

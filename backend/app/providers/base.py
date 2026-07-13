@@ -1,5 +1,6 @@
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 _FULL_ENVELOPE_RE = re.compile(
@@ -61,3 +62,16 @@ class ModelProvider(ABC):
     @abstractmethod
     def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
         ...
+
+    def stream_chat(self, system_prompt: str, messages: list[ChatMessage]) -> Iterator[str]:
+        """Yield raw reply text as it becomes available, for POST /api/chat/stream.
+        Default: no real token-level streaming — call the existing non-streaming
+        chat() and re-emit its already-parsed result as one chunk, reconstructed
+        into the same REASONING:/ANSWER:/MEMORY: shape so the caller's envelope
+        parser (app/envelope_stream.py) works identically for every provider.
+        Providers with a cheap native streaming transport override this for real
+        incremental delivery (currently just Ollama)."""
+        result = self.chat(system_prompt, messages)
+        memory_part = result.memory_json if result.memory_json is not None else "NONE"
+        reasoning_part = result.reasoning if result.reasoning is not None else ""
+        yield f"REASONING: {reasoning_part}\nANSWER: {result.text}\nMEMORY: {memory_part}"

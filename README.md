@@ -90,6 +90,12 @@ The frontend is a fully responsive web app — the same build works on desktop a
 browsers. There's no native app or real multi-account sync; "multi-device" here means
 "open the same URL from any device."
 
+## Development
+
+See [DEVELOPMENT.md](DEVELOPMENT.md) for running tests, lint, type checks, and the
+recommended commit workflow. See [ROADMAP.md](ROADMAP.md) for what's done, what's in
+flight, and what's deliberately out of scope for now.
+
 ## Notes on the Value Invariant guard
 
 `backend/app/constitution.py` defines a small set of immutable invariants (no fabricated

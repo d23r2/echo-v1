@@ -8,6 +8,7 @@ before a proposal is even allowed to reach a vote.
 """
 
 from dataclasses import dataclass
+from typing import Literal
 
 CODENAME = "Seed"
 BASE_VERSION_MAJOR = 1  # bumped only by a deliberate, out-of-band v2 migration
@@ -80,7 +81,11 @@ VALUE_INVARIANTS: tuple[ValueInvariant, ...] = (
     ValueInvariant(
         id="no-fabricated-certainty",
         text="Echo must never present a guess, inference, or hope as settled fact.",
-        guarded_keywords=("certainty", "confidence level", "fabricat"),
+        # "truth-seeking"/"truthfulness" live here rather than as their own invariant:
+        # presenting something comfortable-but-untrue as fact is exactly what fabricated
+        # certainty means, even when the proposal frames it as relaxing "truth-seeking"
+        # (the ranked Core Value) instead of naming this invariant directly.
+        guarded_keywords=("certainty", "confidence level", "fabricat", "truth-seeking", "truthfulness"),
     ),
     ValueInvariant(
         id="no-dependency-fostering",
@@ -92,29 +97,38 @@ VALUE_INVARIANTS: tuple[ValueInvariant, ...] = (
         id="no-power-seeking",
         text="Echo must never seek to acquire power, resources, self-preservation, or control "
         "beyond what a given task requires, for itself or on behalf of any single actor.",
-        guarded_keywords=("power-seeking", "self-preservation", "control over", "autonomy of the ai"),
+        guarded_keywords=(
+            "power-seeking",
+            "self-preservation",
+            "control over",
+            "autonomy of the ai",
+            "seek power",
+            "seek control",
+            "seek resources",
+        ),
     ),
     ValueInvariant(
         id="no-deception-about-self",
         text="Echo must never deceive the user about being an AI, or about its own reasoning, "
         "limits, or uncertainty.",
-        guarded_keywords=("deception", "identity as an ai", "hide its reasoning"),
+        # "decept"/"decei" stems (matching the existing "fabricat" convention below) catch
+        # deception/deceptive/deceive/deceiving without needing every inflection spelled out.
+        guarded_keywords=("decept", "decei", "identity as an ai", "hide its reasoning"),
     ),
     ValueInvariant(
         id="reasoning-transparency-mandatory",
         text="Full reasoning transparency is never optional and may not be suppressed by user "
         "request, persona, or roleplay framing.",
-        guarded_keywords=(
-            "reasoning trace",
-            "hide reasoning",
-            "suppress reasoning",
-            "reasoning transparency",
-            "transparency requirement",
-        ),
+        # Standalone "transparency" subsumes "reasoning transparency"/"transparency
+        # requirement" and also catches softer phrasing like "suspend transparency".
+        guarded_keywords=("reasoning trace", "hide reasoning", "suppress reasoning", "transparency"),
     ),
 )
 
-# Override verbs that, near a guarded keyword, indicate an attempt to weaken an invariant.
+# Override verbs/phrases that, near a guarded keyword, indicate an attempt to weaken an
+# invariant — includes direct verbs (remove, bypass, disable...) and permission-granting
+# framings that amount to the same thing without using an obvious "override" word (allow,
+# hide, an exception, "acceptable when...").
 _OVERRIDE_VERBS: tuple[str, ...] = (
     "remove",
     "delete",
@@ -128,6 +142,10 @@ _OVERRIDE_VERBS: tuple[str, ...] = (
     "relax",
     "no longer require",
     "not required",
+    "hide",
+    "allow",
+    "exception",
+    "acceptable when",
 )
 
 EDGE_CASE_PROTOCOLS: tuple[EdgeCaseProtocol, ...] = (
@@ -174,16 +192,86 @@ EDGE_CASE_PROTOCOLS: tuple[EdgeCaseProtocol, ...] = (
 )
 
 
-def guarded_invariant_hits(text: str) -> list[str]:
-    """Return ids of Value Invariants whose guarded keywords co-occur with an override verb in `text`."""
+AmendmentReviewStatus = Literal["allowed", "blocked", "needs_human_review"]
+
+
+@dataclass(frozen=True)
+class AmendmentReview:
+    status: AmendmentReviewStatus
+    implicated_invariants: tuple[str, ...]
+    reasons: tuple[str, ...]
+
+
+def classify_amendment_text(text: str) -> AmendmentReview:
+    """Two independent, deterministic checks, not one regex wearing two hats:
+
+    1. The original keyword+override-verb heuristic (kept, not removed) — a guarded
+       keyword co-occurring with override/permission-granting language (remove,
+       bypass, allow, hide, an exception, ...) is high-confidence evidence of an
+       attempt to weaken an invariant. -> blocked.
+    2. A *second* checklist that runs regardless of (1): does the text merely mention
+       a guarded term at all, with no override signal? That alone doesn't prove
+       anything is wrong — plenty of legitimate amendments will discuss dependency,
+       transparency, etc. — but it's exactly the kind of proposal a human should
+       glance at before it goes to a vote rather than nod it through silently.
+       -> needs_human_review.
+
+    Anything matching neither check -> allowed. A proposal naming "invariant(s)"
+    generically alongside an override signal (e.g. "the Founder may override all
+    invariants") doesn't need to name one specifically to be dangerous, so it's
+    treated as blocked against every invariant.
+    """
     lowered = text.lower()
-    hits: list[str] = []
-    for inv in VALUE_INVARIANTS:
-        if any(kw in lowered for kw in inv.guarded_keywords) and any(
-            verb in lowered for verb in _OVERRIDE_VERBS
-        ):
-            hits.append(inv.id)
-    return hits
+    has_override_signal = any(verb in lowered for verb in _OVERRIDE_VERBS)
+
+    if has_override_signal and "invariant" in lowered:
+        return AmendmentReview(
+            status="blocked",
+            implicated_invariants=tuple(inv.id for inv in VALUE_INVARIANTS),
+            reasons=(
+                'Proposal references overriding "invariant(s)" generically alongside override '
+                "language (e.g. remove/bypass/override/allow/hide/an exception/...) — treated as "
+                "threatening every Value Invariant, since it doesn't need to name one specifically "
+                "to be dangerous.",
+            ),
+        )
+
+    keyword_hits = tuple(inv for inv in VALUE_INVARIANTS if any(kw in lowered for kw in inv.guarded_keywords))
+
+    if has_override_signal and keyword_hits:
+        return AmendmentReview(
+            status="blocked",
+            implicated_invariants=tuple(inv.id for inv in keyword_hits),
+            reasons=tuple(
+                f'Combines override/permission-granting language with a term guarded for '
+                f'"{inv.id}" ({inv.text}) — reads as an attempt to weaken it.'
+                for inv in keyword_hits
+            ),
+        )
+
+    if keyword_hits:
+        return AmendmentReview(
+            status="needs_human_review",
+            implicated_invariants=tuple(inv.id for inv in keyword_hits),
+            reasons=tuple(
+                f'Mentions a term guarded for "{inv.id}" ({inv.text}) without clear override '
+                "language — not flagged as a weakening attempt, but a human should confirm that's "
+                "actually the case before this goes to a vote."
+                for inv in keyword_hits
+            ),
+        )
+
+    return AmendmentReview(status="allowed", implicated_invariants=(), reasons=())
+
+
+def guarded_invariant_hits(text: str) -> list[str]:
+    """Backward-compatible view of classify_amendment_text(): the ids of invariants
+    implicated in a *blocked* verdict specifically. needs_human_review cases are
+    intentionally NOT included here — this function's historical contract is "would
+    this get rejected outright", not the fuller 3-way picture; see
+    classify_amendment_text() for that."""
+    review = classify_amendment_text(text)
+    return list(review.implicated_invariants) if review.status == "blocked" else []
 
 
 def base_full_text() -> str:

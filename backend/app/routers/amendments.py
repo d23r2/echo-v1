@@ -47,6 +47,11 @@ def propose_amendment(payload: schemas.AmendmentProposeRequest, db: Session = De
         council.guard_amendment_text(payload.text)
     except council.InvariantGuardError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except council.NeedsHumanReviewError as exc:
+        # Distinct from an outright block: 422 (the request is well-formed but
+        # can't be processed as-is) rather than 400, so callers can tell "this was
+        # flagged as ambiguous" apart from "this was rejected outright".
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     amendment = Amendment(
         title=payload.title,

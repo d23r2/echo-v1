@@ -31,6 +31,12 @@ def init_db() -> None:
     _ensure_atlas_memory_type_column()
     _ensure_column("attachments", "generated", "BOOLEAN DEFAULT 0")
     _ensure_column("messages", "fallback_note", "TEXT")
+    _ensure_column("self_improvement_requests", "verification_checks", "TEXT DEFAULT '[]'")
+    _ensure_column("self_improvement_requests", "verified_at", "DATETIME")
+    _ensure_column("atlas_entries", "outdated", "BOOLEAN DEFAULT 0")
+    _ensure_column("messages", "independence_nudge_reason", "TEXT")
+    _ensure_column("attachments", "analysis_status", "TEXT DEFAULT 'stored'")
+    _ensure_column("messages", "conversation_snippets", "TEXT DEFAULT '[]'")
 
 
 def _ensure_atlas_memory_type_column() -> None:

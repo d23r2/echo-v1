@@ -71,6 +71,22 @@ def update_entry(db: Session, entry: models.AtlasEntry, data: schemas.AtlasEntry
     return entry
 
 
+def merge_entries(
+    db: Session, keep: models.AtlasEntry, remove: models.AtlasEntry, merged_content: str | None = None
+) -> models.AtlasEntry:
+    """Fold `remove` into `keep`: keep the higher confidence of the two, optionally
+    take an edited combined content string, then delete `remove`. Deliberately
+    simple — no attempt at automatic content merging beyond what the caller supplies."""
+    if merged_content:
+        keep.content = merged_content
+    keep.confidence = max(keep.confidence, remove.confidence)
+    db.commit()
+    db.refresh(keep)
+    _upsert_chroma(keep)
+    delete_entry(db, remove)
+    return keep
+
+
 def delete_entry(db: Session, entry: models.AtlasEntry) -> None:
     entry_id = entry.id
     db.delete(entry)
@@ -104,7 +120,7 @@ def search(db: Session, query: str, top_k: int = 5) -> list[tuple[models.AtlasEn
     }
 
     hydrated: list[tuple[models.AtlasEntry, float]] = []
-    for entry_id, distance in zip(ids, distances):
+    for entry_id, distance in zip(ids, distances, strict=True):
         row = rows_by_id.get(entry_id)
         if row is not None:
             hydrated.append((row, distance))

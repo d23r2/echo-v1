@@ -20,19 +20,49 @@ GUARDIAN_APPROVALS_REQUIRED = 2
 
 
 class InvariantGuardError(Exception):
-    def __init__(self, invariant_ids: list[str]):
+    """Raised when a proposal is BLOCKED: the guard has high-confidence evidence
+    (a guarded keyword co-occurring with override language) that it attempts to
+    weaken a Value Invariant."""
+
+    def __init__(self, invariant_ids: list[str], reasons: list[str] | None = None):
         self.invariant_ids = invariant_ids
+        self.reasons = reasons or []
         names = ", ".join(invariant_ids)
+        detail = " ".join(self.reasons)
         super().__init__(
             f"Proposed text appears to weaken protected Value Invariant(s): {names}. "
             "Value Invariants cannot be amended and this proposal was blocked before voting."
+            + (f" {detail}" if detail else "")
+        )
+
+
+class NeedsHumanReviewError(Exception):
+    """Raised when a proposal is AMBIGUOUS: it touches a Value Invariant's guarded
+    terms with no clear override signal, so a human (Guardian/Verifier) should look
+    at it before it proceeds. Distinct from InvariantGuardError — this is not an
+    outright rejection, just a "don't nod this through silently" flag."""
+
+    def __init__(self, invariant_ids: list[str], reasons: list[str] | None = None):
+        self.invariant_ids = invariant_ids
+        self.reasons = reasons or []
+        names = ", ".join(invariant_ids)
+        detail = " ".join(self.reasons)
+        super().__init__(
+            f"Proposed text touches protected Value Invariant(s): {names} without a clear "
+            "override attempt, so a human should review it manually before it proceeds. This is "
+            "not an outright rejection." + (f" {detail}" if detail else "")
         )
 
 
 def guard_amendment_text(text: str) -> None:
-    hits = constitution.guarded_invariant_hits(text)
-    if hits:
-        raise InvariantGuardError(hits)
+    """Raises InvariantGuardError (blocked) or NeedsHumanReviewError (ambiguous) —
+    see constitution.classify_amendment_text() for the underlying 3-way logic.
+    Returns None (no exception) for an allowed proposal, same as before."""
+    review = constitution.classify_amendment_text(text)
+    if review.status == "blocked":
+        raise InvariantGuardError(list(review.implicated_invariants), list(review.reasons))
+    if review.status == "needs_human_review":
+        raise NeedsHumanReviewError(list(review.implicated_invariants), list(review.reasons))
 
 
 def tally(amendment: models.Amendment) -> dict:

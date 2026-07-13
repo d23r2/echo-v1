@@ -1,5 +1,6 @@
 import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import AtlasNotes from "./AtlasNotes";
 import { DisplayMessage } from "./ChatView";
 import ReasoningTrace from "./ReasoningTrace";
 
@@ -15,6 +16,17 @@ function MemoryNote({ message }: { message: DisplayMessage }) {
           {update.explicit ? "Remembered: " : "Noted for later: "}
           {update.content}
         </span>
+      </div>
+    );
+  }
+
+  // An auto-extracted candidate isn't saved directly anymore — it's queued for
+  // review in Atlas's "Memory Candidates" section (see app/routers/chat.py).
+  if (update.pending_review) {
+    return (
+      <div className="mt-1 flex items-start gap-1 px-1 text-[11px] text-blue-400">
+        <span>📋</span>
+        <span>Added as a memory candidate — review it in Atlas.</span>
       </div>
     );
   }
@@ -62,26 +74,46 @@ function GeneratedImages({ message }: { message: DisplayMessage }) {
   );
 }
 
+// Honest, specific labels for what actually happened to a file's content — never
+// implies more understanding than actually occurred (see backend/app/attachments.py).
+const ANALYSIS_STATUS_LABELS: Record<string, string> = {
+  text_extracted: "text read",
+  vision_analyzed: "image analyzed",
+  stored: "stored, not analyzed",
+  unsupported: "unsupported format",
+};
+
+function analysisStatusTitle(a: DisplayMessage["attachments"][number]): string {
+  const label = ANALYSIS_STATUS_LABELS[a.analysis_status] || a.analysis_status;
+  return `${a.filename} — ${label}`;
+}
+
 function AttachmentChips({ message }: { message: DisplayMessage }) {
   const chips = (message.attachments || []).filter((a) => !a.generated);
   if (chips.length === 0) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-1.5">
-      {chips.map((a, i) => (
-        <div
-          key={i}
-          title={a.understood ? a.filename : `${a.filename} — Echo couldn't read this file's content`}
-          className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${
-            a.understood
-              ? "border-zinc-700 bg-zinc-900 text-zinc-300"
-              : "border-zinc-800 bg-zinc-900/50 text-zinc-500"
-          }`}
-        >
-          <span>{fileTypeIcon(a.mime_type)}</span>
-          <span className="max-w-[120px] truncate">{a.filename}</span>
-          {!a.understood && <span aria-label="Not readable by Echo">⚠️</span>}
-        </div>
-      ))}
+      {chips.map((a, i) => {
+        const wasAnalyzed = a.analysis_status === "text_extracted" || a.analysis_status === "vision_analyzed";
+        return (
+          <div
+            key={i}
+            title={analysisStatusTitle(a)}
+            className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] ${
+              wasAnalyzed
+                ? "border-zinc-700 bg-zinc-900 text-zinc-300"
+                : "border-zinc-800 bg-zinc-900/50 text-zinc-500"
+            }`}
+          >
+            <span>{fileTypeIcon(a.mime_type)}</span>
+            <span className="max-w-[120px] truncate">{a.filename}</span>
+            <span className="text-[9px] uppercase tracking-wide text-zinc-500">
+              {ANALYSIS_STATUS_LABELS[a.analysis_status] || a.analysis_status}
+            </span>
+            {a.analysis_status === "unsupported" && <span aria-label="Not readable by Echo">⚠️</span>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -159,7 +191,22 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
               : "border border-zinc-800 bg-zinc-900 text-zinc-100"
           }`}
         >
-          {isUser ? message.content : <MarkdownContent content={message.content} />}
+          {isUser ? (
+            message.content
+          ) : message.streaming && !message.content ? (
+            <span className="inline-flex gap-1 py-1">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500" />
+            </span>
+          ) : (
+            <>
+              <MarkdownContent content={message.content} />
+              {message.streaming && (
+                <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-zinc-400 align-text-bottom" />
+              )}
+            </>
+          )}
         </div>
         <div className="w-full px-1">
           <GeneratedImages message={message} />
@@ -167,7 +214,8 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
         </div>
         {!isUser && (
           <div className="w-full px-1">
-            <ReasoningTrace reasoning={message.reasoning} citations={message.atlas_citations} />
+            <ReasoningTrace reasoning={message.reasoning} />
+            <AtlasNotes message={message} />
           </div>
         )}
         {!isUser && <MemoryNote message={message} />}
@@ -178,6 +226,14 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
         )}
         {!isUser && message.fallback_note && (
           <div className="mt-0.5 px-1 text-[10px] text-amber-600/80">⚠ {message.fallback_note}</div>
+        )}
+        {!isUser && message.independence_nudge_reason && (
+          <div
+            className="mt-0.5 px-1 text-[10px] text-zinc-700"
+            title={`Independence nudge (debug): ${message.independence_nudge_reason}`}
+          >
+            · independence nudge: {message.independence_nudge_reason.replace(/_/g, " ")}
+          </div>
         )}
       </div>
     </div>

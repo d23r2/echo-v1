@@ -1,14 +1,13 @@
 """Chat file attachments: on-disk storage, MIME-based "understood" classification,
 and best-effort text extraction for the types we can actually feed to a model.
 
-Important limitation: the provider abstraction (ChatMessage) is plain text only —
-there is no multimodal (vision/audio/video) support wired into any provider today.
-`understood` reflects the file TYPE this app intends to support per the product
-spec (images/PDF/audio/video/text/code = True, binary Office formats = False), not
-that the model literally saw the file's bytes. Only text/code and PDF content is
-actually extracted and injected into the prompt below — images/audio/video are
-stored and shown to the user as "understood", but their content is not currently
-analyzed by the model. Wiring up real multimodal provider calls is future work.
+Important limitation: the provider abstraction (ChatMessage) is plain text only,
+except for images via Gemini (see gemini_provider.py) — no provider has real
+audio/video understanding wired in. `understood` (classify()) is a coarse "is this
+a file type we intend to support at all" flag; `analysis_status` (below) is the
+honest, specific record of what actually happened to a given file's *content* this
+turn, and is what the UI should show the user. Never let `understood=True` alone
+be read as "the model saw this" — check analysis_status instead.
 """
 
 import mimetypes
@@ -24,6 +23,29 @@ _CODE_EXTENSIONS = {
     ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".md", ".txt", ".csv", ".yaml", ".yml",
     ".html", ".css", ".sh", ".java", ".c", ".cpp", ".h", ".go", ".rs", ".rb", ".php", ".sql",
 }
+
+# Honest labels for what actually happened to an attachment's content this turn —
+# never implies more understanding than actually occurred.
+ANALYSIS_STATUSES = (
+    "text_extracted",  # real text content was pulled out and given to the model
+    "vision_analyzed",  # an image, and this turn actually used a vision-capable provider
+    "stored",  # saved to disk, but its content was not analyzed (audio/video, or an
+    # image when no vision-capable provider was available/used this turn)
+    "unsupported",  # not a file type this app attempts to read at all
+)
+
+
+def determine_analysis_status(
+    *, mime_type: str, understood: bool, extracted: str | None, vision_capable: bool
+) -> str:
+    """The single source of truth for what to honestly tell the user about a file."""
+    if not understood:
+        return "unsupported"
+    if mime_type.startswith("image/"):
+        return "vision_analyzed" if vision_capable else "stored"
+    if extracted:
+        return "text_extracted"
+    return "stored"
 
 
 def guess_mime_type(filename: str, provided: str | None) -> str:

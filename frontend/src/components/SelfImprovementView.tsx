@@ -55,6 +55,8 @@ export default function SelfImprovementView() {
       await verifySelfImprovementRequest(id);
       setMessage("Verification completed for the request.");
       await refresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Verification failed to run.");
     } finally {
       setLoading(false);
     }
@@ -109,18 +111,85 @@ export default function SelfImprovementView() {
               <button onClick={() => void handleApprove(req.id, false)} className="rounded-lg border border-red-700 px-3 py-1.5 text-red-400">
                 Reject
               </button>
-              <button onClick={() => void handleVerify(req.id)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300">
-                Run verification
+              <button
+                onClick={() => void handleVerify(req.id)}
+                disabled={req.status !== "approved"}
+                title={req.status !== "approved" ? "Approve this request first — verification only runs for founder-approved requests." : undefined}
+                className="rounded-lg border border-zinc-700 px-3 py-1.5 text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Run verification (git/pytest/ruff)
               </button>
             </div>
-            <div className="mt-3 text-xs text-zinc-500">
-              <div>Verification: {req.verification_status}</div>
-              {req.patch_summary && <div>Patch: {req.patch_summary}</div>}
-              {req.verification_notes && <div>Notes: {req.verification_notes}</div>}
-            </div>
+            <VerificationSummary req={req} />
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  passed: "text-emerald-400",
+  failed: "text-red-400",
+  unavailable: "text-zinc-500",
+  pending: "text-zinc-500",
+};
+
+function VerificationSummary({ req }: { req: SelfImprovementRequestOut }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasChecks = req.verification_checks.length > 0;
+
+  return (
+    <div className="mt-3 border-t border-zinc-800 pt-3 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-zinc-500">Verification:</span>
+        <span className={`font-medium uppercase tracking-wide ${STATUS_STYLES[req.verification_status] ?? "text-zinc-400"}`}>
+          {req.verification_status}
+        </span>
+        {req.verified_at && (
+          <span className="text-zinc-600">· ran {new Date(req.verified_at).toLocaleString()}</span>
+        )}
+        {hasChecks && (
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="ml-auto rounded border border-zinc-700 px-2 py-0.5 text-zinc-400 hover:bg-zinc-800"
+          >
+            {expanded ? "Hide" : "Show"} {req.verification_checks.length} check{req.verification_checks.length === 1 ? "" : "s"}
+          </button>
+        )}
+      </div>
+
+      {/* Never implies code was applied — this is read-only verification. */}
+      {req.patch_summary && <div className="mt-1.5 text-zinc-500">{req.patch_summary}</div>}
+      {req.verification_notes && <div className="mt-1 text-zinc-400">{req.verification_notes}</div>}
+
+      {expanded && (
+        <div className="mt-2 space-y-2">
+          {req.verification_checks.map((check, i) => (
+            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-950 p-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <code className="font-mono text-zinc-300">{check.command}</code>
+                <span className={`uppercase tracking-wide ${STATUS_STYLES[check.status] ?? "text-zinc-400"}`}>
+                  {check.status}
+                </span>
+                {check.exit_code !== null && (
+                  <span className="text-zinc-600">exit {check.exit_code}</span>
+                )}
+              </div>
+              {check.stdout_summary && (
+                <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-zinc-500">
+                  {check.stdout_summary}
+                </pre>
+              )}
+              {check.stderr_summary && (
+                <pre className="mt-1.5 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-red-400/80">
+                  {check.stderr_summary}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
