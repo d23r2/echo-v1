@@ -214,7 +214,11 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
         </div>
         {!isUser && (
           <div className="w-full px-1">
-            <ReasoningTrace reasoning={message.reasoning} />
+            <ReasoningTrace
+              reasoning={message.reasoning}
+              envelopeStatus={message.envelope_status}
+              envelopeDegradationReason={message.envelope_degradation_reason}
+            />
             <AtlasNotes message={message} />
           </div>
         )}

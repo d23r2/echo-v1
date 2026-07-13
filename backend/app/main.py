@@ -9,8 +9,10 @@ from app.routers import (
     chat,
     constitution,
     features,
+    library,
     memory_candidates,
     models,
+    schedule,
     self_improvement,
     usage,
 )
@@ -42,6 +44,8 @@ app.include_router(self_improvement.router)
 app.include_router(usage.router)
 app.include_router(memory_candidates.router)
 app.include_router(features.router)
+app.include_router(library.router)
+app.include_router(schedule.router)
 
 
 @app.get("/api/health")

@@ -50,6 +50,13 @@ class Message(Base):
     # "used previous conversation context" indicator survives reloading an old
     # conversation, same rationale as atlas_citations above.
     conversation_snippets: Mapped[list] = mapped_column(JSON, default=list)
+    # "complete" | "partial" | "missing" | "malformed" — see providers/base.py's
+    # split_reasoning_and_answer() and envelope_stream.py's EnvelopeStreamParser for
+    # how this is computed. Persisted so the frontend can show an honest "reasoning
+    # unavailable" note even when reopening an old conversation, without ever
+    # inventing a reasoning value that wasn't actually returned.
+    envelope_status: Mapped[str] = mapped_column(String, default="missing")
+    envelope_degradation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")
@@ -176,6 +183,22 @@ class ProviderUsageDaily(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class ProviderCooldown(Base):
+    """At most one active row per provider — set when a call fails with a
+    quota/credit/billing/rate-limit error (see app/provider_errors.py's
+    COOLDOWN_CATEGORIES), cleared once `cooldown_until` passes. Lets the router
+    skip a provider it already knows is exhausted instead of re-trying it (and
+    paying the latency cost) on every single turn. See app/router.py."""
+
+    __tablename__ = "provider_cooldowns"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String, unique=True)
+    category: Mapped[str] = mapped_column(String)  # ErrorCategory value, see provider_errors.py
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    cooldown_until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class MemoryExtractionLog(Base):
     """One row per chat turn's memory-extraction attempt (see
     app/routers/chat.py's _extract_memory / _log_memory_diagnostic) — not the
@@ -196,6 +219,54 @@ class MemoryExtractionLog(Base):
     saved: Mapped[bool] = mapped_column(Boolean, default=False)
     rejection_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class LibraryItem(Base):
+    """A pointer to a file Echo produced or received — generated images,
+    exported conversations, self-improvement/health reports, uploaded
+    attachments, etc. — so Phase 5's Library view can list/search/filter them
+    without re-deriving "what files exist" by scanning disk or Attachment
+    rows scattered across conversations. Registered via app/library.py's
+    register_item(), not created directly by user request."""
+
+    __tablename__ = "library_items"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String)
+    file_path: Mapped[str] = mapped_column(String)
+    # image | document | exported_conversation | report | code | other
+    file_type: Mapped[str] = mapped_column(String, default="other")
+    # Where this item came from — e.g. "image_generation", "self_improvement",
+    # "health_report", "conversation_export", "attachment_upload".
+    source: Mapped[str] = mapped_column(String)
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class ScheduleItem(Base):
+    """A user-created reminder/to-do, surfaced in Phase 5's Schedule view.
+    Reminders are in-app only in this build — reminder_type is always
+    "in_app" for now; there is no background OS notification delivery, so a
+    due item only surfaces the next time the user has Echo open. See
+    PROJECT_HEALTH_REPORT.md's known-gaps section."""
+
+    __tablename__ = "schedule_items"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    recurrence_rule: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending | completed | cancelled
+    source_conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    reminder_type: Mapped[str] = mapped_column(String, default="in_app")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 class MemoryCandidate(Base):

@@ -63,6 +63,8 @@ class ChatResponse(BaseModel):
     fallback_note: str | None = None
     independence_nudge_reason: str | None = None
     conversation_snippets: list[ConversationSnippetOut] = Field(default_factory=list)
+    envelope_status: str = "missing"
+    envelope_degradation_reason: str | None = None
 
 
 class AttachmentOut(BaseModel):
@@ -88,6 +90,8 @@ class MessageOut(BaseModel):
     fallback_note: str | None = None
     independence_nudge_reason: str | None = None
     conversation_snippets: list[dict] = Field(default_factory=list)
+    envelope_status: str = "missing"
+    envelope_degradation_reason: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -360,10 +364,65 @@ class VisionAvailability(BaseModel):
     reason: str | None = None
 
 
+class ImageGenerationAvailability(BaseModel):
+    available: bool
+    active_provider: str | None = None
+    reason: str | None = None
+    providers: dict[str, str]  # "gemini"/"ollama"/"comfyui" -> short reason or "available"
+
+
 class FeatureAvailability(BaseModel):
     chat: bool
     voice_input: bool
     file_upload: bool
-    image_generation: bool
+    image_generation: bool  # kept for backward compatibility — mirrors image_generation_detail.available
     vision: VisionAvailability
+    image_generation_detail: ImageGenerationAvailability
     providers: dict[str, str]  # provider name -> "available" | "not_configured" | "unavailable"
+
+
+class LibraryItemOut(BaseModel):
+    id: str
+    title: str
+    file_path: str
+    file_type: str
+    source: str
+    conversation_id: str | None
+    message_id: str | None
+    tags: list[str]
+    description: str | None
+    metadata_json: dict
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ScheduleItemCreate(BaseModel):
+    title: str
+    description: str | None = None
+    due_at: datetime | None = None
+    recurrence_rule: str | None = None
+    source_conversation_id: str | None = None
+
+
+class ScheduleItemUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    due_at: datetime | None = None
+    recurrence_rule: str | None = None
+
+
+class ScheduleItemOut(BaseModel):
+    id: str
+    title: str
+    description: str | None
+    due_at: datetime | None
+    recurrence_rule: str | None
+    status: str
+    source_conversation_id: str | None
+    reminder_type: str
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

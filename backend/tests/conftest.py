@@ -25,7 +25,27 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 
 from app import models  # noqa: E402,F401  (registers all tables on Base.metadata)
-from app.db import Base  # noqa: E402
+from app.db import Base, SessionLocal  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_provider_cooldowns():
+    """Router-level route tests (test_chat_stream_endpoint.py etc.) hit the
+    real app.db session-wide DATABASE_URL, not the isolated db_session
+    fixture below, since they exercise POST /api/chat[/stream] end-to-end.
+    A cooldown set by one test (e.g. a simulated gemini rate limit) would
+    otherwise leak into every later test that also uses "gemini" as a
+    provider name, silently skipping it. Clearing before each test keeps
+    that shared DB's cooldown state test-order-independent."""
+    session = SessionLocal()
+    try:
+        session.query(models.ProviderCooldown).delete()
+        session.commit()
+    except Exception:
+        session.rollback()
+    finally:
+        session.close()
+    yield
 
 
 @pytest.fixture()

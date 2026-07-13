@@ -401,6 +401,8 @@ export default function ChatView() {
       fallback_note: null,
       independence_nudge_reason: null,
       conversation_snippets: [],
+      envelope_status: "missing",
+      envelope_degradation_reason: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
@@ -431,6 +433,8 @@ export default function ChatView() {
         fallback_note: null,
         independence_nudge_reason: null,
         conversation_snippets: [],
+        envelope_status: "missing",
+        envelope_degradation_reason: null,
         created_at: new Date().toISOString(),
         streaming: true,
       },
@@ -468,6 +472,8 @@ export default function ChatView() {
                     fallback_note: data.fallback_note,
                     independence_nudge_reason: data.independence_nudge_reason,
                     conversation_snippets: data.conversation_snippets,
+                    envelope_status: data.envelope_status,
+                    envelope_degradation_reason: data.envelope_degradation_reason,
                     created_at: m.created_at,
                   }
                 : m
@@ -521,6 +527,8 @@ export default function ChatView() {
       fallback_note: null,
       independence_nudge_reason: null,
       conversation_snippets: [],
+      envelope_status: "missing",
+      envelope_degradation_reason: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);

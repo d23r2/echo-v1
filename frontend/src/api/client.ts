@@ -1,7 +1,7 @@
 // Nullish (not ||) coalescing: an explicitly empty string means "same origin"
 // (used in the production Docker build, proxied by nginx), vs. unset falling
 // back to the local dev API port.
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 export class ApiError extends Error {
   status: number;
@@ -137,7 +137,11 @@ export interface ChatResponse {
   fallback_note: string | null;
   independence_nudge_reason: string | null;
   conversation_snippets: ConversationSnippetOut[];
+  envelope_status: EnvelopeStatus;
+  envelope_degradation_reason: string | null;
 }
+
+export type EnvelopeStatus = "complete" | "partial" | "missing" | "malformed";
 
 export type AttachmentAnalysisStatus = "text_extracted" | "vision_analyzed" | "stored" | "unsupported";
 
@@ -162,6 +166,8 @@ export interface MessageOut {
   fallback_note: string | null;
   independence_nudge_reason: string | null;
   conversation_snippets: ConversationSnippetOut[];
+  envelope_status: EnvelopeStatus;
+  envelope_degradation_reason: string | null;
   created_at: string;
 }
 
@@ -341,13 +347,36 @@ export interface VisionAvailability {
   reason: string | null;
 }
 
+// Provider status labels — see backend/app/routers/features.py's
+// _provider_status_label(). "available"/"available_local" are the only two
+// go-ahead states; every other string is some flavor of "not right now."
+export type ProviderStatusLabel =
+  | "available"
+  | "available_local"
+  | "not_configured"
+  | "unavailable"
+  | "rate_limited"
+  | "quota_exceeded"
+  | "credit_exhausted"
+  | "billing_required"
+  | "cooldown_active"
+  | "daily_limit_reached";
+
+export interface ImageGenerationAvailability {
+  available: boolean;
+  active_provider: string | null;
+  reason: string | null;
+  providers: Record<string, string>;
+}
+
 export interface FeatureAvailability {
   chat: boolean;
   voice_input: boolean;
   file_upload: boolean;
   image_generation: boolean;
   vision: VisionAvailability;
-  providers: Record<string, "available" | "not_configured" | "unavailable">;
+  image_generation_detail: ImageGenerationAvailability;
+  providers: Record<string, ProviderStatusLabel>;
 }
 
 export const getFeatureAvailability = () => request<FeatureAvailability>("/api/features");
@@ -385,6 +414,8 @@ export interface StreamDoneEvent {
   fallback_note: string | null;
   independence_nudge_reason: string | null;
   conversation_snippets: ConversationSnippetOut[];
+  envelope_status: EnvelopeStatus;
+  envelope_degradation_reason: string | null;
 }
 
 export interface StreamCallbacks {
@@ -588,3 +619,80 @@ export const voteOnAmendment = (
 
 // ---- Models ----
 export const listModelProviders = () => request<ProviderStatus[]>("/api/models");
+
+// ---- Library ----
+export interface LibraryItemOut {
+  id: string;
+  title: string;
+  file_path: string;
+  file_type: string;
+  source: string;
+  conversation_id: string | null;
+  message_id: string | null;
+  tags: string[];
+  description: string | null;
+  metadata_json: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listLibraryItems = (q = "", fileType?: string) => {
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (fileType) params.set("file_type", fileType);
+  const qs = params.toString();
+  return request<LibraryItemOut[]>(`/api/library${qs ? `?${qs}` : ""}`);
+};
+
+export const deleteLibraryItem = (id: string) =>
+  request<{ deleted: boolean }>(`/api/library/${id}`, { method: "DELETE" });
+
+export const getLibraryItemDownloadUrl = (id: string) => `${BASE_URL}/api/library/${id}/download`;
+
+// ---- Schedule ----
+export type ScheduleItemStatus = "pending" | "completed" | "cancelled";
+
+export interface ScheduleItemOut {
+  id: string;
+  title: string;
+  description: string | null;
+  due_at: string | null;
+  recurrence_rule: string | null;
+  status: ScheduleItemStatus;
+  source_conversation_id: string | null;
+  reminder_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const createScheduleItem = (payload: {
+  title: string;
+  description?: string;
+  due_at?: string;
+  recurrence_rule?: string;
+}) =>
+  request<ScheduleItemOut>("/api/schedule", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+export const listScheduleItems = (status?: ScheduleItemStatus) =>
+  request<ScheduleItemOut[]>(`/api/schedule${status ? `?status=${status}` : ""}`);
+
+export const updateScheduleItem = (
+  id: string,
+  payload: Partial<{ title: string; description: string; due_at: string; recurrence_rule: string }>
+) =>
+  request<ScheduleItemOut>(`/api/schedule/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+
+export const completeScheduleItem = (id: string) =>
+  request<ScheduleItemOut>(`/api/schedule/${id}/complete`, { method: "POST" });
+
+export const cancelScheduleItem = (id: string) =>
+  request<ScheduleItemOut>(`/api/schedule/${id}/cancel`, { method: "POST" });
+
+export const deleteScheduleItem = (id: string) =>
+  request<{ deleted: boolean }>(`/api/schedule/${id}`, { method: "DELETE" });

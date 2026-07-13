@@ -21,14 +21,19 @@ pyflakes + pycodestyle's error subset (ruff's own defaults) plus import sorting 
 common bug patterns (`B`), and syntax modernization (`UP`). No docstring or
 type-annotation-coverage rules — those tend to produce hundreds of warnings on a
 codebase that wasn't written with them in mind, which isn't useful signal. As of
-2026-07-13 this surfaces ~20 findings, all cosmetic (import order, one Python
-3.11+ datetime alias) and all fixable with `--fix`.
+2026-07-13 this surfaces 17 findings, all cosmetic (2 import-order, 15 Python
+3.11+ `datetime.UTC` alias suggestions) and all fixable with `--fix`.
 
 **mypy** is configured gently (`ignore_missing_imports`, `check_untyped_defs = false` —
-see `[tool.mypy]` in `pyproject.toml`). It's genuinely useful here (only ~10 real, minor
-findings as of 2026-07-13 — mostly a plain `str` passed where a narrower Pydantic
-`Literal` type is expected) but is **not wired into CI or a required gate** — treat it as
-an optional second opinion, not a blocker.
+see `[tool.mypy]` in `pyproject.toml`). It's genuinely useful here (14 findings as of
+2026-07-13 — mostly a plain `str` passed where a narrower Pydantic `Literal` type is
+expected, plus a few `str | None` vs `str` narrowing gaps in provider classes where a
+separate `available()` call — not visible to mypy — already guarantees the value is set
+before `chat()` runs) but is **not wired into CI or a required gate** — treat it as an
+optional second opinion, not a blocker.
+
+**pytest**: 335 tests as of 2026-07-13, all passing, no real external API calls anywhere
+(every provider is a fake/mock — see `tests/fake_providers.py` and `tests/README.md`).
 
 ## Frontend (TypeScript)
 
@@ -43,7 +48,14 @@ npm run dev         # local dev server
 
 There's no ESLint configured yet — `tsc -b` (via `build` or `typecheck`) is the current
 quality gate on the frontend. Adding ESLint would be a reasonable future addition but
-isn't set up today; don't assume `npm run lint` exists.
+isn't set up today; don't assume `npm run lint` exists. There's also no `npm run test`
+(no Vitest/Jest configured) — frontend correctness is currently verified by the type
+checker plus manual/browser testing, not an automated test suite.
+
+`npm install` reports 8 known vulnerabilities in transitive dependencies (2 moderate, 6
+high) as of 2026-07-13 — pre-existing, not introduced by any recent work. Run `npm audit`
+for details before deciding whether `npm audit fix` is worth the risk of a breaking
+transitive version bump; it hasn't been applied here since it wasn't tested.
 
 ## Recommended pre-commit workflow
 

@@ -2,6 +2,40 @@
 
 Last check-in: 2026-07-13
 
+## New since 2026-07-13 — Full diagnosis + v1 safety hardening pass (Phases 0–15)
+
+See [PROJECT_HEALTH_REPORT.md](../PROJECT_HEALTH_REPORT.md) for the full breakdown —
+overall status 🟢 Green, 335 backend tests passing (75 new this pass), frontend build
+clean. Summary:
+
+- **Envelope integrity fields** (`envelope_status`, `envelope_degradation_reason`) now
+  persist through the whole chat pipeline (both endpoints, both DB and API), and a real
+  bug was fixed where `stream_chat()`'s default implementation fabricated a fake complete
+  envelope even when the model returned none.
+- **Cloud quota/credit/billing exhaustion now falls back to Ollama** with a specific,
+  required message, backed by real error classification (`provider_errors.py`) and a
+  persistent per-provider cooldown (`PROVIDER_COOLDOWN_MINUTES`) so an exhausted provider
+  isn't retried every turn.
+- **FREE_MODE** (Ollama → Gemini → Azure → Ollama, paid-only providers excluded from auto
+  unless explicitly pinned) and a new, safe-by-default **Azure OpenAI provider**
+  (disabled unless explicitly enabled+configured, never primary in FREE_MODE, optional
+  daily request cap) both shipped.
+- **Image generation provider architecture** (`image_router.py`): honest per-provider
+  status (Gemini is the only one that actually generates; Ollama/ComfyUI correctly
+  self-report as non-functional rather than failing silently), generated images now
+  register into the new Library.
+- **New: Library and Schedule** — new `LibraryItem`/`ScheduleItem` models + routers +
+  frontend pages, plus a redesigned ChatGPT-like sidebar (New chat / Chats / Search /
+  Library / Schedule / Atlas / Constitution / Amendments / Self-Improvement). Live-verified
+  in a real browser against real data, not just tested.
+- **Two real bugs found and fixed** during re-verification of already-built features:
+  `GET /api/schedule`'s default filter silently included completed/cancelled items; and
+  previous-conversation semantic search had no relevance threshold, so genuinely
+  unrelated queries could return a false match (see PROJECT_HEALTH_REPORT.md §5 for the
+  distance-calibration details).
+- Gap #2 below (non-streaming `MEMORY:` leak) — confirmed resolved via PR #2, merged
+  before this pass began.
+
 ## Snapshot (as of 2026-07-09, corrected after full review)
 
 This is further along than a first glance suggests — it's a working, previously-run app,
@@ -37,15 +71,11 @@ not just a scaffold.
 
 ## Gaps / next up (working priority order)
 1. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
-   (Partially underway — mobile hamburger drawer landed 2026-07-11 — but not complete.)
-2. `split_reasoning_and_answer()`'s final fallback (base.py) can still leak a malformed
-   trailing `MEMORY:` JSON block into the saved/displayed answer on the *non-streaming*
-   `/api/chat` and `/api/chat/send-with-files` paths — confirmed live 2026-07-13 with a
-   local Ollama model that answers directly, then bolts on a garbled envelope
-   afterward. Already fixed for the new streaming endpoint (`envelope_stream.py`'s
-   `EnvelopeStreamParser`). A background task fixing the non-streaming path
-   (task_d30e06e7) is running in a separate session as of 2026-07-13 — check its
-   result before starting related work on base.py.
+   (Partially underway — mobile hamburger drawer landed 2026-07-11, sidebar redesign +
+   new Search/Library/Schedule pages landed 2026-07-13 — but not complete.)
+2. See PROJECT_HEALTH_REPORT.md's "Next 5 zero-cost priorities" for the current top
+   picks (ComfyUI real generation, frontend test setup, Schedule background
+   notifications, real Groq/OpenRouter providers, `npm audit fix`).
 3. Self-improvement verification's `git status`/`git diff --stat` checks report
    "unavailable" inside the production Docker container — the image only ships `app/`
    (see `backend/Dockerfile`), not a `.git` directory, so there's genuinely nothing for
@@ -186,6 +216,9 @@ recall, chat UI overhaul — all tested, 255 backend tests passing, frontend bui
   containers healthy, nginx correctly proxies `/api` to the backend, confirmed a full
   chat round-trip through the containerized stack (including the host-run Ollama
   fallback via `host.docker.internal`).
+- The non-streaming `MEMORY:` JSON leak (former gap #2) — fixed via PR #2 in a separate
+  session, merged before the 2026-07-13 diagnosis pass began; re-verified as part of that
+  pass's envelope-integrity test suite.
 
 ## Blockers
 - (none recorded yet)

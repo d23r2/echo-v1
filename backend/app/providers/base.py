@@ -15,6 +15,20 @@ class ChatResult:
     text: str
     reasoning: str | None
     memory_json: str | None = None
+    # "complete" | "partial" | "missing" | "malformed" — see split_reasoning_and_answer()
+    # and app/envelope_stream.py for how this is computed. Never inferred beyond what
+    # the raw text actually contains; a "missing"/"malformed" result never has a
+    # fabricated `reasoning` value — it's always None in that case.
+    envelope_status: str = "missing"
+    envelope_degradation_reason: str | None = None
+
+    @property
+    def reasoning_available(self) -> bool:
+        return bool(self.reasoning)
+
+    @property
+    def memory_block_available(self) -> bool:
+        return self.memory_json is not None
 
 
 @dataclass
@@ -42,12 +56,22 @@ def split_reasoning_and_answer(raw: str) -> ChatResult:
     match = _FULL_ENVELOPE_RE.match(stripped)
     if match:
         reasoning, answer, memory = match.groups()
-        return ChatResult(text=answer.strip(), reasoning=reasoning.strip(), memory_json=memory.strip())
+        return ChatResult(
+            text=answer.strip(),
+            reasoning=reasoning.strip(),
+            memory_json=memory.strip(),
+            envelope_status="complete",
+        )
 
     match = _TRACE_RE.match(stripped)
     if match:
         reasoning, answer = match.groups()
-        return ChatResult(text=answer.strip(), reasoning=reasoning.strip())
+        return ChatResult(
+            text=answer.strip(),
+            reasoning=reasoning.strip(),
+            envelope_status="partial",
+            envelope_degradation_reason="Model provided REASONING and ANSWER but no MEMORY: block.",
+        )
 
     # Model answered directly with no REASONING:/ANSWER: prefix at all, but may still
     # have appended a MEMORY: block per its instructions (persona.py). Truncate at that
@@ -58,9 +82,22 @@ def split_reasoning_and_answer(raw: str) -> ChatResult:
             text=stripped[: marker.start()].strip(),
             reasoning=None,
             memory_json=stripped[marker.end() :].strip(),
+            envelope_status="malformed",
+            envelope_degradation_reason=(
+                "Model answered directly without a REASONING:/ANSWER: prefix, but attempted "
+                "a MEMORY: block afterward — reasoning is unavailable for this reply."
+            ),
         )
 
-    return ChatResult(text=stripped, reasoning=None)
+    return ChatResult(
+        text=stripped,
+        reasoning=None,
+        envelope_status="missing",
+        envelope_degradation_reason=(
+            "Model did not return the expected REASONING:/ANSWER:/MEMORY: envelope — "
+            "reasoning is unavailable for this reply."
+        ),
+    )
 
 
 class ModelProvider(ABC):
@@ -80,10 +117,24 @@ class ModelProvider(ABC):
         Default: no real token-level streaming — call the existing non-streaming
         chat() and re-emit its already-parsed result as one chunk, reconstructed
         into the same REASONING:/ANSWER:/MEMORY: shape so the caller's envelope
-        parser (app/envelope_stream.py) works identically for every provider.
-        Providers with a cheap native streaming transport override this for real
-        incremental delivery (currently just Ollama)."""
+        parser (app/envelope_stream.py) re-derives the same text/reasoning/memory
+        AND the same envelope_status — never inventing markers the model didn't
+        actually produce. Providers with a cheap native streaming transport
+        override this for real incremental delivery (currently just Ollama)."""
         result = self.chat(system_prompt, messages)
-        memory_part = result.memory_json if result.memory_json is not None else "NONE"
+        if result.envelope_status == "missing":
+            # No envelope at all originally — don't fabricate REASONING:/MEMORY:
+            # markers that were never in the model's output; yielding the raw
+            # answer text lets the receiving parser correctly re-derive "missing"
+            # too, instead of a fake "complete" classification.
+            yield result.text
+            return
         reasoning_part = result.reasoning if result.reasoning is not None else ""
-        yield f"REASONING: {reasoning_part}\nANSWER: {result.text}\nMEMORY: {memory_part}"
+        lines = [f"REASONING: {reasoning_part}", f"ANSWER: {result.text}"]
+        if result.memory_json is not None:
+            # Omitted (not "MEMORY: NONE") when the model never produced a MEMORY:
+            # block at all — collapsing that into "NONE" would make the receiving
+            # parser think the model explicitly said "nothing to remember", which
+            # is a different, meaningful diagnostic state (see memory_extraction.py).
+            lines.append(f"MEMORY: {result.memory_json}")
+        yield "\n".join(lines)

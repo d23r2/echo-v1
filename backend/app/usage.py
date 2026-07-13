@@ -5,13 +5,14 @@ vary and change over time. This only records what actually happened (a successfu
 call, or a real 429 response) and lets the caller react to that.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import ProviderUsageDaily
+from app.models import ProviderCooldown, ProviderUsageDaily
+from app.provider_errors import ErrorCategory
 
 # Gemini resets its free-tier quota at midnight Pacific. Anthropic/OpenAI/Grok don't
 # publish a fixed reset convention the same way, so midnight UTC is used as a
@@ -65,6 +66,15 @@ def record_429(db: Session, provider: str) -> None:
     db.commit()
 
 
+def get_daily_request_count(db: Session, provider: str) -> int:
+    """Read-only counterpart to _get_or_create_row — used by app/router.py to
+    enforce AZURE_DAILY_REQUEST_LIMIT without creating a spurious zero-count
+    row for a provider that hasn't been called yet today."""
+    date_key = _date_key(provider)
+    row = db.query(ProviderUsageDaily).filter_by(provider=provider, date_key=date_key).first()
+    return row.request_count if row else 0
+
+
 def is_rate_limit_error(exc: Exception) -> bool:
     """SDK-agnostic 429 check: anthropic/openai SDK errors expose `.status_code`
     directly, httpx.HTTPStatusError (used by the Gemini provider) exposes it via
@@ -74,6 +84,46 @@ def is_rate_limit_error(exc: Exception) -> bool:
         return True
     response = getattr(exc, "response", None)
     return response is not None and getattr(response, "status_code", None) == 429
+
+
+def set_cooldown(db: Session, provider: str, category: ErrorCategory) -> None:
+    """Best-effort — records a cooldown so the router skips this provider for a
+    while instead of re-trying a call it already knows will fail. A cooldown of
+    0 minutes (PROVIDER_COOLDOWN_MINUTES=0) disables this entirely. Only called
+    for categories in COOLDOWN_CATEGORIES; callers should check that first."""
+    settings = get_settings()
+    if settings.provider_cooldown_minutes <= 0:
+        return
+    now = datetime.now(timezone.utc)
+    row = db.query(ProviderCooldown).filter_by(provider=provider).first()
+    if row is None:
+        row = ProviderCooldown(provider=provider, category=category, started_at=now, cooldown_until=now)
+        db.add(row)
+    row.category = category
+    row.started_at = now
+    row.cooldown_until = now + timedelta(minutes=settings.provider_cooldown_minutes)
+    db.commit()
+
+
+def get_active_cooldown(db: Session, provider: str) -> ProviderCooldown | None:
+    """Returns the active cooldown row for `provider`, or None if it isn't
+    currently cooling down (never had one, or it already expired)."""
+    row = db.query(ProviderCooldown).filter_by(provider=provider).first()
+    if row is None:
+        return None
+    cooldown_until = row.cooldown_until
+    if cooldown_until.tzinfo is None:
+        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
+    if cooldown_until <= datetime.now(timezone.utc):
+        return None
+    return row
+
+
+def clear_cooldown(db: Session, provider: str) -> None:
+    """Manual-retry escape hatch — deletes any cooldown for `provider` so the
+    next turn tries it again immediately, regardless of how much time is left."""
+    db.query(ProviderCooldown).filter_by(provider=provider).delete()
+    db.commit()
 
 
 def get_usage_summary(db: Session) -> dict[str, dict]:

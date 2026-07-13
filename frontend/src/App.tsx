@@ -6,11 +6,16 @@ import AmendmentsView from "./components/amendments/AmendmentsView";
 import AtlasView from "./components/atlas/AtlasView";
 import ChatView from "./components/chat/ChatView";
 import ConstitutionView from "./components/constitution/ConstitutionView";
+import LibraryView from "./components/library/LibraryView";
+import ScheduleView from "./components/schedule/ScheduleView";
+import SearchView from "./components/search/SearchView";
 import SelfImprovementView from "./components/SelfImprovementView";
+import { useConversations } from "./state/conversationsContext";
 
 export default function App() {
   const [view, setView] = useState<View>("chat");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const { selectConversation } = useConversations();
 
   return (
     <div className="flex h-screen flex-col md:flex-row bg-zinc-950">
@@ -37,6 +42,16 @@ export default function App() {
 
         <main className="flex-1 overflow-y-auto">
           {view === "chat" && <ChatView />}
+          {view === "search" && (
+            <SearchView
+              onOpenConversation={(id) => {
+                selectConversation(id);
+                setView("chat");
+              }}
+            />
+          )}
+          {view === "library" && <LibraryView />}
+          {view === "schedule" && <ScheduleView />}
           {view === "atlas" && <AtlasView />}
           {view === "constitution" && <ConstitutionView />}
           {view === "amendments" && <AmendmentsView />}

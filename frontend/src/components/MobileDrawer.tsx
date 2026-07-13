@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import ConversationList from "./chat/ConversationList";
 import { NAV_ITEMS, View } from "./Sidebar";
+import { useConversations } from "../state/conversationsContext";
 
 export default function MobileDrawer({
   open,
@@ -13,6 +14,7 @@ export default function MobileDrawer({
   active: View;
   onChange: (view: View) => void;
 }) {
+  const { startNewConversation } = useConversations();
   useEffect(() => {
     if (!open) return;
     document.body.style.overflow = "hidden";
@@ -36,6 +38,20 @@ export default function MobileDrawer({
         <div className="px-4 pt-5 pb-3">
           <div className="text-sm font-semibold tracking-wide text-zinc-100">God Tear</div>
           <div className="text-xs text-zinc-500">AI Brain — Seed v1.0</div>
+        </div>
+
+        <div className="px-2">
+          <button
+            onClick={() => {
+              startNewConversation();
+              onChange("chat");
+              onClose();
+            }}
+            className="mb-2 flex min-h-[44px] w-full items-center gap-3 rounded-lg border border-zinc-700 px-3 text-sm text-zinc-200 hover:bg-zinc-900"
+          >
+            <span>➕</span>
+            <span>New chat</span>
+          </button>
         </div>
 
         <nav className="flex flex-col gap-1 px-2">

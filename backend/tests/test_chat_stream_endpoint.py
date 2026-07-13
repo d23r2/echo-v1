@@ -78,8 +78,7 @@ def test_stream_falls_back_to_next_provider_before_first_chunk(monkeypatch):
     done = next(d for e, d in events if e == "done")
 
     assert done["provider_used"] == "ollama"
-    assert done["fallback_note"] is not None
-    assert "gemini" in done["fallback_note"]
+    assert done["fallback_note"] == "Cloud providers were unavailable or quota-limited, so Echo replied using Ollama."
 
 
 def test_stream_emits_error_event_when_no_provider_available(monkeypatch):

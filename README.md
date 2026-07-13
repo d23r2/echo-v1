@@ -26,9 +26,41 @@ backend/   FastAPI + SQLAlchemy (SQLite) + ChromaDB (local embeddings)
 frontend/  React + TypeScript + Tailwind (Vite)
 ```
 
-Model routing supports Anthropic (Claude), OpenAI, Gemini (Google), xAI (Grok), and a
-local Ollama fallback. "auto" mode tries them in that order and uses the first available
-one; you can also pin a specific provider from the model picker.
+Model routing supports Anthropic (Claude), OpenAI, Gemini (Google), xAI (Grok), Azure
+OpenAI (disabled by default), and a local Ollama fallback. "auto" mode tries them in that
+order and uses the first available one; you can also pin a specific provider from the
+model picker.
+
+## Provider fallback and quota/credit safety
+
+"auto" mode doesn't just try providers in order once — it classifies *why* a provider
+failed (rate limit, quota exceeded, credit exhausted, billing required, auth failed,
+network error, etc. — see `backend/app/provider_errors.py`) and, for the quota/credit/
+billing/rate-limit categories, puts that provider on a cooldown (`PROVIDER_COOLDOWN_MINUTES`,
+default 30) so it isn't retried on every single turn while it's known to be exhausted.
+If every cloud provider fails or is cooling down, Echo falls back to local Ollama
+(`OLLAMA_ALWAYS_AVAILABLE_FALLBACK=true` by default) and tells you it did so. If Ollama
+isn't running either, you get a clear message saying so — never a raw provider exception.
+
+Every reply also carries an honest `envelope_status` (`complete` / `partial` / `missing` /
+`malformed`) reflecting whether the model actually returned its REASONING:/ANSWER:/MEMORY:
+structure — Echo never fabricates a reasoning trace it didn't get.
+
+### Running at (near-)zero cost: FREE_MODE
+
+Set `FREE_MODE=true` to make "auto" mode prefer Ollama first, then Gemini's free tier,
+then Azure (only if you've explicitly enabled and configured it — see below), then
+Ollama again as a last resort — skipping Anthropic/OpenAI/Grok entirely even if you have
+keys configured for them. You can still reach a paid provider by pinning to it by name
+in the model picker; FREE_MODE only changes what "auto" reaches for.
+
+### Azure OpenAI (opt-in, safe by default)
+
+Azure is disabled unless you set `AZURE_OPENAI_ENABLED=true` and fill in
+`AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT`. It's never
+used as FREE_MODE's primary choice. You can also cap it with `AZURE_DAILY_REQUEST_LIMIT` —
+once reached, Azure is skipped for the rest of that day (separate from whatever limits
+Azure's own billing enforces).
 
 ## Running locally (no Docker)
 
@@ -83,6 +115,46 @@ Desktop for Windows/Mac). This only matters for Docker — running the backend d
 | `CORS_ORIGINS` | Comma-separated origins allowed to call the API |
 | `INDEPENDENCE_NUDGE_EVERY_N_TURNS` | How often Echo is reminded to nudge toward user independence |
 | `ATLAS_TOP_K` | How many Atlas memories are injected into context per chat turn |
+| `OLLAMA_ALWAYS_AVAILABLE_FALLBACK` | Whether "auto" mode falls back to Ollama when cloud providers fail (default `true`) |
+| `PROVIDER_COOLDOWN_MINUTES` | Minutes a provider is skipped after a quota/credit/billing/rate-limit error (default `30`, `0` disables) |
+| `FREE_MODE` | Prefer Ollama/free-tier providers; never reach paid-only providers via "auto" (default `false`) |
+| `AZURE_OPENAI_ENABLED` / `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_API_KEY` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` | Azure OpenAI, disabled unless explicitly enabled + fully configured |
+| `AZURE_DAILY_REQUEST_LIMIT` / `AZURE_DAILY_TOKEN_LIMIT` | Optional self-imposed daily caps for Azure (blank = no cap) |
+| `IMAGE_PROVIDER` | `auto` / `gemini` / `ollama` / `comfyui` / `disabled` — see Image generation below |
+| `COMFYUI_BASE_URL` | Local ComfyUI server URL — reachability-check only in this build, see below |
+| `OPENROUTER_API_KEY` / `GROQ_API_KEY` | Reserved for a future free-tier provider integration — not yet wired to anything |
+
+## Image generation
+
+Image generation is a separate, explicit action (the "+" menu in chat) — it's never
+triggered automatically by a normal chat turn, and it calls a paid model, so it's kept
+deliberately separate from regular text chat. `IMAGE_PROVIDER` controls which backend is
+used:
+
+- **Gemini/Imagen** — the only provider that actually generates images in this build.
+  Works whenever `GEMINI_API_KEY` is set.
+- **Ollama** — **cannot generate images in this build.** Ollama's chat models are
+  text-only; there's no image-capable model wired up, so this always reports itself as
+  unavailable rather than silently failing or faking a result.
+- **ComfyUI** (`COMFYUI_BASE_URL`) — currently a reachability check only
+  (`backend/app/image_router.py`). A configured, reachable ComfyUI server is reported as
+  such, but this build doesn't yet submit an actual generation job to it — real workflow
+  submission is real, untested-in-CI work left for later rather than shipped half-built.
+
+When nothing can generate an image, the UI shows a clean "unavailable" state with the
+actual reason (not configured, not implemented yet, etc.) — never a raw provider error.
+Generated images are saved to disk and automatically registered in the Library.
+
+## Library and Schedule
+
+- **Library** (sidebar) lists everything Echo has produced or you've uploaded — generated
+  images, self-improvement/health reports, conversation exports, and so on — with
+  search, a type filter, and download/delete per item.
+- **Schedule** (sidebar) is a simple in-app reminder/to-do list: create, complete, cancel,
+  delete. **Reminders only surface while Echo is open in your browser/app — there is no
+  background OS notification delivery in this build**, so don't rely on it to interrupt
+  you away from the app; that's a reasonable future addition, not something implemented
+  today.
 
 ## Multi-device
 

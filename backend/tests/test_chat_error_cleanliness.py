@@ -27,7 +27,10 @@ def test_no_providers_available_hides_raw_exception_text(monkeypatch):
     assert resp.status_code == 503
     detail = resp.json()["detail"]
     assert _RAW_TECHNICAL_STRING not in detail
-    assert detail == "No AI provider is currently available. Check API keys or local Ollama."
+    assert detail == (
+        "No AI provider is currently available. Cloud providers are unavailable/quota-limited "
+        "and Ollama is not running."
+    )
 
 
 def test_pinned_provider_failure_hides_raw_exception_text(monkeypatch):

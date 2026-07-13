@@ -122,10 +122,25 @@ class EnvelopeStreamParser:
             # there. Never fall back to the *entire* raw text once a memory
             # marker has been found — that would leak its JSON into the saved,
             # user-visible answer.
+            if memory_json is not None:
+                envelope_status = "malformed"
+                reason = (
+                    "Model answered directly without a REASONING:/ANSWER: prefix, but "
+                    "attempted a MEMORY: block afterward — reasoning is unavailable for "
+                    "this reply."
+                )
+            else:
+                envelope_status = "missing"
+                reason = (
+                    "Model did not return the expected REASONING:/ANSWER:/MEMORY: "
+                    "envelope — reasoning is unavailable for this reply."
+                )
             return ChatResult(
                 text=self.raw[self._answer_start : answer_end].strip(),
                 reasoning=None,
                 memory_json=memory_json,
+                envelope_status=envelope_status,
+                envelope_degradation_reason=reason,
             )
 
         if self._answer_marker_start is None:
@@ -142,4 +157,23 @@ class EnvelopeStreamParser:
 
         answer_text = self.raw[self._answer_start : answer_end].strip()
 
-        return ChatResult(text=answer_text, reasoning=reasoning, memory_json=memory_json)
+        if reasoning is not None and memory_json is not None:
+            envelope_status = "complete"
+            reason = None
+        elif reasoning is not None:
+            envelope_status = "partial"
+            reason = "Model provided REASONING and ANSWER but no MEMORY: block."
+        else:
+            envelope_status = "partial"
+            reason = (
+                "ANSWER: was found but no REASONING: prefix preceded it — reasoning is "
+                "unavailable for this reply."
+            )
+
+        return ChatResult(
+            text=answer_text,
+            reasoning=reasoning,
+            memory_json=memory_json,
+            envelope_status=envelope_status,
+            envelope_degradation_reason=reason,
+        )

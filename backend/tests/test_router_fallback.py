@@ -44,8 +44,7 @@ def test_falls_back_to_next_provider_on_429():
     assert result.text == "from ollama"
     assert first.chat_call_count == 1
     assert second.chat_call_count == 1
-    assert fallback_note is not None
-    assert "gemini" in fallback_note
+    assert fallback_note == "Cloud providers were unavailable or quota-limited, so Echo replied using Ollama."
 
 
 # 3. Two providers fail (one 429, one a generic error) -> router continues until one works.

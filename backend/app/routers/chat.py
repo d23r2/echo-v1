@@ -11,6 +11,7 @@ from app import (
     atlas,
     attachments as attachments_lib,
     conversation_search,
+    library,
     memory_conflicts,
     memory_extraction,
     persona,
@@ -20,6 +21,7 @@ from app import (
 from app.config import get_settings
 from app.db import get_db
 from app.envelope_stream import EnvelopeStreamParser
+from app.image_router import image_router
 from app.models import Attachment, Conversation, MemoryCandidate, MemoryExtractionLog, Message
 from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
@@ -329,6 +331,8 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         fallback_note=fallback_note,
         independence_nudge_reason=nudge_reason,
         conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
+        envelope_status=result.envelope_status,
+        envelope_degradation_reason=result.envelope_degradation_reason,
     )
     db.add(user_msg)
     db.add(echo_msg)
@@ -348,6 +352,8 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         fallback_note=fallback_note,
         independence_nudge_reason=nudge_reason,
         conversation_snippets=snippets_out,
+        envelope_status=result.envelope_status,
+        envelope_degradation_reason=result.envelope_degradation_reason,
     )
 
 
@@ -431,6 +437,8 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
                 fallback_note=fallback_note,
                 independence_nudge_reason=nudge_reason,
                 conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
+                envelope_status=result.envelope_status,
+                envelope_degradation_reason=result.envelope_degradation_reason,
             )
             db.add(user_msg)
             db.add(echo_msg)
@@ -457,6 +465,8 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
                 "conversation_snippets": [s.model_dump(mode="json") for s in snippets_out],
                 "fallback_note": fallback_note,
                 "independence_nudge_reason": nudge_reason,
+                "envelope_status": result.envelope_status,
+                "envelope_degradation_reason": result.envelope_degradation_reason,
             },
         )
 
@@ -635,6 +645,8 @@ async def send_chat_message_with_files(
         fallback_note=fallback_note,
         independence_nudge_reason=nudge_reason,
         conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
+        envelope_status=result.envelope_status,
+        envelope_degradation_reason=result.envelope_degradation_reason,
     )
     db.add(user_msg)
     db.add(echo_msg)
@@ -669,6 +681,21 @@ async def generate_image(
     ever run from an explicit user action, never as a side effect of normal chat."""
     if not prompt.strip():
         raise HTTPException(status_code=400, detail="Prompt is required")
+
+    active_provider, unavailable_reason = image_router.select_provider()
+    if active_provider is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image generation is unavailable — {unavailable_reason}",
+        )
+    if active_provider != "gemini":
+        # Only Gemini has a real generate() implementation wired up in this
+        # build — see app/image_router.py's module docstring for why
+        # comfyui/ollama never reach this branch.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image generation via {active_provider} isn't implemented in this build yet.",
+        )
 
     if conversation_id:
         conversation = db.get(Conversation, conversation_id)
@@ -721,6 +748,18 @@ async def generate_image(
     db.add(echo_msg)
     db.commit()
     db.refresh(echo_msg)
+
+    library.register_item(
+        db,
+        title=f"Generated image: {prompt.strip()[:60]}",
+        file_path=storage_path,
+        file_type="image",
+        source="image_generation",
+        conversation_id=conversation.id,
+        message_id=echo_msg.id,
+        tags=["generated", "gemini"],
+        description=prompt.strip(),
+    )
 
     return schemas.SendWithFilesResponse(
         conversation_id=conversation.id,

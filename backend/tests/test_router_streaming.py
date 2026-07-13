@@ -37,8 +37,7 @@ def test_falls_back_to_next_provider_when_first_fails_before_any_chunk():
 
     assert [c[0] for c in chunks] == ["from ollama"]
     assert chunks[0][1].name == "ollama"
-    assert chunks[0][2] is not None  # fallback_note
-    assert "gemini" in chunks[0][2]
+    assert chunks[0][2] == "Cloud providers were unavailable or quota-limited, so Echo replied using Ollama."
 
 
 def test_does_not_switch_providers_after_first_chunk_already_yielded():
@@ -94,16 +93,50 @@ def test_no_providers_available_raises():
         list(router.stream_chat("auto", "sys", _MSG))
 
 
-def test_default_stream_chat_falls_back_to_single_reconstructed_chunk():
+def test_default_stream_chat_with_no_envelope_yields_raw_text_unmodified():
     # No stream_chunks configured — exercises ModelProvider.stream_chat()'s base
-    # default, which every non-Ollama provider still uses today.
+    # default, which every non-Ollama provider still uses today. The provider's
+    # chat() returned a plain, no-envelope ChatResult (envelope_status defaults
+    # to "missing") — the default streaming path must NOT fabricate REASONING:/
+    # ANSWER: markers that were never actually in the model's output.
     provider = FakeProvider("anthropic", response_text="whole reply at once")
     router = ModelRouter(providers=[provider])
 
     chunks = list(router.stream_chat("auto", "sys", _MSG))
 
     assert len(chunks) == 1
-    assert "ANSWER: whole reply at once" in chunks[0][0]
+    assert chunks[0][0] == "whole reply at once"
+    assert "ANSWER:" not in chunks[0][0]
+    assert "REASONING:" not in chunks[0][0]
+
+
+def test_default_stream_chat_with_full_envelope_round_trips_faithfully():
+    from app.providers.base import ChatResult
+
+    provider = FakeProvider(
+        "anthropic",
+        chat_result=ChatResult(
+            text="the answer",
+            reasoning="the reasoning",
+            memory_json="NONE",
+            envelope_status="complete",
+        ),
+    )
+    router = ModelRouter(providers=[provider])
+
+    chunks = list(router.stream_chat("auto", "sys", _MSG))
+    assert len(chunks) == 1
+
+    from app.envelope_stream import EnvelopeStreamParser
+
+    parser = EnvelopeStreamParser()
+    parser.feed(chunks[0][0])
+    result = parser.result()
+
+    assert result.text == "the answer"
+    assert result.reasoning == "the reasoning"
+    assert result.memory_json == "NONE"
+    assert result.envelope_status == "complete"
 
 
 def test_usage_tracks_successful_stream(db_session):

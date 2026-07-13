@@ -33,6 +33,16 @@ from app.config import get_settings
 
 _COLLECTION_NAME = "conversation_messages"
 _SNIPPET_MAX_CHARS = 220
+# Chroma's default index (squared L2 over all-MiniLM-L6-v2 embeddings) always
+# returns the k nearest neighbors, even when none of them are actually
+# related to the query — with a small/sparse collection especially, "nearest"
+# can still be a completely unrelated message. Empirically, genuine matches
+# (including paraphrases with no shared vocabulary, e.g. "my learning style"
+# matching "lead with a concrete example first") scored ~0.13-0.75, while
+# unrelated pairs scored ~0.84-1.05 against the same collection — 0.8 sits in
+# the gap between the two, so only results past it are dropped rather than
+# surfaced as a false "this relates to what you said before."
+_MAX_SEMANTIC_DISTANCE = 0.8
 
 
 @lru_cache
@@ -162,6 +172,8 @@ def semantic_search(
 
     snippets: list[MessageSnippet] = []
     for message_id, distance, meta in zip(ids, distances, metadatas, strict=True):
+        if distance > _MAX_SEMANTIC_DISTANCE:
+            continue
         if exclude_conversation_id and meta.get("conversation_id") == exclude_conversation_id:
             continue
         message = db.get(models.Message, message_id)
