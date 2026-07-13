@@ -192,8 +192,14 @@ export default function ChatView() {
         : null;
 
   const canGenerateImage = features?.image_generation ?? true; // default permissive until the fetch resolves
+  // image_generation_detail.reason is the image-generation-specific reason
+  // (e.g. "COMFYUI_BASE_URL not set", "Ollama does not support image
+  // generation in this build") — vision.reason is a different concern
+  // (image *understanding*, used above for visionWarning) and would show a
+  // misleading reason here (e.g. blaming Gemini vision config for an
+  // unrelated image-gen provider being unavailable).
   const imageGenerationUnavailableReason = features && !features.image_generation
-    ? features.vision.reason || "not configured"
+    ? features.image_generation_detail.reason || "not configured"
     : null;
 
   // Stop any in-flight speech when navigating away from Chat entirely.

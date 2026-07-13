@@ -19,8 +19,7 @@ export default function ConversationList({
   /** Desktop aside uses the original (smaller) row sizing; the mobile drawer needs ~44px tap targets. */
   compact?: boolean;
 }) {
-  const { conversations, conversationId, selectConversation, startNewConversation, removeConversation } =
-    useConversations();
+  const { conversations, conversationId, selectConversation, removeConversation } = useConversations();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
   const [query, setQuery] = useState("");
@@ -83,17 +82,9 @@ export default function ConversationList({
 
   return (
     <>
-      <button
-        onClick={() => {
-          startNewConversation();
-          onSelect?.();
-        }}
-        className={`mb-3 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-900 ${
-          compact ? "" : "min-h-[44px] flex items-center"
-        }`}
-      >
-        + New conversation
-      </button>
+      {/* No "New conversation" button here — the top-level "+ New chat" button
+          in Sidebar.tsx/MobileDrawer.tsx already covers this, and having both
+          was a confusing duplicate control. */}
       <div className="relative mb-3">
         <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500">
           🔎

@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 EpistemicStatus = Literal["Verified", "Inferred", "Hypothesis", "Narrative"]
 MemoryType = Literal[
@@ -382,9 +382,15 @@ class FeatureAvailability(BaseModel):
 
 
 class LibraryItemOut(BaseModel):
+    # Deliberately no file_path here — that's a server-absolute filesystem
+    # path with no meaning to a frontend consumer, and no reason to expose it
+    # over the API. Downloading/opening an item goes through
+    # GET /api/library/{id}/download (see routers/library.py), keyed by id,
+    # never by path. The ORM row still has file_path internally — the route
+    # handlers that need it (download/delete) read it straight off that row,
+    # not through this schema.
     id: str
     title: str
-    file_path: str
     file_type: str
     source: str
     conversation_id: str | None
@@ -426,3 +432,20 @@ class ScheduleItemOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("due_at", "created_at", "updated_at", mode="before")
+    @classmethod
+    def _assume_utc_if_naive(cls, value: datetime | None) -> datetime | None:
+        # SQLite drops tzinfo on read-back even for a DateTime(timezone=True)
+        # column (same gotcha already documented in app/usage.py's
+        # _as_utc_isoformat) — every datetime this app writes to these
+        # columns is UTC, so a naive value read back from the DB is UTC that
+        # lost its label, not a genuinely tz-naive value. Without this, the
+        # API would serialize an offset-less ISO string, and the frontend's
+        # `new Date(...)` would parse it as local time instead of UTC —
+        # silently shifting a reminder's displayed time by however many
+        # hours off UTC the browser is. A reminder created for local 9:00 AM
+        # must still say 9:00 AM after a reload.
+        if isinstance(value, datetime) and value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value

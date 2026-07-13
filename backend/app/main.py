@@ -19,7 +19,7 @@ from app.routers import (
 
 settings = get_settings()
 
-app = FastAPI(title="God Tear AI Brain — Echo", version="1.0.0")
+app = FastAPI(title="ECHO — Adaptive Personal AI", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,

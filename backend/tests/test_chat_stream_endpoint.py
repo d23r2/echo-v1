@@ -125,6 +125,10 @@ def test_stream_mid_stream_failure_emits_error_without_saving(monkeypatch):
 
     assert events[-1][0] == "error"
     assert not any(e == "done" for e, _ in events)
+    # Clean, generic message — never the raw exception text (e.g. "connection
+    # dropped") from whatever actually failed underneath.
+    assert events[-1][1]["detail"] == "Streaming failed. Please try again."
+    assert "connection dropped" not in events[-1][1]["detail"]
 
     # The partial answer text ("partial reply") must never have been persisted —
     # only the conversation itself gets created up front (before streaming
@@ -133,3 +137,25 @@ def test_stream_mid_stream_failure_emits_error_without_saving(monkeypatch):
     # echo message was saved.
     search = client.get("/api/chat/search", params={"q": "partial reply"})
     assert search.json() == []
+
+
+def test_stream_save_failure_after_full_reply_emits_clean_error(monkeypatch):
+    """Regression test: the completed-reply-failed-to-save branch (distinct
+    from the mid-stream provider failure above — this fires *after* a full
+    reply was received, while persisting it) used to interpolate the raw
+    exception directly into the SSE error event. It must not leak that text,
+    even though the underlying failure (forced here via a monkeypatched
+    conversation_search.index_message) can be arbitrary internal detail."""
+    provider = FakeProvider("gemini", stream_chunks=["ANSWER: a full reply\nMEMORY: NONE"])
+    monkeypatch.setattr("app.routers.chat.model_router", ModelRouter(providers=[provider]))
+    monkeypatch.setattr(
+        "app.routers.chat.conversation_search.index_message",
+        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("raw-secret-looking-db-detail-xyz")),
+    )
+
+    resp = client.post("/api/chat/stream", json={"message": "trigger a save failure", "provider": "auto"})
+    events = _parse_sse(resp.text)
+
+    assert events[-1][0] == "error"
+    assert events[-1][1]["detail"] == "The completed reply could not be saved. Please try again."
+    assert "raw-secret-looking-db-detail-xyz" not in events[-1][1]["detail"]

@@ -621,10 +621,11 @@ export const voteOnAmendment = (
 export const listModelProviders = () => request<ProviderStatus[]>("/api/models");
 
 // ---- Library ----
+// No file_path — that's a server-absolute filesystem path with no meaning
+// here; download/open goes through getLibraryItemDownloadUrl(id) below.
 export interface LibraryItemOut {
   id: string;
   title: string;
-  file_path: string;
   file_type: string;
   source: string;
   conversation_id: string | null;

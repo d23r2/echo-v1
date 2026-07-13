@@ -36,8 +36,8 @@ export default function MobileDrawer({
 
       <div className="relative flex h-full w-[82%] max-w-sm flex-col overflow-hidden border-r border-zinc-800 bg-zinc-950 shadow-xl">
         <div className="px-4 pt-5 pb-3">
-          <div className="text-sm font-semibold tracking-wide text-zinc-100">God Tear</div>
-          <div className="text-xs text-zinc-500">AI Brain — Seed v1.0</div>
+          <div className="text-sm font-semibold tracking-wide text-zinc-100">ECHO</div>
+          <div className="text-xs text-zinc-500">Adaptive Personal AI</div>
         </div>
 
         <div className="px-2">

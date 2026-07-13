@@ -1,4 +1,7 @@
-# God Tear AI Brain — Echo (Seed v1.0)
+# ECHO — Adaptive Personal AI
+
+*(formerly God Tear AI Brain — internal architecture concepts like Atlas and the
+Constitution keep their names; "ECHO" is the app/assistant's user-facing name.)*
 
 A symbiotic, truth-seeking AI partner governed by a versioned constitution with ranked
 core values, immutable Value Invariants, and a simulated Guardian Council amendment process.
@@ -7,12 +10,15 @@ core values, immutable Value Invariants, and a simulated Guardian Council amendm
   and jailbreaks, actively discourages dependency.
 - **Atlas** — persistent memory with epistemic status (Verified / Inferred / Hypothesis /
   Narrative), tags, confidence, and semantic search (ChromaDB + local embeddings). Any
-  Atlas entry is retrievable in any future conversation, regardless of which one it was
-  created in. Writes happen two ways: explicitly ("remember that I prefer tea" is
-  detected and saved directly from your own words, no model judgment involved), or
+  non-outdated Atlas entry is retrievable in any future conversation, regardless of which
+  one it was created in. Writes happen two ways: explicitly ("remember that I prefer tea"
+  is detected and saved directly from your own words, no model judgment involved), or
   opportunistically (Echo's single chat-completion call also emits a `MEMORY:` section
   alongside its reasoning/answer — no second model call, so it can't double your rate
-  limit — which gets parsed and saved when it decides something's worth keeping).
+  limit — which gets parsed and saved when it decides something's worth keeping). Marking
+  an entry **outdated** keeps it visible in the Atlas list/history but excludes it from
+  semantic search, prompt injection, and normal conflict detection — it's no longer
+  treated as current.
 - **Constitution** — ranked values, immutable invariants, edge-case protocols, amendment log.
 - **Guardian Council** — Founder proposes an amendment; it must clear an automatic
   Value-Invariant guard, then be approved by 2-of-3 Guardians *and* the Verifier to be

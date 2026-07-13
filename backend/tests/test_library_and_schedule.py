@@ -65,6 +65,31 @@ def test_list_library_items_filters_by_query():
     assert results[0]["title"] == title
 
 
+def test_library_list_and_get_do_not_expose_absolute_file_path():
+    """Regression test: file_path is a server-absolute filesystem path with
+    no meaning to the frontend — it must never appear in the API response,
+    on either the list or single-item endpoint. Download/open/delete all go
+    through the item's id (see the download/delete tests below), never the
+    path itself."""
+    title = _unique("no-path-leak")
+    session = SessionLocal()
+    try:
+        item = library.register_item(
+            session, title=title, file_path="/tmp/should-not-leak.png", file_type="image", source="image_generation"
+        )
+        item_id = item.id
+    finally:
+        session.close()
+
+    listing = client.get("/api/library", params={"q": title})
+    assert listing.status_code == 200
+    assert "file_path" not in listing.json()[0]
+
+    detail = client.get(f"/api/library/{item_id}")
+    assert detail.status_code == 200
+    assert "file_path" not in detail.json()
+
+
 def test_list_library_items_filters_by_file_type():
     title = _unique("code-file")
     session = SessionLocal()
@@ -245,6 +270,41 @@ def test_update_schedule_item_title_and_due_date():
     body = resp.json()
     assert body["title"] == new_title
     assert body["due_at"] is not None
+
+
+def test_due_at_round_trip_preserves_the_exact_utc_instant():
+    """Regression test: SQLite drops tzinfo on DateTime(timezone=True) columns
+    on read-back (see app/usage.py's _as_utc_isoformat for the same gotcha
+    elsewhere), so without ScheduleItemOut's _assume_utc_if_naive validator,
+    a reminder created for a specific UTC instant would come back as a
+    naive/offset-less ISO string — which a browser's `new Date(...)` parses
+    as local time instead of UTC, silently shifting the displayed time.
+
+    A reminder created for local 9:00 AM (here: 2026-08-01T09:00:00+05:30,
+    equivalent to 03:30 UTC) must still resolve to that same real instant
+    after a reload — not shifted by the server's local timezone."""
+    title = _unique("timezone-check")
+    create = client.post(
+        "/api/schedule", json={"title": title, "due_at": "2026-08-01T09:00:00+05:30"}
+    )
+    assert create.status_code == 200
+    item_id = create.json()["id"]
+
+    # Immediately-returned value from POST.
+    from datetime import datetime
+
+    created_due_at = datetime.fromisoformat(create.json()["due_at"])
+    assert created_due_at.utcoffset() is not None  # must carry an explicit offset
+
+    # Re-fetch via GET (separate request/response cycle, exercising the same
+    # SQLite read-back path a page reload would).
+    listing = client.get("/api/schedule")
+    row = next(r for r in listing.json() if r["id"] == item_id)
+    reloaded_due_at = datetime.fromisoformat(row["due_at"])
+
+    assert reloaded_due_at.utcoffset() is not None  # still carries an explicit offset
+    # Same real instant in time, regardless of which offset it's expressed in.
+    assert reloaded_due_at.astimezone(created_due_at.tzinfo) == created_due_at
 
 
 def test_delete_schedule_item():

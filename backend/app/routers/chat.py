@@ -417,9 +417,12 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
         except (NoProviderAvailableError, ProviderUnavailableError, ValueError) as exc:
             yield _sse("error", {"detail": str(exc)})
             return
-        except Exception as exc:
+        except Exception:
+            # Full technical detail stays server-side only — see this module's
+            # other error branches (e.g. the non-streaming /api/chat's
+            # NoProviderAvailableError handling) for the same policy.
             logger.exception("Streaming chat turn failed mid-stream")
-            yield _sse("error", {"detail": f"Streaming failed: {exc}"})
+            yield _sse("error", {"detail": "Streaming failed. Please try again."})
             return
 
         try:
@@ -446,10 +449,10 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
             db.refresh(echo_msg)
             conversation_search.index_message(user_msg)
             conversation_search.index_message(echo_msg)
-        except Exception as exc:
+        except Exception:
             logger.exception("Failed to save streamed chat turn")
             db.rollback()
-            yield _sse("error", {"detail": f"Failed to save the completed reply: {exc}"})
+            yield _sse("error", {"detail": "The completed reply could not be saved. Please try again."})
             return
 
         yield _sse(

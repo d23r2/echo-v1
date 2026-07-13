@@ -1,4 +1,69 @@
-# Echo — Project Health Report
+# ECHO — Project Health Report
+
+## 2026-07-14 — Post-diagnosis cleanup pass
+
+**Overall health: 🟢 Green** — targeted cleanup on top of the 2026-07-13 Green baseline
+below, not a re-diagnosis. **349 backend tests passing (14 new this pass)**, frontend
+build/typecheck clean. Every item verified either by a passing test or a specific
+browser-verified interaction against a real (non-mocked) backend.
+
+**What changed:**
+
+1. **Branding**: "God Tear" / "AI Brain — Seed v1.0" → **ECHO** / **Adaptive Personal AI**
+   across the sidebar, mobile drawer, browser title, PWA manifest, FastAPI title, and the
+   Constitution's own opening `PHILOSOPHY` line (genuinely user-facing — shown in the
+   Constitution tab and injected into every system prompt). `VALUE_INVARIANTS` and
+   internal architecture names (Atlas, Constitution, Guardian Council) untouched.
+2. **Sidebar cleanup**: removed the duplicate "+ New conversation" button (the top-level
+   "+ New chat" already covered it) and the duplicate "Search" nav item (it called the
+   exact same `searchConversations()` as the inline search already sitting above
+   conversation history) — deleted the now-fully-redundant `SearchView.tsx`.
+3. **Real bug fixed — outdated Atlas memories were still being retrieved.**
+   `atlas.search()`, `persona.build_system_prompt()`'s prompt injection, and
+   `memory_conflicts.find_conflicts()`/`find_all_conflicts()` now all exclude
+   `outdated=True` entries by default (an explicit `include_outdated=True` escape hatch
+   exists for the rare case that wants them back). They remain fully visible in the Atlas
+   list/history UI — only *retrieval as current/relevant* changed. 11 new tests.
+4. **Real bug fixed — Schedule due_at could display shifted after reload.** SQLite drops
+   tzinfo from `DateTime(timezone=True)` columns on read-back (same class of gotcha
+   already documented in `usage.py`'s `_as_utc_isoformat`) — a reminder stored as a UTC
+   instant came back naive, and the frontend's `new Date(...)` then misparsed the
+   offset-less string as local time. Fixed with a Pydantic validator on `ScheduleItemOut`
+   that reattaches UTC to any naive datetime read from the DB (Option A: store UTC,
+   always serialize with an explicit offset). Verified the fix is real by reverting it and
+   confirming the new regression test fails without it, then re-verified live in-browser:
+   a reminder created for 9:00 AM still reads 9:00 AM after a full page reload.
+5. **nginx.conf / Docker**: re-checked, already correct (exists, proxies `/api/` to
+   `backend:8000`, SPA fallback in place) — no change needed.
+6. **Streaming errors sanitized.** `POST /api/chat/stream`'s two generic-exception
+   branches were interpolating the raw exception directly into the SSE `error` event
+   (`f"Streaming failed: {exc}"`, `f"Failed to save the completed reply: {exc}"`) — fixed
+   to clean, generic text; full detail still goes to `logger.exception()` server-side. The
+   `(NoProviderAvailableError, ProviderUnavailableError, ValueError)` branch was already
+   safe (those exceptions already carry only clean, curated text) and was left alone.
+7. **Real bug fixed — image-generation unavailable reason used the wrong field.**
+   `ChatView.tsx` read `features.vision.reason` (image-*understanding* status) instead of
+   `features.image_generation_detail.reason` (image-*generation* status) — two genuinely
+   different fields, confirmed live (Gemini was mid-quota-cooldown for chat/vision during
+   verification, giving each field a different real value). Fixed to read the correct one;
+   `vision.reason` stays where it belongs (the attached-image vision warning).
+8. **Library no longer exposes absolute server file paths.** `LibraryItemOut` dropped
+   `file_path` from the API response entirely — download/delete already went through the
+   item's `id` (`GET /api/library/{id}/download`), never the raw path, so this was a pure
+   information-exposure trim with no functional change. New test confirms the field is
+   absent from both the list and single-item response.
+
+**Known, pre-existing (not introduced by this pass):** the full backend suite
+intermittently shows a burst of unrelated failures (persona/router tests) on a full run
+that always pass again on immediate retry and always pass in isolation — consistent with
+the already-documented shared/never-reset Chroma collection across the test session
+growing large enough to occasionally introduce timing sensitivity. Not chased down this
+pass (matches "fix only what's needed"); worth a real fix if it starts happening more
+than rarely.
+
+---
+
+# Echo — Project Health Report (2026-07-13 baseline)
 
 **Date:** 2026-07-13
 **Scope:** Full diagnosis + safety hardening pass (Phases 0–15) — provider fallback safety,

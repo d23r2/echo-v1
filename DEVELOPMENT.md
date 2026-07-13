@@ -32,7 +32,7 @@ separate `available()` call — not visible to mypy — already guarantees the v
 before `chat()` runs) but is **not wired into CI or a required gate** — treat it as an
 optional second opinion, not a blocker.
 
-**pytest**: 335 tests as of 2026-07-13, all passing, no real external API calls anywhere
+**pytest**: 349 tests as of 2026-07-14, all passing, no real external API calls anywhere
 (every provider is a fake/mock — see `tests/fake_providers.py` and `tests/README.md`).
 
 ## Frontend (TypeScript)

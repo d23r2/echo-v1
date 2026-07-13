@@ -106,11 +106,29 @@ def list_entries(
     return query.order_by(models.AtlasEntry.created_at.desc()).limit(limit).all()
 
 
-def search(db: Session, query: str, top_k: int = 5) -> list[tuple[models.AtlasEntry, float]]:
+def search(
+    db: Session, query: str, top_k: int = 5, include_outdated: bool = False
+) -> list[tuple[models.AtlasEntry, float]]:
+    """Semantic search over Atlas. Outdated entries (AtlasEntry.outdated=True)
+    are excluded by default — an entry marked outdated is a deliberate "don't
+    treat this as current" signal (see routers/atlas.py's update endpoint),
+    and normal search/persona prompt-injection/conflict-detection should
+    honor that rather than still surfacing it as relevant. It stays fully
+    visible via list_entries() (the Atlas UI list) regardless of this flag —
+    only *retrieval as a relevant/current memory* is affected. Pass
+    include_outdated=True for the rare case that genuinely wants it back
+    (e.g. an audit view).
+
+    Outdated rows are filtered out after Chroma's nearest-neighbor query, so
+    this over-fetches (same 3x pattern conversation_search.py's semantic_search
+    already uses for its own post-query distance filtering) to make it
+    unlikely that filtering leaves fewer than top_k real results just because
+    a few of the nearest matches happened to be outdated."""
     collection = _get_collection()
     if collection.count() == 0:
         return []
-    result = collection.query(query_texts=[query], n_results=min(top_k, collection.count()))
+    fetch_n = min(top_k * 3, collection.count()) if not include_outdated else min(top_k, collection.count())
+    result = collection.query(query_texts=[query], n_results=fetch_n)
     ids = result.get("ids", [[]])[0]
     distances = result.get("distances", [[]])[0]
 
@@ -122,6 +140,11 @@ def search(db: Session, query: str, top_k: int = 5) -> list[tuple[models.AtlasEn
     hydrated: list[tuple[models.AtlasEntry, float]] = []
     for entry_id, distance in zip(ids, distances, strict=True):
         row = rows_by_id.get(entry_id)
-        if row is not None:
-            hydrated.append((row, distance))
+        if row is None:
+            continue
+        if row.outdated and not include_outdated:
+            continue
+        hydrated.append((row, distance))
+        if len(hydrated) >= top_k:
+            break
     return hydrated

@@ -1,6 +1,39 @@
-# Echo (God Tear AI Brain) — Progress Log
+# ECHO (formerly God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-13
+Last check-in: 2026-07-14
+
+## New since 2026-07-14 — Post-diagnosis cleanup pass
+
+Targeted cleanup on top of the 2026-07-13 Green baseline (not a re-diagnosis) — see
+[PROJECT_HEALTH_REPORT.md](../PROJECT_HEALTH_REPORT.md)'s "2026-07-14" section for the
+full breakdown. 349 backend tests passing (14 new), frontend build/typecheck clean.
+
+- Branding: "God Tear" / "AI Brain — Seed v1.0" → **ECHO** / **Adaptive Personal AI**
+  (sidebar, mobile drawer, browser title, PWA manifest, FastAPI title, Constitution's
+  own `PHILOSOPHY` text).
+- Sidebar: removed the duplicate "+ New conversation" button and the duplicate "Search"
+  nav item (identical to the already-present inline conversation search); deleted the
+  now-redundant `SearchView.tsx`.
+- **Real bug fixed**: outdated Atlas memories (`AtlasEntry.outdated=True`) were still
+  being retrieved by semantic search, injected into the persona prompt, and used for
+  conflict detection. Now excluded from all three by default (still visible in the Atlas
+  list UI) — `atlas.search()`/`memory_conflicts.find_conflicts()`/`find_all_conflicts()`
+  gained an `include_outdated` escape hatch for the rare case that wants them back.
+- **Real bug fixed**: Schedule `due_at` could display shifted after a reload — SQLite
+  drops tzinfo on `DateTime(timezone=True)` read-back, so a naive datetime was
+  serialized without a UTC offset and the frontend misparsed it as local time. Fixed via
+  a Pydantic validator that reattaches UTC to naive datetimes read from the DB; verified
+  live (9:00 AM in, 9:00 AM out after a real reload).
+- Streaming (`POST /api/chat/stream`) no longer leaks raw exception text into SSE
+  `error` events on unexpected failures — clean generic messages now, full detail still
+  in server logs.
+- **Real bug fixed**: the image-generation unavailable reason in the chat "+" menu was
+  reading `features.vision.reason` (image-*understanding* status) instead of
+  `features.image_generation_detail.reason` (image-*generation* status) — confirmed live
+  that these are genuinely different values.
+- Library API (`GET /api/library`) no longer includes the server-absolute `file_path` in
+  its response — download/delete already went through the item's `id`, so this was a
+  pure information-exposure trim, no functional change.
 
 ## New since 2026-07-13 — Full diagnosis + v1 safety hardening pass (Phases 0–15)
 

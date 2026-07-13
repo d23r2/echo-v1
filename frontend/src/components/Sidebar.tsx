@@ -2,7 +2,6 @@ import { useConversations } from "../state/conversationsContext";
 
 export type View =
   | "chat"
-  | "search"
   | "library"
   | "schedule"
   | "atlas"
@@ -10,9 +9,12 @@ export type View =
   | "amendments"
   | "self-improvement";
 
+// No standalone "Search" entry — conversation search lives inline above the
+// chat history (see ConversationList.tsx). A separate nav item pointing at
+// the same underlying searchConversations() call was a confusing duplicate
+// control, not a distinct feature.
 export const NAV_ITEMS: { id: View; label: string; icon: string }[] = [
   { id: "chat", label: "Chats", icon: "💬" },
-  { id: "search", label: "Search", icon: "🔎" },
   { id: "library", label: "Library", icon: "🗂️" },
   { id: "schedule", label: "Schedule", icon: "🗓️" },
   { id: "atlas", label: "Atlas", icon: "🗺️" },
@@ -32,8 +34,8 @@ export default function Sidebar({
   return (
     <nav className="hidden md:flex md:flex-col gap-2 border-r border-zinc-800 bg-zinc-950 p-3 md:w-56 md:h-full">
       <div className="px-2 py-3">
-        <div className="text-sm font-semibold tracking-wide text-zinc-100">God Tear</div>
-        <div className="text-xs text-zinc-500">AI Brain — Seed v1.0</div>
+        <div className="text-sm font-semibold tracking-wide text-zinc-100">ECHO</div>
+        <div className="text-xs text-zinc-500">Adaptive Personal AI</div>
       </div>
       <button
         onClick={() => {

@@ -1,7 +1,7 @@
 {
-  "name": "Echo",
-  "short_name": "Echo",
-  "description": "God Tear AI Brain — a truth-seeking AI persona with governed memory and constitution.",
+  "name": "ECHO",
+  "short_name": "ECHO",
+  "description": "ECHO — Adaptive Personal AI. A truth-seeking AI persona with governed memory and constitution.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
