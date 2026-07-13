@@ -2,7 +2,6 @@ import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AtlasNotes from "./AtlasNotes";
 import { DisplayMessage } from "./ChatView";
-import ReasoningTrace from "./ReasoningTrace";
 
 function MemoryNote({ message }: { message: DisplayMessage }) {
   const update = message.memory_update;
@@ -214,11 +213,12 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
         </div>
         {!isUser && (
           <div className="w-full px-1">
-            <ReasoningTrace
-              reasoning={message.reasoning}
-              envelopeStatus={message.envelope_status}
-              envelopeDegradationReason={message.envelope_degradation_reason}
-            />
+            {/* Reasoning is intentionally not rendered here — it's internal
+                processing detail, not meant for normal-use display. The data
+                (message.reasoning, envelope_status, envelope_degradation_reason)
+                still flows through the API response unchanged; only the UI
+                stopped showing it. See ReasoningTrace.tsx if this needs to
+                come back later (e.g. behind a debug toggle). */}
             <AtlasNotes message={message} />
           </div>
         )}
@@ -226,10 +226,15 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
         {!isUser && message.provider && (
           <div className="mt-1 px-1 text-[10px] uppercase tracking-wide text-zinc-600">
             via {message.provider}
+            {message.fallback_note && (
+              <span
+                className="ml-1.5 lowercase tracking-normal text-amber-600/80"
+                title={message.fallback_note}
+              >
+                ⚠ fallback
+              </span>
+            )}
           </div>
-        )}
-        {!isUser && message.fallback_note && (
-          <div className="mt-0.5 px-1 text-[10px] text-amber-600/80">⚠ {message.fallback_note}</div>
         )}
         {!isUser && message.independence_nudge_reason && (
           <div
