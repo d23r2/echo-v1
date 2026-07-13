@@ -122,6 +122,7 @@ export interface ChatResponse {
   provider_used: string;
   atlas_citations: AtlasCitation[];
   memory_update: MemoryUpdate | null;
+  fallback_note: string | null;
 }
 
 export interface AttachmentOut {
@@ -129,6 +130,8 @@ export interface AttachmentOut {
   mime_type: string;
   size_bytes: number;
   understood: boolean;
+  generated: boolean;
+  base64_preview: string | null;
 }
 
 export interface MessageOut {
@@ -139,6 +142,7 @@ export interface MessageOut {
   provider: string | null;
   atlas_citations: AtlasCitation[];
   attachments: AttachmentOut[];
+  fallback_note: string | null;
   created_at: string;
 }
 
@@ -268,6 +272,21 @@ export interface ProviderStatus {
   reason: string | null;
 }
 
+export interface ConversationSearchResult {
+  conversation_id: string;
+  title: string;
+  snippet: string;
+  matched_role: "user" | "echo" | "title";
+  updated_at: string;
+}
+
+export interface ProviderUsageOut {
+  requests_today: number;
+  last_429_at: string | null;
+}
+
+export type UsageSummary = Record<string, ProviderUsageOut>;
+
 // ---- Chat ----
 export const sendChatMessage = (message: string, provider: string, conversationId?: string) =>
   request<ChatResponse>("/api/chat", {
@@ -291,6 +310,22 @@ export const sendChatMessageWithFiles = (
 
 export const deleteConversation = (id: string) =>
   request<DeleteConversationResponse>(`/api/conversations/${id}`, { method: "DELETE" });
+
+// Plain substring search over past conversations — distinct from Atlas's semantic
+// memory search below (searchAtlas).
+export const searchConversations = (q: string) =>
+  request<ConversationSearchResult[]>(`/api/chat/search?q=${encodeURIComponent(q)}`);
+
+// Calls a PAID model server-side — only ever invoke from an explicit, deliberate
+// user action, never automatically.
+export const generateImage = (prompt: string, conversationId?: string) => {
+  const form = new FormData();
+  form.append("prompt", prompt);
+  if (conversationId) form.append("conversation_id", conversationId);
+  return requestMultipart<SendWithFilesResponse>("/api/chat/generate-image", form);
+};
+
+export const getUsage = () => request<UsageSummary>("/api/usage");
 
 export const listSelfImprovementRequests = () =>
   request<SelfImprovementRequestOut[]>('/api/self-improvement');

@@ -1,13 +1,15 @@
 import logging
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
 from app import atlas, attachments as attachments_lib, memory_extraction, persona, schemas
 from app.config import get_settings
 from app.db import get_db
 from app.models import Attachment, Conversation, Message
+from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError, router as model_router
 
@@ -45,6 +47,26 @@ def _will_use_vision_capable_provider(preferred: str) -> bool:
         if available:
             return p.name in _VISION_CAPABLE_PROVIDERS
     return False
+
+
+def _make_snippet(text: str, query: str, context: int = 40) -> str:
+    idx = text.lower().find(query.lower())
+    if idx == -1:
+        return text[:100]
+    start = max(0, idx - context)
+    end = min(len(text), idx + len(query) + context)
+    snippet = text[start:end]
+    if start > 0:
+        snippet = "…" + snippet
+    if end < len(text):
+        snippet = snippet + "…"
+    return snippet
+
+
+def _conversation_updated_at(conversation: Conversation):
+    if conversation.messages:
+        return max(m.created_at for m in conversation.messages)
+    return conversation.created_at
 
 
 def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
@@ -120,7 +142,9 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
     history.append(ChatMessage(role="user", content=payload.message))
 
     try:
-        result, provider_used = model_router.chat(payload.provider, system_prompt, history)
+        result, provider_used, fallback_note = model_router.chat(
+            payload.provider, system_prompt, history, db=db
+        )
     except (NoProviderAvailableError, ProviderUnavailableError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -136,6 +160,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         reasoning=result.reasoning,
         provider=provider_used,
         atlas_citations=[c.model_dump() for c in citations],
+        fallback_note=fallback_note,
     )
     db.add(user_msg)
     db.add(echo_msg)
@@ -150,6 +175,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         provider_used=provider_used,
         atlas_citations=citations,
         memory_update=memory_update,
+        fallback_note=fallback_note,
     )
 
 
@@ -272,7 +298,9 @@ async def send_chat_message_with_files(
     )
 
     try:
-        result, provider_used = model_router.chat(provider, system_prompt, history)
+        result, provider_used, fallback_note = model_router.chat(
+            provider, system_prompt, history, db=db
+        )
     except (NoProviderAvailableError, ProviderUnavailableError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
@@ -293,6 +321,7 @@ async def send_chat_message_with_files(
         reasoning=result.reasoning,
         provider=provider_used,
         atlas_citations=[c.model_dump() for c in citations],
+        fallback_note=fallback_note,
     )
     db.add(user_msg)
     db.add(echo_msg)
@@ -313,6 +342,112 @@ async def send_chat_message_with_files(
     )
 
 
+@router.post("/chat/generate-image", response_model=schemas.SendWithFilesResponse)
+async def generate_image(
+    prompt: str = Form(...),
+    conversation_id: str | None = Form(None),
+    device_label: str | None = Form(None),
+    db: Session = Depends(get_db),
+):
+    """Deliberately separate from send_chat_message / send_chat_message_with_files —
+    this calls a PAID model (Imagen, via gemini_provider.generate_image) and must only
+    ever run from an explicit user action, never as a side effect of normal chat."""
+    if not prompt.strip():
+        raise HTTPException(status_code=400, detail="Prompt is required")
+
+    if conversation_id:
+        conversation = db.get(Conversation, conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+    else:
+        conversation = Conversation(title=f"Image: {prompt.strip()[:50]}")
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+
+    try:
+        image_bytes = gemini_provider.generate_image(prompt)
+    except Exception as exc:
+        logger.warning("Image generation failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"Image generation failed: {exc}") from exc
+
+    filename = f"generated-{uuid4().hex[:8]}.png"
+    storage_path = attachments_lib.save_to_disk(filename, image_bytes)
+    device_note = f" (from {device_label})" if device_label else ""
+
+    user_msg = Message(
+        conversation_id=conversation.id,
+        role="user",
+        content=f"Generate image: {prompt}{device_note}",
+    )
+    attachment = Attachment(
+        filename=filename,
+        mime_type="image/png",
+        size_bytes=len(image_bytes),
+        storage_path=storage_path,
+        understood=True,
+        generated=True,
+    )
+    echo_msg = Message(
+        conversation_id=conversation.id,
+        role="echo",
+        content=f'Here\'s the generated image for: "{prompt}"',
+        provider="gemini-image",
+        attachments=[attachment],
+    )
+    db.add(user_msg)
+    db.add(echo_msg)
+    db.commit()
+    db.refresh(echo_msg)
+
+    return schemas.SendWithFilesResponse(
+        conversation_id=conversation.id,
+        message=schemas.MessageOut.model_validate(echo_msg),
+    )
+
+
+@router.get("/chat/search", response_model=list[schemas.ConversationSearchResult])
+def search_conversations(q: str = Query(""), db: Session = Depends(get_db)):
+    """Plain substring search over conversation titles and message content — distinct
+    from Atlas's semantic search, which queries persistent memory, not chat history."""
+    query = q.strip()
+    if len(query) < 2:
+        return []
+    query_lower = query.lower()
+
+    results: list[schemas.ConversationSearchResult] = []
+    conversations = db.query(Conversation).order_by(Conversation.created_at.desc()).all()
+    for conversation in conversations:
+        if query_lower in conversation.title.lower():
+            results.append(
+                schemas.ConversationSearchResult(
+                    conversation_id=conversation.id,
+                    title=conversation.title,
+                    snippet=_make_snippet(conversation.title, query),
+                    matched_role="title",
+                    updated_at=_conversation_updated_at(conversation),
+                )
+            )
+            continue
+
+        matched_message = next(
+            (m for m in conversation.messages if query_lower in m.content.lower()), None
+        )
+        if matched_message:
+            results.append(
+                schemas.ConversationSearchResult(
+                    conversation_id=conversation.id,
+                    title=conversation.title,
+                    snippet=_make_snippet(matched_message.content, query),
+                    matched_role=matched_message.role,
+                    updated_at=_conversation_updated_at(conversation),
+                )
+            )
+
+    results.sort(key=lambda r: r.updated_at, reverse=True)
+    return results
+
+
 @router.get("/chat/welcome", response_model=schemas.WelcomeResponse)
 def get_welcome_greeting(db: Session = Depends(get_db)):
     memories = atlas.list_entries(db, limit=3)
@@ -327,8 +462,8 @@ def get_welcome_greeting(db: Session = Depends(get_db)):
         system_prompt = _WELCOME_PROMPT_EMPTY
 
     try:
-        result, _provider_used = model_router.chat(
-            "auto", system_prompt, [ChatMessage(role="user", content="Greet me.")]
+        result, _provider_used, _fallback_note = model_router.chat(
+            "auto", system_prompt, [ChatMessage(role="user", content="Greet me.")], db=db
         )
     except (NoProviderAvailableError, ProviderUnavailableError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

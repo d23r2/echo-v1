@@ -42,11 +42,32 @@ function fileTypeIcon(mime: string): string {
   return "📎";
 }
 
+// Generated images render as real inline images (via a data URI) rather than a
+// filename chip, so they read as part of the conversation, not a throwaway
+// attachment — matching how a normal image reply would look.
+function GeneratedImages({ message }: { message: DisplayMessage }) {
+  const images = (message.attachments || []).filter((a) => a.generated && a.base64_preview);
+  if (images.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-col gap-2">
+      {images.map((a, i) => (
+        <img
+          key={i}
+          src={`data:${a.mime_type};base64,${a.base64_preview}`}
+          alt={message.content}
+          className="max-w-full rounded-lg border border-zinc-800 sm:max-w-sm"
+        />
+      ))}
+    </div>
+  );
+}
+
 function AttachmentChips({ message }: { message: DisplayMessage }) {
-  if (!message.attachments || message.attachments.length === 0) return null;
+  const chips = (message.attachments || []).filter((a) => !a.generated);
+  if (chips.length === 0) return null;
   return (
     <div className="mt-1.5 flex flex-wrap gap-1.5">
-      {message.attachments.map((a, i) => (
+      {chips.map((a, i) => (
         <div
           key={i}
           title={a.understood ? a.filename : `${a.filename} — Echo couldn't read this file's content`}
@@ -141,6 +162,7 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
           {isUser ? message.content : <MarkdownContent content={message.content} />}
         </div>
         <div className="w-full px-1">
+          <GeneratedImages message={message} />
           <AttachmentChips message={message} />
         </div>
         {!isUser && (
@@ -153,6 +175,9 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
           <div className="mt-1 px-1 text-[10px] uppercase tracking-wide text-zinc-600">
             via {message.provider}
           </div>
+        )}
+        {!isUser && message.fallback_note && (
+          <div className="mt-0.5 px-1 text-[10px] text-amber-600/80">⚠ {message.fallback_note}</div>
         )}
       </div>
     </div>

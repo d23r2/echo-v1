@@ -3,6 +3,7 @@ import {
   MemoryUpdate,
   MessageOut,
   WelcomeResponse,
+  generateImage,
   getConversation,
   getWelcomeGreeting,
   sendChatMessage,
@@ -15,6 +16,7 @@ import ConversationList from "./ConversationList";
 import EchoPresence, { PresenceState } from "./EchoPresence";
 import MessageBubble from "./MessageBubble";
 import ModelPicker from "./ModelPicker";
+import UsageStatus from "./UsageStatus";
 
 export interface DisplayMessage extends MessageOut {
   memory_update?: MemoryUpdate | null;
@@ -107,6 +109,10 @@ export default function ChatView() {
   // Errors intentionally not surfaced anywhere — a failed welcome fetch should be
   // invisible and just leave the plain empty-state placeholder in place.
   const { run: runWelcome, loading: welcomeLoading } = useApi(getWelcomeGreeting);
+  // Deliberately separate from runSend/runSendWithFiles — this hits a PAID model, so
+  // its own loading/error state must never get silently merged into normal chat's.
+  const { run: runGenerateImage, loading: generatingImage, error: generateImageError } =
+    useApi(generateImage);
 
   const sending = sendingText || sendingFiles;
   const error = sendError || filesError;
@@ -341,7 +347,10 @@ export default function ChatView() {
         mime_type: f.type || "application/octet-stream",
         size_bytes: f.size,
         understood: guessUnderstood(f),
+        generated: false,
+        base64_preview: null,
       })),
+      fallback_note: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
@@ -371,10 +380,39 @@ export default function ChatView() {
         atlas_citations: result.atlas_citations,
         attachments: [],
         memory_update: result.memory_update,
+        fallback_note: result.fallback_note,
         created_at: new Date().toISOString(),
       },
     ]);
     speak(result.content);
+    refreshConversations();
+  }
+
+  // Deliberately separate action from handleSend — must only ever run from an
+  // explicit click on the dedicated "Generate image" button, never automatically.
+  async function handleGenerateImage() {
+    const prompt = input.trim();
+    if (!prompt || generatingImage || sending) return;
+    setInput("");
+
+    const optimisticUser: DisplayMessage = {
+      id: `pending-${Date.now()}`,
+      role: "user",
+      content: `Generate image: ${prompt}`,
+      reasoning: null,
+      provider: null,
+      atlas_citations: [],
+      attachments: [],
+      fallback_note: null,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimisticUser]);
+
+    const result = await runGenerateImage(prompt, conversationId);
+    if (!result) return;
+
+    selectConversation(result.conversation_id);
+    setMessages((prev) => [...prev, result.message]);
     refreshConversations();
   }
 
@@ -408,6 +446,7 @@ export default function ChatView() {
               </button>
             )}
             <ModelPicker />
+            <UsageStatus />
           </div>
         </header>
 
@@ -461,9 +500,20 @@ export default function ChatView() {
               <EchoPresence state="thinking" size="sm" showLabel />
             </div>
           )}
+          {generatingImage && (
+            <div className="flex items-center gap-2 pl-1 text-xs text-zinc-500">
+              <span className="animate-pulse">🎨</span>
+              <span>Generating image… this can take several seconds.</span>
+            </div>
+          )}
           {error && (
             <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">
               {error}
+            </div>
+          )}
+          {generateImageError && (
+            <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">
+              Image generation failed: {generateImageError}
             </div>
           )}
           <div ref={bottomRef} />
@@ -551,7 +601,18 @@ export default function ChatView() {
             >
               Send
             </button>
+            <button
+              onClick={handleGenerateImage}
+              disabled={generatingImage || sending || !input.trim()}
+              title="Uses a paid image model — a few cents per image. Type a description above, then click this to generate it (separate from Send)."
+              className="flex shrink-0 items-center gap-1.5 rounded-xl border border-amber-700/50 bg-amber-950/30 px-3 py-2 text-sm font-medium text-amber-300 hover:bg-amber-950/50 disabled:opacity-40"
+            >
+              🎨 <span className="hidden sm:inline">Generate image</span>
+            </button>
           </div>
+          <p className="mt-1.5 pl-1 text-[10px] text-amber-600/80">
+            "Generate image" uses a paid image model — a few cents per image — separate from normal chat.
+          </p>
         </div>
       </div>
     </div>

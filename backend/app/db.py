@@ -29,6 +29,8 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_atlas_memory_type_column()
+    _ensure_column("attachments", "generated", "BOOLEAN DEFAULT 0")
+    _ensure_column("messages", "fallback_note", "TEXT")
 
 
 def _ensure_atlas_memory_type_column() -> None:
@@ -39,4 +41,15 @@ def _ensure_atlas_memory_type_column() -> None:
         cols = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(atlas_entries)")}
         if "memory_type" not in cols:
             conn.exec_driver_sql("ALTER TABLE atlas_entries ADD COLUMN memory_type TEXT DEFAULT 'fact'")
+            conn.commit()
+
+
+def _ensure_column(table: str, column: str, ddl_type: str) -> None:
+    """Same rationale as _ensure_atlas_memory_type_column, generalized: create_all
+    never adds columns to a table that already exists, so new nullable/defaulted
+    columns need an in-place ALTER for databases created before this field existed."""
+    with engine.connect() as conn:
+        cols = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+        if column not in cols:
+            conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
             conn.commit()

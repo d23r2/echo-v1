@@ -40,6 +40,7 @@ class ChatResponse(BaseModel):
     provider_used: str
     atlas_citations: list[AtlasCitation] = Field(default_factory=list)
     memory_update: MemoryUpdate | None = None
+    fallback_note: str | None = None
 
 
 class AttachmentOut(BaseModel):
@@ -47,6 +48,8 @@ class AttachmentOut(BaseModel):
     mime_type: str
     size_bytes: int
     understood: bool
+    generated: bool = False
+    base64_preview: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -59,6 +62,7 @@ class MessageOut(BaseModel):
     provider: str | None
     atlas_citations: list[dict]
     attachments: list[AttachmentOut] = Field(default_factory=list)
+    fallback_note: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -91,6 +95,19 @@ class WelcomeResponse(BaseModel):
 class DeleteConversationResponse(BaseModel):
     ok: bool
     deleted_id: str
+
+
+class ConversationSearchResult(BaseModel):
+    conversation_id: str
+    title: str
+    snippet: str
+    matched_role: Literal["user", "echo", "title"]
+    updated_at: datetime
+
+
+class ProviderUsageOut(BaseModel):
+    requests_today: int
+    last_429_at: datetime | None = None
 
 
 class SelfImprovementRequestOut(BaseModel):
