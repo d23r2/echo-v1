@@ -6,6 +6,7 @@ _FULL_ENVELOPE_RE = re.compile(
     r"REASONING:\s*(.*?)\s*ANSWER:\s*(.*?)\s*MEMORY:\s*(.*)", re.DOTALL | re.IGNORECASE
 )
 _TRACE_RE = re.compile(r"REASONING:\s*(.*?)\s*ANSWER:\s*(.*)", re.DOTALL | re.IGNORECASE)
+_MEMORY_MARKER_RE = re.compile(r"\s*MEMORY:\s*", re.IGNORECASE)
 
 
 @dataclass
@@ -46,6 +47,17 @@ def split_reasoning_and_answer(raw: str) -> ChatResult:
     if match:
         reasoning, answer = match.groups()
         return ChatResult(text=answer.strip(), reasoning=reasoning.strip())
+
+    # Model answered directly with no REASONING:/ANSWER: prefix at all, but may still
+    # have appended a MEMORY: block per its instructions (persona.py). Truncate at that
+    # marker so the raw JSON never reaches the displayed/saved answer.
+    marker = _MEMORY_MARKER_RE.search(stripped)
+    if marker:
+        return ChatResult(
+            text=stripped[: marker.start()].strip(),
+            reasoning=None,
+            memory_json=stripped[marker.end() :].strip(),
+        )
 
     return ChatResult(text=stripped, reasoning=None)
 
