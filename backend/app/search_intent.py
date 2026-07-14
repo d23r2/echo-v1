@@ -69,12 +69,13 @@ _CODE_HELP_PATTERNS = [
 ]
 
 _SPORT_NAMES = re.compile(
-    r"\b(football|soccer|cricket|epl|premier league|champions league|world cup|nba|nfl|"
+    r"\b(football|soccer|cricket|epl|premier league|champions league|world cup|fifa|nba|nfl|"
     r"rugby|tennis|f1|formula 1|olympics)\b",
     re.IGNORECASE,
 )
 _SPORT_ACTION = re.compile(
-    r"\b(match update|live score|score|fixture|result|kick[- ]?off|full[- ]?time|standings)\b",
+    r"\b(match update|match details|live score|score|fixture|result|kick[- ]?off|"
+    r"full[- ]?time|standings)\b",
     re.IGNORECASE,
 )
 _TEAM_VS_TEAM = re.compile(r"\b\w+(?:\s\w+)?\s+vs\.?\s+\w+(?:\s\w+)?\b", re.IGNORECASE)
@@ -91,6 +92,11 @@ _CURRENT_INFO_PATTERNS = [
     re.compile(r"\b(visa|law|policy|regulation) (change|update|rule)s?\b", re.IGNORECASE),
     re.compile(r"\bis (this|it) still true\b", re.IGNORECASE),
     re.compile(r"\bstill (valid|accurate|correct|true)\b", re.IGNORECASE),
+    # "last match/game/result/score" is a very natural way to ask for the
+    # most recent outcome of something ongoing — deliberately narrower than a
+    # bare "\blast\b" (which would also match "last year", "last name", "at
+    # last", none of which imply wanting current info).
+    re.compile(r"\blast (match|game|result|score|fixture)\b", re.IGNORECASE),
 ]
 _NEWS_KEYWORDS = re.compile(r"\bnews\b", re.IGNORECASE)
 _DOCS_KEYWORDS = re.compile(

@@ -34,6 +34,39 @@ def test_team_vs_team_with_score_triggers_sports_update():
     assert result.needs_current_info is True
 
 
+def test_fifa_match_details_query_triggers_sports_update():
+    """Regression test: a real user query — 'check last match details of
+    argentina in fifa 2026' — fell through to general_chat with no search at
+    all, because neither 'fifa' nor 'match details' were in the sport-name/
+    action vocabularies, and 'last' (as opposed to 'latest') wasn't a
+    current-info trigger. ECHO answered from training data instead of
+    honestly saying it needed to search, which is exactly the failure mode
+    this classifier exists to prevent."""
+    result = detect_search_intent("check last match details of argentina in fifa 2026")
+    assert result.task_type == "sports_update"
+    assert result.needs_current_info is True
+
+
+def test_last_game_score_triggers_current_info_without_sport_name():
+    result = detect_search_intent("What was the last game score?")
+    assert result.needs_current_info is True
+
+
+def test_bare_match_word_does_not_trigger_current_info():
+    """Regression guard: 'match' is common outside sports (regex matching,
+    pattern matching, dating) — it must only count as a sports signal when
+    paired with an explicit sport name/team-vs-team, never as a standalone
+    current-info trigger on its own."""
+    result = detect_search_intent("this doesn't match what I expected")
+    assert result.needs_current_info is False
+    assert result.task_type == "general_chat"
+
+
+def test_last_year_does_not_trigger_current_info():
+    result = detect_search_intent("last year I visited Argentina")
+    assert result.needs_current_info is False
+
+
 def test_live_price_query_triggers_web_search():
     result = detect_search_intent("What's the current price of Bitcoin?")
     assert result.task_type == "web_search"

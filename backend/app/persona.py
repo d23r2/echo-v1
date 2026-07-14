@@ -68,7 +68,10 @@ SOURCE_USAGE_INSTRUCTION = (
     "reliability_note, ...) are internal formatting for you only — never write them, or the "
     "word 'block', in your ANSWER. Refer to sources in plain language instead (e.g. \"according "
     "to Wikipedia\" or \"a recent search found...\"), the same way you'd cite something a person "
-    "told you, not the way you'd cite a database table."
+    "told you, not the way you'd cite a database table. Concretely: WRONG — \"According to the "
+    "WEB_SEARCH_RESULTS block provided, Argentina won 2-0.\" RIGHT — \"According to a recent "
+    "search, Argentina won 2-0.\" Never use the phrase 'the block' or any ALL_CAPS_WITH_UNDERSCORES "
+    "name anywhere in your ANSWER."
 )
 
 

@@ -8,7 +8,17 @@ DATA_DIR = BASE_DIR / "data"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Absolute path, not a bare ".env" — pydantic-settings resolves a relative
+    # env_file against the process's CWD at import time, not this file's
+    # location. That's silently wrong whenever the backend is launched from
+    # anywhere other than backend/ itself (e.g. uvicorn's --app-dir backend
+    # flag changes module resolution, not CWD) — .env then isn't found at
+    # all, and every setting falls back to its field default with no error.
+    # Confirmed in practice: OLLAMA_MODEL silently fell back to the default
+    # "llama3.1" (not an installed model) instead of the real .env's
+    # "llama3", and a real GEMINI_API_KEY was silently dropped, entirely
+    # because of which directory the process happened to start from.
+    model_config = SettingsConfigDict(env_file=str(BASE_DIR / ".env"), extra="ignore")
 
     # Server
     cors_origins: str = "http://localhost:5174,http://127.0.0.1:5174"
