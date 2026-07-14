@@ -46,7 +46,15 @@ def test_image_generation_false_when_gemini_not_configured(monkeypatch):
     assert "not set" in body["vision"]["reason"].lower()
     assert body["providers"]["gemini"] == "not_configured"
     assert body["image_generation_detail"]["active_provider"] is None
+    # image_generation_detail.providers is per-provider API/log detail, never
+    # rendered directly by the frontend (see ChatView.tsx) — raw reason text
+    # like this is fine here.
     assert body["image_generation_detail"]["providers"]["gemini"] == "GEMINI_API_KEY not set"
+    # .reason, by contrast, IS what the chat "+" menu displays directly — it
+    # must never contain a raw env var/config name (regression test: this
+    # used to interpolate select_provider()'s raw reason unchanged).
+    assert "GEMINI_API_KEY" not in body["image_generation_detail"]["reason"]
+    assert "COMFYUI_BASE_URL" not in body["image_generation_detail"]["reason"]
 
 
 def test_image_generation_true_when_gemini_configured(monkeypatch):

@@ -1,7 +1,8 @@
 # Development
 
 Quick reference for running quality checks locally. Everything here is free and local —
-no paid services, no CI required.
+no paid services, no CI required. See [DAILY_SMOKE_TEST.md](DAILY_SMOKE_TEST.md) for a
+manual click-through checklist to run alongside these automated checks.
 
 ## Backend (Python)
 
@@ -32,8 +33,12 @@ separate `available()` call — not visible to mypy — already guarantees the v
 before `chat()` runs) but is **not wired into CI or a required gate** — treat it as an
 optional second opinion, not a blocker.
 
-**pytest**: 349 tests as of 2026-07-14, all passing, no real external API calls anywhere
+**pytest**: 386 tests as of 2026-07-14, all passing, no real external API calls anywhere
 (every provider is a fake/mock — see `tests/fake_providers.py` and `tests/README.md`).
+The no-billing web/wiki/RSS search system (`app/search_intent.py`, `app/web_search.py`)
+is covered the same way — `tests/fake_http.py` fakes `httpx.get()` with real (but
+offline) `httpx.Response` objects, so `test_search_intent.py`/`test_web_search.py`/
+`test_persona_search_injection.py` never touch a real SearXNG/Wikipedia/RSS endpoint.
 
 ## Frontend (TypeScript)
 

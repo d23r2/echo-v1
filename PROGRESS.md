@@ -2,6 +2,78 @@
 
 Last check-in: 2026-07-14
 
+## New since 2026-07-14 (yet later same day) — Image-generation error cleanliness fix
+
+388 backend tests passing (2 new), frontend build/typecheck clean.
+
+- **Real bug fixed**: `test_chat_error_cleanliness.py`'s two image-generation tests
+  depended on the real `backend/.env`'s `GEMINI_API_KEY` being visible via
+  pydantic-settings' CWD-relative `.env` lookup — passing or failing depending on
+  whether pytest was invoked from `backend/` or the repo root, not on the code itself.
+  Fixed by monkeypatching `image_router.select_provider()` directly in both tests,
+  decoupling them from any real environment/CWD state.
+- **Real bug fixed** (found while investigating the above, same feature area): the
+  generic "nothing configured" image-generation reason —
+  `"No image generation provider is available (configure GEMINI_API_KEY or
+  COMFYUI_BASE_URL)"` — was reaching both `GET /api/features`'s
+  `image_generation_detail.reason` (rendered directly in the chat "+" menu) and
+  `POST /api/chat/generate-image`'s 502 response, unchanged, literal env var names and
+  all. Added `image_router.clean_unavailable_reason()` to translate any raw reason into
+  a short, human-readable message before it crosses into either response; the raw,
+  detailed per-provider `statuses()` breakdown is untouched since it's API/log detail
+  the frontend never renders directly.
+- `@app.on_event("startup")` replaced with a `lifespan` context manager
+  (`app/main.py`) — the FastAPI deprecation warning is gone, single `init_db()` hook
+  unchanged.
+
+## New since 2026-07-14 (later same day) — Clean chat UI + no-billing search system
+
+386 backend tests passing (37 new), frontend build/typecheck clean, live-verified in a
+real browser against a real local Ollama model.
+
+- **Clean chat UI**: normal chat now shows only the answer text plus a small natural
+  metadata line (`via Ollama`, `via Ollama, Wikipedia`) — Atlas usage notes, reasoning
+  traces, memory-candidate-queued messages, and the welcome screen's raw "recalling: ..."
+  memory dump no longer render in normal chat (`MessageBubble.tsx`, new
+  `chatMetadata.ts`). The underlying data is untouched — Atlas citations, conversation
+  snippets, reasoning, etc. still flow through the API for future debug tooling;
+  `ReasoningTrace.tsx`/`AtlasNotes.tsx` are now orphaned but kept, not deleted.
+- **Real bug fixed**: an intermittent full-suite pytest flake (unrelated persona/router
+  tests failing in a full run, passing in isolation/on retry) traced to `atlas.py`'s and
+  `conversation_search.py`'s Chroma collections being process-wide `@lru_cache`'d
+  singletons that never reset between tests. Fixed via a new autouse
+  `_isolate_chroma_collections` fixture (`tests/conftest.py`) that wipes collection
+  *contents* before every test — verified stable across 5+ full-suite runs since.
+- **New: no-billing web/wiki/RSS search system** — `app/search_intent.py` (deterministic
+  regex classifier: does this message need current or background info, and what kind)
+  and `app/web_search.py` (SearXNG, Wikimedia, RSS/Atom, direct-page-fetch providers,
+  all genuinely free, none requiring an API key). Wired into `persona.build_system_prompt()`
+  (labeled `WIKI_SEARCH_RESULTS:`/`WEB_SEARCH_RESULTS:`/`RSS_FEED_RESULTS:` prompt blocks,
+  never shown to the user) and persisted per-message (`sources_used`,
+  `current_info_intent`, `search_failure_reason` — new `Message` columns). Wiki is on by
+  default (no key needed); web/RSS are off by default until you point `SEARXNG_BASE_URL`
+  / `RSS_FEED_URLS` at something — see [docs/searxng-setup.md](../docs/searxng-setup.md)
+  and the new optional `docker-compose.searxng.yml`.
+- **Three real bugs found and fixed during live verification** (not caught by unit tests
+  alone — worth remembering when trusting green CI without a live pass):
+  1. Wikimedia's public API 403s any request whose User-Agent doesn't contain a
+     URL-shaped token (its robot policy) — fixed by using a compliant `_USER_AGENT` in
+     `web_search.py`.
+  2. The search-intent classifier's `"what is"` pattern was broad enough to misfire on
+     `"What is the latest news today?"`, spuriously flagging it as also needing a wiki
+     background lookup and injecting irrelevant results.
+  3. A plain "breaking news" query with no other current-info keyword ("latest",
+     "today", etc.) fell through to `general_chat` with no search at all, since the
+     "news"/"docs" keyword checks only ran *after* a current-info signal was already
+     found — now counted as their own trigger.
+  4. (Prompt-level, not code) a live Ollama reply once echoed the literal string
+     "WIKI_SEARCH_RESULTS block" into its visible answer — fixed by explicitly
+     instructing the model never to write the internal block/field names, confirmed
+     resolved on retest.
+- **New: [DAILY_SMOKE_TEST.md](../DAILY_SMOKE_TEST.md)** — a lightweight manual
+  click-through checklist (chat, fallback, search routing, memory, Library/Schedule)
+  to run alongside the automated suite.
+
 ## New since 2026-07-14 — Post-diagnosis cleanup pass
 
 Targeted cleanup on top of the 2026-07-13 Green baseline (not a re-diagnosis) — see
@@ -254,7 +326,16 @@ recall, chat UI overhaul — all tested, 255 backend tests passing, frontend bui
   pass's envelope-integrity test suite.
 
 ## Blockers
-- (none recorded yet)
+- **2026-07-14 check-in**: today's "no-billing search system + clean chat UI" work
+  (search_intent.py, web_search.py, chatMetadata.ts, MessageBubble.tsx changes, Chroma
+  test-isolation fixture, etc.) is present on disk but **not yet committed** — `git
+  status` shows it all as modified/untracked against the last commit (44faeb49, cleanup
+  pass). Commit it before starting new work.
+- Hit a stale `.git/index.lock` from this Cowork sandbox session (created today,
+  "Operation not permitted" on unlink — a bridging/permissions quirk, same family as the
+  earlier known Cowork-sandbox git limitation). Repo itself is intact (git log/status
+  still read fine); if a local terminal also reports a lock, just delete
+  `.git/index.lock` by hand and retry.
 
 ## Notes for the daily check-in task
 - This file is the source of truth for "where things stand." Update the **Last check-in**

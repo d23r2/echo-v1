@@ -1,38 +1,28 @@
 import ReactMarkdown, { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import AtlasNotes from "./AtlasNotes";
+import { buildViaLine } from "./chatMetadata";
 import { DisplayMessage } from "./ChatView";
 
+// Only ever renders for an EXPLICIT "remember that..." request — a direct
+// confirmation of something the user just asked for, not internal noise.
+// Auto-extracted memory candidates are queued for review in Atlas's own
+// "Memory Candidates" section (see app/routers/chat.py) and deliberately
+// never surface under a normal reply — that's internal/debug detail, not
+// something every chat turn should announce.
 function MemoryNote({ message }: { message: DisplayMessage }) {
   const update = message.memory_update;
-  if (!update) return null;
+  if (!update || !update.explicit) return null;
 
   if (update.saved) {
     return (
       <div className="mt-1 flex items-start gap-1 px-1 text-[11px] text-emerald-400">
         <span>📌</span>
-        <span>
-          {update.explicit ? "Remembered: " : "Noted for later: "}
-          {update.content}
-        </span>
+        <span>Remembered: {update.content}</span>
       </div>
     );
   }
 
-  // An auto-extracted candidate isn't saved directly anymore — it's queued for
-  // review in Atlas's "Memory Candidates" section (see app/routers/chat.py).
-  if (update.pending_review) {
-    return (
-      <div className="mt-1 flex items-start gap-1 px-1 text-[11px] text-blue-400">
-        <span>📋</span>
-        <span>Added as a memory candidate — review it in Atlas.</span>
-      </div>
-    );
-  }
-
-  // Only surface failures for explicit asks — implicit auto-extraction failing is
-  // expected background noise, not something worth interrupting the chat over.
-  if (update.explicit) {
+  if (update.error) {
     return (
       <div className="mt-1 flex items-start gap-1 px-1 text-[11px] text-red-400">
         <span>⚠️</span>
@@ -211,37 +201,19 @@ export default function MessageBubble({ message }: { message: DisplayMessage }) 
           <GeneratedImages message={message} />
           <AttachmentChips message={message} />
         </div>
-        {!isUser && (
-          <div className="w-full px-1">
-            {/* Reasoning is intentionally not rendered here — it's internal
-                processing detail, not meant for normal-use display. The data
-                (message.reasoning, envelope_status, envelope_degradation_reason)
-                still flows through the API response unchanged; only the UI
-                stopped showing it. See ReasoningTrace.tsx if this needs to
-                come back later (e.g. behind a debug toggle). */}
-            <AtlasNotes message={message} />
-          </div>
-        )}
+        {/* Internal processing detail — reasoning, Atlas memory-usage notes,
+            auto-extracted memory-candidate notices, and independence-nudge
+            debug reasons — is deliberately not rendered here. It's for
+            ECHO's own memory/tools/debugging, not the person using the chat.
+            The underlying data (reasoning, atlas_citations,
+            conversation_snippets, independence_nudge_reason, etc.) still
+            flows through the API response unchanged; only the UI stopped
+            showing it in the normal chat view. Atlas usage is still
+            reviewable in the Atlas UI itself (memory candidates, entries). */}
         {!isUser && <MemoryNote message={message} />}
-        {!isUser && message.provider && (
+        {!isUser && buildViaLine(message) && (
           <div className="mt-1 px-1 text-[10px] uppercase tracking-wide text-zinc-600">
-            via {message.provider}
-            {message.fallback_note && (
-              <span
-                className="ml-1.5 lowercase tracking-normal text-amber-600/80"
-                title={message.fallback_note}
-              >
-                ⚠ fallback
-              </span>
-            )}
-          </div>
-        )}
-        {!isUser && message.independence_nudge_reason && (
-          <div
-            className="mt-0.5 px-1 text-[10px] text-zinc-700"
-            title={`Independence nudge (debug): ${message.independence_nudge_reason}`}
-          >
-            · independence nudge: {message.independence_nudge_reason.replace(/_/g, " ")}
+            {buildViaLine(message)}
           </div>
         )}
       </div>

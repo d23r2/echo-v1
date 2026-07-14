@@ -56,6 +56,16 @@ def test_streaming_no_providers_available_hides_raw_exception_text(monkeypatch):
 
 
 def test_image_generation_unconfigured_returns_clean_error(monkeypatch):
+    # image_router.select_provider() must resolve to "gemini" for this test to
+    # reach gemini_provider.generate_image() at all — it otherwise depends on
+    # whether GEMINI_API_KEY happens to be set in the real backend/.env, which
+    # in turn depends on pydantic-settings' CWD-relative env_file lookup (so
+    # this test previously passed or failed depending on whether pytest was
+    # invoked from backend/ or the repo root — the exact opposite of a
+    # deterministic, no-real-keys-required test). Monkeypatching the router's
+    # own selection decouples this test from any real environment/CWD state.
+    monkeypatch.setattr("app.routers.chat.image_router.select_provider", lambda: ("gemini", None))
+
     def _raise_not_configured(prompt: str) -> bytes:
         raise RuntimeError("GEMINI_API_KEY not set")
 
@@ -68,6 +78,10 @@ def test_image_generation_unconfigured_returns_clean_error(monkeypatch):
 
 
 def test_image_generation_api_failure_returns_clean_error_not_raw(monkeypatch):
+    # See test_image_generation_unconfigured_returns_clean_error's comment —
+    # same fix, same reason.
+    monkeypatch.setattr("app.routers.chat.image_router.select_provider", lambda: ("gemini", None))
+
     def _raise_api_error(prompt: str) -> bytes:
         raise RuntimeError(_RAW_TECHNICAL_STRING)
 
@@ -79,3 +93,24 @@ def test_image_generation_api_failure_returns_clean_error_not_raw(monkeypatch):
     detail = resp.json()["detail"]
     assert _RAW_TECHNICAL_STRING not in detail
     assert detail == "Image generation is unavailable right now."
+
+
+def test_image_generation_no_provider_configured_hides_env_var_names(monkeypatch):
+    """Regression test: image_router.select_provider()'s reason for "nothing
+    is configured" is 'No image generation provider is available (configure
+    GEMINI_API_KEY or COMFYUI_BASE_URL)' — genuinely useful in server logs,
+    but that raw string was previously interpolated straight into this
+    endpoint's HTTP response, putting literal env var names in front of the
+    user. Must now go through image_router.clean_unavailable_reason()."""
+    monkeypatch.setattr(
+        "app.routers.chat.image_router.select_provider",
+        lambda: (None, "No image generation provider is available (configure GEMINI_API_KEY or COMFYUI_BASE_URL)"),
+    )
+
+    resp = client.post("/api/chat/generate-image", data={"prompt": "a cat"})
+
+    assert resp.status_code == 502
+    detail = resp.json()["detail"]
+    assert "GEMINI_API_KEY" not in detail
+    assert "COMFYUI_BASE_URL" not in detail
+    assert detail == "Image generation is unavailable — Image generation isn't configured yet."

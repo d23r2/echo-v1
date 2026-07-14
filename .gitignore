@@ -20,4 +20,7 @@ frontend/android/capacitor-cordova-android-plugins/build/
 # Tauri Windows — build output
 frontend/src-tauri/target/
 
+# Local SearXNG instance config (docker-compose.searxng.yml) — generated on first run
+searxng-config/
+
 .DS_Store

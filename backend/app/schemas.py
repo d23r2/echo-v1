@@ -65,6 +65,9 @@ class ChatResponse(BaseModel):
     conversation_snippets: list[ConversationSnippetOut] = Field(default_factory=list)
     envelope_status: str = "missing"
     envelope_degradation_reason: str | None = None
+    sources_used: list[dict] = Field(default_factory=list)
+    current_info_intent: str | None = None
+    search_failure_reason: str | None = None
 
 
 class AttachmentOut(BaseModel):
@@ -92,6 +95,9 @@ class MessageOut(BaseModel):
     conversation_snippets: list[dict] = Field(default_factory=list)
     envelope_status: str = "missing"
     envelope_degradation_reason: str | None = None
+    sources_used: list[dict] = Field(default_factory=list)
+    current_info_intent: str | None = None
+    search_failure_reason: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

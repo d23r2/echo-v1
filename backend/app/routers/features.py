@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app import schemas, usage
 from app.config import get_settings
 from app.db import get_db
-from app.image_router import image_router
+from app.image_router import clean_unavailable_reason, image_router
 from app.router import router as model_router
 
 router = APIRouter(prefix="/api", tags=["features"])
@@ -75,7 +75,13 @@ def get_feature_availability(db: Session = Depends(get_db)):
         image_generation_detail=schemas.ImageGenerationAvailability(
             available=image_gen_active is not None,
             active_provider=image_gen_active,
-            reason=image_gen_reason,
+            # Cleaned for the UI (see image_router.clean_unavailable_reason) —
+            # the raw reason may name a config field like GEMINI_API_KEY,
+            # which is fine server-side/in logs but never in a response the
+            # frontend renders. `providers` below stays raw/detailed: it's API
+            # data the frontend never displays directly (see ChatView.tsx),
+            # not the reason string shown in the "+" menu's unavailable state.
+            reason=clean_unavailable_reason(image_gen_reason) if image_gen_active is None else None,
             providers={name: ("available" if s.available else (s.reason or "unavailable")) for name, s in image_gen_statuses.items()},
         ),
         providers=provider_labels,

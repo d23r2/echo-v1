@@ -2,10 +2,12 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app import atlas, conversation_search, council, dependency_patterns
+from app import atlas, conversation_search, council, dependency_patterns, web_search
 from app.config import get_settings
 from app.conversation_search import MessageSnippet
+from app.search_intent import detect_search_intent
 from app.schemas import AtlasCitation
+from app.web_search import GatherResult, SourceResult
 
 BEHAVIOR_DIRECTIVES = """
 ECHO BEHAVIOR DIRECTIVES (derived from the constitution above; not optional):
@@ -49,6 +51,99 @@ SKIP_MEMORY_JUDGMENT_NOTE = (
     "saved directly from their own words — you don't need to duplicate it in MEMORY: (still emit "
     "the field, just NONE, unless something *else* worth remembering came up in this exchange)."
 )
+
+SOURCE_USAGE_INSTRUCTION = (
+    "The WIKI_SEARCH_RESULTS / RSS_FEED_RESULTS / WEB_SEARCH_RESULTS / DIRECT_PAGE_RESULTS "
+    "block(s) above, whichever are present, are real results from an actual search just "
+    "performed for this turn — not something you looked up yourself, and not your own training "
+    "data. Clearly distinguish source types when you use them: wiki results are for stable "
+    "background/definitional/historical knowledge, never for live or current facts — do not "
+    "treat a wiki result as proof of anything current. Web search, RSS, and direct-page results "
+    "are for current information. Use only these provided sources for any current/live fact — "
+    "never state a current fact (a score, a price, today's news, a rule that may have changed) "
+    "from your own training data as if it were up to date. If the sources conflict with each "
+    "other, say so plainly rather than picking one silently. Never claim to have searched or "
+    "browsed the web if no results block is present above for this turn. These block names "
+    "(WIKI_SEARCH_RESULTS, etc.) and the field labels inside them (title, url, retrieved_at, "
+    "reliability_note, ...) are internal formatting for you only — never write them, or the "
+    "word 'block', in your ANSWER. Refer to sources in plain language instead (e.g. \"according "
+    "to Wikipedia\" or \"a recent search found...\"), the same way you'd cite something a person "
+    "told you, not the way you'd cite a database table."
+)
+
+
+def _search_unavailable_note(reason: str) -> str:
+    return (
+        "This message appears to need current/live information, but no search results could be "
+        f"retrieved this turn ({reason}). Say plainly that you could not verify this — do not "
+        "guess, and do not answer a current-info question from potentially stale training data."
+    )
+
+
+def _source_result_lines(s: SourceResult) -> list[str]:
+    if s.source_type == "wiki":
+        return [
+            f"- title: {s.title or 'unknown'}",
+            f"  provider: {s.provider}",
+            f"  url: {s.url or 'unknown'}",
+            f"  retrieved_at: {s.retrieved_at or 'unknown'}",
+            f"  summary: {s.snippet or ''}",
+            f"  reliability_note: {s.reliability_note or ''}",
+        ]
+    if s.source_type == "rss":
+        return [
+            f"- feed_title: {s.feed_title or 'unknown'}",
+            f"  title: {s.title or 'unknown'}",
+            f"  url: {s.url or 'unknown'}",
+            f"  published_at: {s.published_at or 'unknown'}",
+            f"  retrieved_at: {s.retrieved_at or 'unknown'}",
+            f"  snippet: {s.snippet or ''}",
+            f"  reliability_note: {s.reliability_note or ''}",
+        ]
+    if s.source_type == "direct_page":
+        return [
+            f"- title: {s.title or 'unknown'}",
+            f"  domain: {s.domain or 'unknown'}",
+            f"  url: {s.url or 'unknown'}",
+            f"  retrieved_at: {s.retrieved_at or 'unknown'}",
+            f"  extracted_text: {s.snippet or ''}",
+            f"  reliability_note: {s.reliability_note or ''}",
+        ]
+    # web_search (default)
+    return [
+        f"- title: {s.title or 'unknown'}",
+        f"  provider: {s.provider}",
+        f"  domain: {s.domain or 'unknown'}",
+        f"  url: {s.url or 'unknown'}",
+        f"  retrieved_at: {s.retrieved_at or 'unknown'}",
+        f"  snippet: {s.snippet or ''}",
+        f"  reliability_note: {s.reliability_note or ''}",
+    ]
+
+
+_BLOCK_HEADERS = {
+    "wiki": "WIKI_SEARCH_RESULTS:",
+    "rss": "RSS_FEED_RESULTS:",
+    "web_search": "WEB_SEARCH_RESULTS:",
+    "direct_page": "DIRECT_PAGE_RESULTS:",
+}
+
+
+def _source_blocks(sources: list[SourceResult]) -> list[str]:
+    """One block per source_type present, in a fixed order (wiki, rss, web,
+    direct page) so the model sees background before current-info sources —
+    matches SOURCE_USAGE_INSTRUCTION's framing."""
+    blocks = []
+    for source_type in ("wiki", "rss", "web_search", "direct_page"):
+        matching = [s for s in sources if s.source_type == source_type]
+        if not matching:
+            continue
+        lines = [_BLOCK_HEADERS[source_type]]
+        for s in matching:
+            lines.extend(_source_result_lines(s))
+        blocks.append("\n".join(lines))
+    return blocks
+
 
 PREVIOUS_CONVERSATION_HONESTY_NOTE = (
     "The PREVIOUS_CONVERSATION_SNIPPETS section (if present below) is raw excerpts from earlier "
@@ -115,7 +210,7 @@ def build_system_prompt(
     now: datetime | None = None,
     prior_user_messages: list[str] | None = None,
     conversation_id: str | None = None,
-) -> tuple[str, list[AtlasCitation], str | None, list[MessageSnippet]]:
+) -> tuple[str, list[AtlasCitation], str | None, list[MessageSnippet], GatherResult]:
     settings = get_settings()
     constitution_view = council.build_constitution_view(db)
 
@@ -151,6 +246,28 @@ def build_system_prompt(
                 PREVIOUS_CONVERSATION_HONESTY_NOTE,
             ]
 
+    # No-billing web/wiki/RSS search (see app/search_intent.py, app/web_search.py) —
+    # only attempted when the message's own phrasing suggests it needs current
+    # or stable-background info beyond training data (never on every turn, and
+    # never for personal-memory/code-help/general-chat messages, which the
+    # intent classifier routes away from search entirely).
+    # gather_sources() itself short-circuits to a no-op GatherResult for
+    # memory_lookup/code_help/general_chat — called unconditionally here (rather
+    # than skipped in this function too) so gather_result.task_type always
+    # reflects the classification, even when no provider was actually called.
+    # That gives chat.py's persistence layer one consistent object to read
+    # current_info_intent from, instead of losing it whenever search wasn't
+    # needed.
+    intent = detect_search_intent(latest_user_message)
+    gather_result = web_search.gather_sources(intent, latest_user_message)
+    if gather_result.sources:
+        blocks = _source_blocks(gather_result.sources)
+        for block in blocks:
+            sections += ["", block]
+        sections += ["", SOURCE_USAGE_INSTRUCTION]
+    elif gather_result.search_failure_reason:
+        sections += ["", _search_unavailable_note(gather_result.search_failure_reason)]
+
     if explicit_remember_request:
         sections += ["", SKIP_MEMORY_JUDGMENT_NOTE]
 
@@ -169,4 +286,4 @@ def build_system_prompt(
         sections += ["", INDEPENDENCE_NUDGE]
         nudge_reason = INDEPENDENCE_NUDGE_REASON_PERIODIC
 
-    return "\n".join(sections), citations, nudge_reason, conversation_snippets
+    return "\n".join(sections), citations, nudge_reason, conversation_snippets, gather_result

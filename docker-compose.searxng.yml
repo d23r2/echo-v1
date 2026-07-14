@@ -1,0 +1,26 @@
+# Optional add-on: a local SearXNG instance for Echo's no-billing web search.
+# Doesn't touch the main docker-compose.yml — run alongside it, or standalone:
+#
+#   docker compose -f docker-compose.searxng.yml up -d
+#
+# Then set in backend/.env:
+#   WEB_SEARCH_ENABLED=true
+#   SEARXNG_BASE_URL=http://localhost:8080
+#   (if the backend itself is also in Docker Compose, use http://searxng:8080
+#   instead — see the "Backend in Docker" note in docs/searxng-setup.md)
+#
+# No API key, no account, no billing — SearXNG is a self-hosted metasearch
+# proxy over other engines' public results. See docs/searxng-setup.md for
+# health checks and troubleshooting.
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: echo-searxng
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng-config:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8080/
+    restart: unless-stopped

@@ -57,6 +57,22 @@ class Message(Base):
     # inventing a reasoning value that wasn't actually returned.
     envelope_status: Mapped[str] = mapped_column(String, default="missing")
     envelope_degradation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # No-billing web/wiki/RSS search results actually used for this turn's prompt —
+    # see app/web_search.py's SourceResult (source_type/provider/title/url/domain/
+    # feed_title/snippet/retrieved_at/published_at/reliability_note per entry).
+    # Persisted so reopening an old conversation still shows the "via ..." source
+    # names it was answered with, same rationale as atlas_citations above.
+    sources_used: Mapped[list] = mapped_column(JSON, default=list)
+    # The classified SearchIntent.task_type for this turn (see
+    # app/search_intent.py) — e.g. "sports_update", "encyclopedia_lookup",
+    # "general_chat". Recorded even when no search was needed, so it's
+    # possible to audit what the classifier decided.
+    current_info_intent: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Set when the message needed current/background info but no source could
+    # be retrieved (search disabled, provider unreachable, no results) — the
+    # honest reason surfaced instead of a fabricated answer. See
+    # app/web_search.py's GatherResult.search_failure_reason.
+    search_failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped["Conversation"] = relationship(back_populates="messages")

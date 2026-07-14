@@ -155,6 +155,34 @@ export interface AttachmentOut {
   base64_preview: string | null;
 }
 
+// A single retrieved-and-used source (web search, wiki, RSS, direct page
+// fetch, Atlas memory, previous conversation, Library file) — see
+// backend/app/web_search.py's SourceResult. Only source_type/provider are
+// guaranteed; the rest depend on which provider produced it.
+export type SourceType =
+  | "web_search"
+  | "wiki"
+  | "rss"
+  | "direct_page"
+  | "official_source"
+  | "previous_conversation"
+  | "atlas_memory"
+  | "library_file"
+  | "unavailable";
+
+export interface SourceUsed {
+  source_type: SourceType;
+  provider: string;
+  title?: string | null;
+  url?: string | null;
+  domain?: string | null;
+  feed_title?: string | null;
+  snippet?: string | null;
+  retrieved_at?: string | null;
+  published_at?: string | null;
+  reliability_note?: string | null;
+}
+
 export interface MessageOut {
   id: string;
   role: string;
@@ -168,6 +196,9 @@ export interface MessageOut {
   conversation_snippets: ConversationSnippetOut[];
   envelope_status: EnvelopeStatus;
   envelope_degradation_reason: string | null;
+  sources_used: SourceUsed[];
+  current_info_intent: string | null;
+  search_failure_reason: string | null;
   created_at: string;
 }
 
@@ -416,6 +447,9 @@ export interface StreamDoneEvent {
   conversation_snippets: ConversationSnippetOut[];
   envelope_status: EnvelopeStatus;
   envelope_degradation_reason: string | null;
+  sources_used: SourceUsed[];
+  current_info_intent: string | null;
+  search_failure_reason: string | null;
 }
 
 export interface StreamCallbacks {

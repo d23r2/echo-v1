@@ -1,5 +1,6 @@
 import json
 import logging
+from dataclasses import asdict
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app import (
     atlas,
-    attachments as attachments_lib,
     conversation_search,
     library,
     memory_conflicts,
@@ -18,14 +18,19 @@ from app import (
     preference_detection,
     schemas,
 )
+from app import (
+    attachments as attachments_lib,
+)
 from app.config import get_settings
 from app.db import get_db
 from app.envelope_stream import EnvelopeStreamParser
-from app.image_router import image_router
+from app.image_router import clean_unavailable_reason, image_router
 from app.models import Attachment, Conversation, MemoryCandidate, MemoryExtractionLog, Message
 from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
-from app.router import NoProviderAvailableError, ProviderUnavailableError, router as model_router
+from app.router import NoProviderAvailableError, ProviderUnavailableError
+from app.router import router as model_router
+from app.web_search import GatherResult
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -85,6 +90,17 @@ def _conversation_updated_at(conversation: Conversation):
     if conversation.messages:
         return max(m.created_at for m in conversation.messages)
     return conversation.created_at
+
+
+def _search_metadata_kwargs(gather_result: GatherResult) -> dict:
+    """Shared shape for both the persisted Message row and the API response —
+    see app/web_search.py's GatherResult/SourceResult and the matching
+    frontend fields on MessageOut/StreamDoneEvent (chatMetadata.ts)."""
+    return {
+        "sources_used": [asdict(s) for s in gather_result.sources],
+        "current_info_intent": gather_result.task_type,
+        "search_failure_reason": gather_result.search_failure_reason,
+    }
 
 
 def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
@@ -298,7 +314,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
-    system_prompt, citations, nudge_reason, conversation_snippets = persona.build_system_prompt(
+    system_prompt, citations, nudge_reason, conversation_snippets, gather_result = persona.build_system_prompt(
         db,
         payload.message,
         turn_count,
@@ -319,6 +335,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
 
     memory_update = _extract_memory(db, payload.message, result, conversation_id=conversation.id)
     snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
+    search_meta = _search_metadata_kwargs(gather_result)
 
     user_msg = Message(conversation_id=conversation.id, role="user", content=payload.message)
     echo_msg = Message(
@@ -333,6 +350,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
         envelope_status=result.envelope_status,
         envelope_degradation_reason=result.envelope_degradation_reason,
+        **search_meta,
     )
     db.add(user_msg)
     db.add(echo_msg)
@@ -354,6 +372,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         conversation_snippets=snippets_out,
         envelope_status=result.envelope_status,
         envelope_degradation_reason=result.envelope_degradation_reason,
+        **search_meta,
     )
 
 
@@ -385,7 +404,7 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
-    system_prompt, citations, nudge_reason, conversation_snippets = persona.build_system_prompt(
+    system_prompt, citations, nudge_reason, conversation_snippets, gather_result = persona.build_system_prompt(
         db,
         payload.message,
         turn_count,
@@ -398,6 +417,7 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
     conversation_id = conversation.id
     user_message = payload.message
     snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
+    search_meta = _search_metadata_kwargs(gather_result)
 
     def event_stream():
         parser = EnvelopeStreamParser()
@@ -442,6 +462,7 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
                 conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
                 envelope_status=result.envelope_status,
                 envelope_degradation_reason=result.envelope_degradation_reason,
+                **search_meta,
             )
             db.add(user_msg)
             db.add(echo_msg)
@@ -470,6 +491,7 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
                 "independence_nudge_reason": nudge_reason,
                 "envelope_status": result.envelope_status,
                 "envelope_degradation_reason": result.envelope_degradation_reason,
+                **search_meta,
             },
         )
 
@@ -518,7 +540,7 @@ async def send_chat_message_with_files(
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(message)
-    system_prompt, citations, nudge_reason, conversation_snippets = persona.build_system_prompt(
+    system_prompt, citations, nudge_reason, conversation_snippets, gather_result = persona.build_system_prompt(
         db,
         message,
         turn_count,
@@ -631,6 +653,7 @@ async def send_chat_message_with_files(
 
     _extract_memory(db, message, result, conversation_id=conversation.id)
     snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
+    search_meta = _search_metadata_kwargs(gather_result)
 
     user_msg = Message(
         conversation_id=conversation.id,
@@ -650,6 +673,7 @@ async def send_chat_message_with_files(
         conversation_snippets=[s.model_dump(mode="json") for s in snippets_out],
         envelope_status=result.envelope_status,
         envelope_degradation_reason=result.envelope_degradation_reason,
+        **search_meta,
     )
     db.add(user_msg)
     db.add(echo_msg)
@@ -687,9 +711,14 @@ async def generate_image(
 
     active_provider, unavailable_reason = image_router.select_provider()
     if active_provider is None:
+        # unavailable_reason is internal/log detail — may name a config field
+        # like GEMINI_API_KEY or COMFYUI_BASE_URL (see image_router.py) — so
+        # it's logged here, never put directly into the HTTP response the
+        # frontend renders.
+        logger.info("Image generation unavailable: %s", unavailable_reason)
         raise HTTPException(
             status_code=502,
-            detail=f"Image generation is unavailable — {unavailable_reason}",
+            detail=f"Image generation is unavailable — {clean_unavailable_reason(unavailable_reason)}",
         )
     if active_provider != "gemini":
         # Only Gemini has a real generate() implementation wired up in this

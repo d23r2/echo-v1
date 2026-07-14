@@ -68,6 +68,32 @@ used as FREE_MODE's primary choice. You can also cap it with `AZURE_DAILY_REQUES
 once reached, Azure is skipped for the rest of that day (separate from whatever limits
 Azure's own billing enforces).
 
+## Web search, Wikipedia, and RSS (no billing)
+
+Echo can ground answers in real search results, entirely free — no API key or billing
+account for any of it:
+
+- **Wikipedia/Wikimedia** — on by default (public API, no setup). Used for stable
+  background/definitional/historical facts, never as proof of anything current.
+- **SearXNG** — off by default; needs a self-hosted (or trusted public) SearXNG instance.
+  Used for current/live questions (news, prices, "did X happen").
+- **RSS/Atom feeds** — off by default; point at whichever feeds you want for
+  news/sports headlines.
+
+A message is only routed to search when its own phrasing suggests it needs current or
+background info (see `backend/app/search_intent.py`) — never on every turn, and never for
+personal-memory questions ("what did I tell you about my job?"), which use Atlas/
+conversation history instead. If a current-info question can't be verified (search off,
+unreachable, no results), Echo says so honestly rather than guessing from possibly-stale
+training data.
+
+In normal chat, sources show up only as a small natural line under the reply — `via
+Ollama, Wikipedia` or `via Gemini, SearXNG` — never a formal "Source:" label and never
+raw internal block names.
+
+See [docs/searxng-setup.md](docs/searxng-setup.md) for the one-command local SearXNG
+setup, health checks, and troubleshooting.
+
 ## Running locally (no Docker)
 
 **Backend**
@@ -108,6 +134,10 @@ running on your host. If you want the local fallback to work under Docker Compos
 Desktop for Windows/Mac). This only matters for Docker — running the backend directly with
 `uvicorn` needs no change.
 
+**Optional: local SearXNG for web search** — a separate compose file,
+`docker-compose.searxng.yml`, adds a self-hosted SearXNG instance without touching the
+setup above. See [docs/searxng-setup.md](docs/searxng-setup.md).
+
 ## Environment variables (backend/.env)
 
 | Variable | Purpose |
@@ -129,6 +159,9 @@ Desktop for Windows/Mac). This only matters for Docker — running the backend d
 | `IMAGE_PROVIDER` | `auto` / `gemini` / `ollama` / `comfyui` / `disabled` — see Image generation below |
 | `COMFYUI_BASE_URL` | Local ComfyUI server URL — reachability-check only in this build, see below |
 | `OPENROUTER_API_KEY` / `GROQ_API_KEY` | Reserved for a future free-tier provider integration — not yet wired to anything |
+| `WEB_SEARCH_ENABLED` / `SEARXNG_BASE_URL` / `WEB_SEARCH_MAX_RESULTS` / `WEB_FETCH_TIMEOUT_SECONDS` / `WEB_SEARCH_CACHE_MINUTES` | No-billing web search via SearXNG, off by default — see [docs/searxng-setup.md](docs/searxng-setup.md) |
+| `WIKI_SEARCH_ENABLED` / `WIKI_PROVIDER` / `WIKI_API_BASE_URL` / `WIKI_MAX_RESULTS` / `WIKI_FETCH_TIMEOUT_SECONDS` / `WIKI_USER_AGENT` | Wikipedia/Wikimedia background search, on by default (no key needed) — `WIKI_USER_AGENT` is client identification, not a credential; a working default is already set |
+| `RSS_SEARCH_ENABLED` / `RSS_FEED_URLS` / `RSS_MAX_ITEMS_PER_FEED` / `RSS_FETCH_TIMEOUT_SECONDS` / `RSS_CACHE_MINUTES` | RSS/Atom feeds for news/sports headlines, off by default (no feeds configured) |
 
 ## Image generation
 
@@ -172,7 +205,10 @@ browsers. There's no native app or real multi-account sync; "multi-device" here 
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for running tests, lint, type checks, and the
 recommended commit workflow. See [ROADMAP.md](ROADMAP.md) for what's done, what's in
-flight, and what's deliberately out of scope for now.
+flight, and what's deliberately out of scope for now. See
+[DAILY_SMOKE_TEST.md](DAILY_SMOKE_TEST.md) for a quick manual checklist after a work
+session, covering things the automated suite can't see (actual UI text, actual
+click-through behavior).
 
 ## Notes on the Value Invariant guard
 

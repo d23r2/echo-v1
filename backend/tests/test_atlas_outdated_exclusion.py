@@ -81,7 +81,7 @@ def test_outdated_entry_not_injected_into_persona_prompt(db_session):
     entry.outdated = True
     db_session.commit()
 
-    prompt, citations, _nudge, _snippets = persona.build_system_prompt(
+    prompt, citations, _nudge, _snippets, _gather_result = persona.build_system_prompt(
         db_session, f"What is Zylthorqu marker {token}'s favorite programming language?", turn_count=0
     )
     assert entry.id not in [c.id for c in citations]
@@ -93,7 +93,7 @@ def test_non_outdated_entry_still_injected_into_persona_prompt(db_session):
     content = f"Zylthorqu marker {token}'s favorite programming language is Go."
     entry = _entry(db_session, content)
 
-    prompt, citations, _nudge, _snippets = persona.build_system_prompt(
+    prompt, citations, _nudge, _snippets, _gather_result = persona.build_system_prompt(
         db_session, f"What is Zylthorqu marker {token}'s favorite programming language?", turn_count=0
     )
     assert entry.id in [c.id for c in citations]

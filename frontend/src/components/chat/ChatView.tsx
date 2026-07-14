@@ -409,6 +409,9 @@ export default function ChatView() {
       conversation_snippets: [],
       envelope_status: "missing",
       envelope_degradation_reason: null,
+      sources_used: [],
+      current_info_intent: null,
+      search_failure_reason: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
@@ -441,6 +444,9 @@ export default function ChatView() {
         conversation_snippets: [],
         envelope_status: "missing",
         envelope_degradation_reason: null,
+        sources_used: [],
+        current_info_intent: null,
+        search_failure_reason: null,
         created_at: new Date().toISOString(),
         streaming: true,
       },
@@ -480,6 +486,9 @@ export default function ChatView() {
                     conversation_snippets: data.conversation_snippets,
                     envelope_status: data.envelope_status,
                     envelope_degradation_reason: data.envelope_degradation_reason,
+                    sources_used: data.sources_used,
+                    current_info_intent: data.current_info_intent,
+                    search_failure_reason: data.search_failure_reason,
                     created_at: m.created_at,
                   }
                 : m
@@ -535,6 +544,9 @@ export default function ChatView() {
       conversation_snippets: [],
       envelope_status: "missing",
       envelope_degradation_reason: null,
+      sources_used: [],
+      current_info_intent: null,
+      search_failure_reason: null,
       created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimisticUser]);
@@ -606,19 +618,18 @@ export default function ChatView() {
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm leading-relaxed text-zinc-100 whitespace-pre-wrap">
                       {welcome.greeting}
                     </div>
-                    {welcome.referenced_memories.length > 0 && (
-                      <div className="mt-1 px-1 text-[10px] text-zinc-600">
-                        recalling: {welcome.referenced_memories.join(" · ")}
-                      </div>
-                    )}
+                    {/* welcome.referenced_memories (raw recalled Atlas snippets)
+                        deliberately not shown — the greeting may use them
+                        internally, but the normal chat view doesn't surface
+                        internal memory detail. See MessageBubble.tsx's same
+                        policy for regular replies. */}
                   </div>
                 </div>
               ) : welcomeLoading ? (
                 <div className="text-xs text-zinc-500">Echo is remembering…</div>
               ) : (
                 <div className="text-center text-sm text-zinc-500">
-                  Ask Echo anything. It will show its reasoning and cite any relevant Atlas
-                  memories it draws on.
+                  Ask Echo anything.
                 </div>
               )}
             </div>

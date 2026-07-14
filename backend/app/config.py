@@ -79,6 +79,47 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = None
     groq_api_key: str | None = None
 
+    # --- No-billing web search (app/web_search.py) ---
+    # All disabled/absent by default — Echo works fully without any of these
+    # configured, it just can't answer current/live questions (and says so
+    # honestly instead of guessing). None of these require an API key or
+    # billing; SearXNG is meant to be self-hosted (see docs/searxng-setup.md).
+    web_search_enabled: bool = False
+    web_search_provider: str = "searxng"  # searxng | disabled
+    searxng_base_url: str | None = None
+    web_search_max_results: int = 5
+    web_fetch_timeout_seconds: int = 10
+    # Simple in-memory TTL cache for identical queries — avoids hammering a
+    # public/self-hosted SearXNG instance on repeated near-identical asks.
+    web_search_cache_minutes: int = 10
+
+    wiki_search_enabled: bool = True
+    wiki_provider: str = "wikimedia"  # wikimedia | custom | disabled
+    wiki_api_base_url: str = "https://en.wikipedia.org/w/api.php"
+    wiki_max_results: int = 5
+    wiki_fetch_timeout_seconds: int = 10
+    # Wikimedia's API enforces its robot policy (https://w.wiki/4wJS) by
+    # rejecting any User-Agent that doesn't look like ClientName/Version (URL;
+    # contact) — a plain descriptive string with no URL-shaped token gets a
+    # hard 403 (confirmed by hand against the real API). Also sent to
+    # SearXNG/RSS/direct-page requests for consistency, though only Wikimedia
+    # actually enforces this. None of this requires a key or account — it's
+    # purely a client-identification string, not a credential.
+    wiki_user_agent: str = (
+        "EchoPersonalAI/1.0 (https://github.com/echo-project/echo; local self-hosted, "
+        "no-billing search) python-httpx"
+    )
+
+    rss_search_enabled: bool = False
+    rss_feed_urls: str = ""  # comma-separated
+    rss_max_items_per_feed: int = 10
+    rss_fetch_timeout_seconds: int = 10
+    rss_cache_minutes: int = 10
+
+    @property
+    def rss_feed_url_list(self) -> list[str]:
+        return [u.strip() for u in self.rss_feed_urls.split(",") if u.strip()]
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

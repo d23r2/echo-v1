@@ -7,7 +7,7 @@ from app import persona
 
 
 def test_detected_pattern_is_injected_and_reason_returned(db_session):
-    prompt, _citations, nudge_reason, _snippets = persona.build_system_prompt(
+    prompt, _citations, nudge_reason, _snippets, _gather_result = persona.build_system_prompt(
         db_session,
         "Just you choose, whatever you think is best.",
         turn_count=1,
@@ -21,7 +21,7 @@ def test_detected_pattern_is_injected_and_reason_returned(db_session):
 def test_pattern_takes_priority_over_periodic_nudge(db_session):
     # turn_count is a multiple of the periodic interval (6), which would normally
     # fire the generic nudge — but a specific pattern is present and must win instead.
-    prompt, _citations, nudge_reason, _snippets = persona.build_system_prompt(
+    prompt, _citations, nudge_reason, _snippets, _gather_result = persona.build_system_prompt(
         db_session,
         "Just you choose, whatever you think is best.",
         turn_count=6,
@@ -33,7 +33,7 @@ def test_pattern_takes_priority_over_periodic_nudge(db_session):
 
 
 def test_periodic_nudge_still_fires_when_no_pattern_detected(db_session):
-    prompt, _citations, nudge_reason, _snippets = persona.build_system_prompt(
+    prompt, _citations, nudge_reason, _snippets, _gather_result = persona.build_system_prompt(
         db_session, "What's a good book to read?", turn_count=6
     )
 
@@ -42,7 +42,7 @@ def test_periodic_nudge_still_fires_when_no_pattern_detected(db_session):
 
 
 def test_no_nudge_when_no_pattern_and_not_on_periodic_turn(db_session):
-    prompt, _citations, nudge_reason, _snippets = persona.build_system_prompt(
+    prompt, _citations, nudge_reason, _snippets, _gather_result = persona.build_system_prompt(
         db_session, "What's a good book to read?", turn_count=2
     )
 

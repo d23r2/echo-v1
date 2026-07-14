@@ -39,6 +39,9 @@ def init_db() -> None:
     _ensure_column("messages", "conversation_snippets", "TEXT DEFAULT '[]'")
     _ensure_column("messages", "envelope_status", "TEXT DEFAULT 'missing'")
     _ensure_column("messages", "envelope_degradation_reason", "TEXT")
+    _ensure_column("messages", "sources_used", "TEXT DEFAULT '[]'")
+    _ensure_column("messages", "current_info_intent", "TEXT")
+    _ensure_column("messages", "search_failure_reason", "TEXT")
 
 
 def _ensure_atlas_memory_type_column() -> None:

@@ -70,6 +70,31 @@ _STATUS_CHECKS = {
 }
 
 
+def clean_unavailable_reason(raw_reason: str | None) -> str:
+    """Translates a select_provider() reason (which may name a config field
+    like GEMINI_API_KEY/COMFYUI_BASE_URL/IMAGE_PROVIDER for server-side/log
+    clarity — see the raw strings above) into a short, human-readable message
+    with no internal config/env-var names. Use this wherever a reason crosses
+    into an HTTP response or the chat UI (routers/chat.py's generate-image
+    endpoint, routers/features.py's image_generation_detail.reason); the raw
+    form stays fine for statuses()'s per-provider breakdown, which is API/log
+    detail that the frontend never renders directly."""
+    if not raw_reason:
+        return "Image generation is unavailable right now."
+    lower = raw_reason.lower()
+    if "disabled" in lower:
+        return "Image generation is turned off."
+    if "does not support" in lower:
+        return "Image generation isn't available for this provider."
+    if "not implemented" in lower:
+        return "Image generation isn't available right now."
+    if "not reachable" in lower or "unreachable" in lower:
+        return "Image generation isn't reachable right now."
+    if "not set" in lower or "not configured" in lower or "no image generation provider" in lower:
+        return "Image generation isn't configured yet."
+    return "Image generation is unavailable right now."
+
+
 class ImageGenerationRouter:
     def statuses(self) -> dict[str, ImageProviderStatus]:
         return {name: check() for name, check in _STATUS_CHECKS.items()}

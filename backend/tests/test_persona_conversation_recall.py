@@ -29,7 +29,7 @@ def test_snippets_included_when_atlas_empty_but_history_has_a_match(db_session):
         [("user", "When you explain technical things to me, lead with a concrete example first.")],
     )
 
-    prompt, citations, _nudge, snippets = persona.build_system_prompt(
+    prompt, citations, _nudge, snippets, _gather_result = persona.build_system_prompt(
         db_session,
         "Do you remember what I said about my learning style?",
         turn_count=1,
@@ -50,7 +50,7 @@ def test_snippets_not_injected_when_not_triggered(db_session):
 
     # Same underlying content exists in history, but this message doesn't use
     # any recall phrasing — must not trigger a search.
-    prompt, _citations, _nudge, snippets = persona.build_system_prompt(
+    prompt, _citations, _nudge, snippets, _gather_result = persona.build_system_prompt(
         db_session, "What's a good way to learn Python?", turn_count=1
     )
 
@@ -59,7 +59,7 @@ def test_snippets_not_injected_when_not_triggered(db_session):
 
 
 def test_no_match_in_history_means_no_snippets_section(db_session):
-    prompt, _citations, _nudge, snippets = persona.build_system_prompt(
+    prompt, _citations, _nudge, snippets, _gather_result = persona.build_system_prompt(
         db_session, "Do you remember what I said about my learning style?", turn_count=0
     )
 
@@ -86,7 +86,7 @@ def test_atlas_retrieval_still_works_alongside_conversation_search(db_session, m
     )
     monkeypatch.setattr("app.persona.atlas.search", lambda db, query, top_k: [(fake_entry, 0.1)])
 
-    prompt, citations, _nudge, _snippets = persona.build_system_prompt(
+    prompt, citations, _nudge, _snippets, _gather_result = persona.build_system_prompt(
         db_session, "What's my favorite color?", turn_count=0
     )
 
@@ -99,7 +99,7 @@ def test_current_conversation_excluded_from_snippet_search(db_session):
         db_session, "Current chat", [("user", "provider routing details are here")]
     )
 
-    _prompt, _citations, _nudge, snippets = persona.build_system_prompt(
+    _prompt, _citations, _nudge, snippets, _gather_result = persona.build_system_prompt(
         db_session,
         "What did we discuss earlier about provider routing?",
         turn_count=1,
