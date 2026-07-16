@@ -2,16 +2,27 @@ import { useState } from "react";
 import MobileDrawer from "./components/MobileDrawer";
 import RoleSwitcher from "./components/RoleSwitcher";
 import Sidebar, { View } from "./components/Sidebar";
+import ActionCenterView from "./components/actions/ActionCenterView";
 import AmendmentsView from "./components/amendments/AmendmentsView";
 import AtlasView from "./components/atlas/AtlasView";
 import ChatView from "./components/chat/ChatView";
+import CognitiveCoreView from "./components/cognitive/CognitiveCoreView";
 import ConstitutionView from "./components/constitution/ConstitutionView";
+import EvaluationLabView from "./components/evaluations/EvaluationLabView";
+import KnowledgeVaultView from "./components/knowledge/KnowledgeVaultView";
 import LibraryView from "./components/library/LibraryView";
+import MissionControlView from "./components/mission-control/MissionControlView";
+import PermissionCenterView from "./components/permissions/PermissionCenterView";
+import PersonalityView from "./components/personality/PersonalityView";
+import ProjectsView from "./components/projects/ProjectsView";
+import ReleaseManagerView from "./components/releases/ReleaseManagerView";
 import ScheduleView from "./components/schedule/ScheduleView";
 import SelfImprovementView from "./components/SelfImprovementView";
+import TasksView from "./components/tasks/TasksView";
+import ToolCenterView from "./components/tools/ToolCenterView";
 
 export default function App() {
-  const [view, setView] = useState<View>("chat");
+  const [view, setView] = useState<View>("mission-control");
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
@@ -38,10 +49,21 @@ export default function App() {
         </div>
 
         <main className="flex-1 overflow-y-auto">
+          {view === "mission-control" && <MissionControlView onNavigate={setView} />}
           {view === "chat" && <ChatView />}
+          {view === "projects" && <ProjectsView />}
+          {view === "tasks" && <TasksView />}
           {view === "library" && <LibraryView />}
           {view === "schedule" && <ScheduleView />}
           {view === "atlas" && <AtlasView />}
+          {view === "personality" && <PersonalityView />}
+          {view === "knowledge-vault" && <KnowledgeVaultView />}
+          {view === "evaluation-lab" && <EvaluationLabView />}
+          {view === "action-center" && <ActionCenterView />}
+          {view === "tool-center" && <ToolCenterView />}
+          {view === "cognitive-core" && <CognitiveCoreView />}
+          {view === "release-manager" && <ReleaseManagerView />}
+          {view === "permission-center" && <PermissionCenterView />}
           {view === "constitution" && <ConstitutionView />}
           {view === "amendments" && <AmendmentsView />}
           {view === "self-improvement" && <SelfImprovementView />}

@@ -6,7 +6,6 @@ for natural preference statements, which was the actual reported bug).
 
 from app.preference_detection import detect_preference_statement
 
-
 # ---- detect_preference_statement() — pure function ----
 
 

@@ -3,7 +3,7 @@ set_cooldown/get_active_cooldown/clear_cooldown) — local, deterministic,
 no real provider calls.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from app import usage
 from app.models import ProviderCooldown
@@ -26,8 +26,8 @@ def test_expired_cooldown_is_not_active(db_session):
     row = ProviderCooldown(
         provider="anthropic",
         category="rate_limited",
-        started_at=datetime.now(timezone.utc) - timedelta(hours=1),
-        cooldown_until=datetime.now(timezone.utc) - timedelta(minutes=1),
+        started_at=datetime.now(UTC) - timedelta(hours=1),
+        cooldown_until=datetime.now(UTC) - timedelta(minutes=1),
     )
     db_session.add(row)
     db_session.commit()

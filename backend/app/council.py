@@ -8,7 +8,7 @@ can even be voted on, and ratification requires real quorum math over
 whatever votes have actually been cast.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -92,10 +92,10 @@ def recompute_status(db: Session, amendment: models.Amendment) -> models.Amendme
     t = tally(amendment)
     if t["ready_to_ratify"]:
         amendment.status = "ratified"
-        amendment.decided_at = datetime.now(timezone.utc)
+        amendment.decided_at = datetime.now(UTC)
     elif t["ready_to_reject"]:
         amendment.status = "rejected"
-        amendment.decided_at = datetime.now(timezone.utc)
+        amendment.decided_at = datetime.now(UTC)
     db.commit()
     db.refresh(amendment)
     return amendment

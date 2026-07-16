@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 
 from app import (
     atlas,
+    chat_actions,
     conversation_search,
+    human_persona,
     library,
     memory_conflicts,
     memory_extraction,
@@ -30,6 +32,7 @@ from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError
 from app.router import router as model_router
+from app.tester import get_tester_id
 from app.web_search import GatherResult
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -86,6 +89,27 @@ def _make_snippet(text: str, query: str, context: int = 40) -> str:
     return snippet
 
 
+def _save_action_turn(db: Session, conversation: Conversation, user_message: str, action: chat_actions.ActionResult) -> Message:
+    """Persists a deterministic command turn (Phase 9) exactly like a normal
+    chat turn, minus any model call — provider="system" marks it as such
+    internally. Never invokes memory extraction: a command confirmation
+    ("Created project X") isn't user-stated content worth extracting."""
+    user_msg = Message(conversation_id=conversation.id, role="user", content=user_message)
+    echo_msg = Message(
+        conversation_id=conversation.id,
+        role="echo",
+        content=action.response_text,
+        provider="system",
+    )
+    db.add(user_msg)
+    db.add(echo_msg)
+    db.commit()
+    db.refresh(echo_msg)
+    conversation_search.index_message(user_msg)
+    conversation_search.index_message(echo_msg)
+    return echo_msg
+
+
 def _conversation_updated_at(conversation: Conversation):
     if conversation.messages:
         return max(m.created_at for m in conversation.messages)
@@ -101,6 +125,86 @@ def _search_metadata_kwargs(gather_result: GatherResult) -> dict:
         "current_info_intent": gather_result.task_type,
         "search_failure_reason": gather_result.search_failure_reason,
     }
+
+
+def _try_local_intelligence_engine(
+    db: Session, conversation: Conversation, payload: schemas.ChatRequest, tester_id: str, history: list[ChatMessage]
+) -> schemas.ChatResponse | None:
+    """ECHO Local Intelligence Engine v1 (LOCAL_INTELLIGENCE_ENGINE_ENABLED,
+    default off — see ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md). Returns None
+    when the engine path doesn't apply — flag off, or an explicit non-Ollama
+    provider pin ("pinned means pinned" stays true exactly like the existing
+    model_router) — so the caller falls straight through to the unchanged
+    single-call chat flow below. POST /api/chat/stream never calls this;
+    the engine only integrates into the non-streaming endpoint for v1.
+
+    Known, documented gap versus the normal path: memory extraction,
+    dependency nudges, and conversation-snippet metadata aren't carried
+    over yet — a clean scope cut, not an oversight."""
+    settings = get_settings()
+    if not settings.local_intelligence_engine_enabled:
+        return None
+    if payload.provider not in ("auto", "ollama"):
+        return None
+
+    from app.services.local_intelligence_engine import LocalIntelligenceEngine
+
+    quality_mode = human_persona.get_or_create_persona_settings(db, tester_id).local_answer_quality_mode
+    engine = LocalIntelligenceEngine(db)
+    result = engine.generate_response(
+        payload.message,
+        conversation_id=conversation.id,
+        tester_id=tester_id,
+        mode=quality_mode,
+        history=history,
+        # The engine's own settings.cloud_fallback_enabled check (off by
+        # default) is the real gate — this just opts the one real call site
+        # into letting that gate run at all.
+        allow_cloud_fallback=True,
+    )
+
+    citations = [
+        schemas.AtlasCitation(
+            id=e.id, content=e.content, epistemic_status=e.epistemic_status, confidence=e.confidence
+        )
+        for e in result.atlas_citations
+    ]
+    search_meta = {
+        "sources_used": [asdict(s) for s in result.sources_used],
+        "current_info_intent": result.current_info_intent,
+        "search_failure_reason": result.search_failure_reason,
+    }
+    fallback_note = "Answered via cloud fallback (local confidence was low)." if result.fallback_used else None
+
+    user_msg = Message(conversation_id=conversation.id, role="user", content=payload.message)
+    echo_msg = Message(
+        conversation_id=conversation.id,
+        role="echo",
+        content=result.answer,
+        provider=result.provider,
+        atlas_citations=[c.model_dump() for c in citations],
+        fallback_note=fallback_note,
+        envelope_status="missing",
+        **search_meta,
+    )
+    db.add(user_msg)
+    db.add(echo_msg)
+    db.commit()
+    db.refresh(echo_msg)
+    conversation_search.index_message(user_msg)
+    conversation_search.index_message(echo_msg)
+    human_persona.upsert_thread_state(db, conversation, tester_id, payload.message, result.answer)
+
+    return schemas.ChatResponse(
+        conversation_id=conversation.id,
+        message_id=echo_msg.id,
+        content=result.answer,
+        provider_used=result.provider,
+        atlas_citations=citations,
+        fallback_note=fallback_note,
+        envelope_status="missing",
+        **search_meta,
+    )
 
 
 def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
@@ -295,21 +399,40 @@ def _extract_memory(
 
 
 @router.post("/chat", response_model=schemas.ChatResponse)
-def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db)):
+def send_chat_message(
+    payload: schemas.ChatRequest, db: Session = Depends(get_db), tester_id: str = Depends(get_tester_id)
+):
+    tester_id = payload.tester_id or tester_id
     if payload.conversation_id:
         conversation = db.get(Conversation, payload.conversation_id)
-        if conversation is None:
+        if conversation is None or conversation.tester_id != tester_id:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
         title = payload.message.strip()[:60] or "New conversation"
-        conversation = Conversation(title=title)
+        conversation = Conversation(title=title, tester_id=tester_id)
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
 
+    persona_action = chat_actions.try_handle_persona_action(db, conversation, tester_id, payload.message)
+    action = persona_action or chat_actions.try_handle_action(db, payload.message, tester_id)
+    if action is not None:
+        echo_msg = _save_action_turn(db, conversation, payload.message, action)
+        return schemas.ChatResponse(
+            conversation_id=conversation.id,
+            message_id=echo_msg.id,
+            content=action.response_text,
+            provider_used="system",
+        )
+
     history = [
         ChatMessage(role=_ROLE_MAP[m.role], content=m.content) for m in conversation.messages
     ]
+
+    engine_response = _try_local_intelligence_engine(db, conversation, payload, tester_id, history)
+    if engine_response is not None:
+        return engine_response
+
     turn_count = len(conversation.messages)
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
@@ -321,6 +444,8 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
         explicit_remember_request=explicit_remember,
         prior_user_messages=prior_user_messages,
         conversation_id=conversation.id,
+        tester_id=tester_id,
+        conversation=conversation,
     )
     history.append(ChatMessage(role="user", content=payload.message))
 
@@ -358,6 +483,7 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
     db.refresh(echo_msg)
     conversation_search.index_message(user_msg)
     conversation_search.index_message(echo_msg)
+    human_persona.upsert_thread_state(db, conversation, tester_id, payload.message, result.text)
 
     return schemas.ChatResponse(
         conversation_id=conversation.id,
@@ -377,7 +503,9 @@ def send_chat_message(payload: schemas.ChatRequest, db: Session = Depends(get_db
 
 
 @router.post("/chat/stream")
-def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends(get_db)):
+def send_chat_message_stream(
+    payload: schemas.ChatRequest, db: Session = Depends(get_db), tester_id: str = Depends(get_tester_id)
+):
     """Server-Sent Events counterpart to POST /api/chat. Streams only the
     user-facing ANSWER text as `token` events while REASONING/MEMORY stay
     buffered server-side (see app/envelope_stream.py) — never exposed to the
@@ -386,16 +514,47 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
     Message rows, and emits one final `done` event carrying everything the
     non-streaming response would have returned. Text-only — attachments still
     go through POST /api/chat/send-with-files."""
+    tester_id = payload.tester_id or tester_id
     if payload.conversation_id:
         conversation = db.get(Conversation, payload.conversation_id)
-        if conversation is None:
+        if conversation is None or conversation.tester_id != tester_id:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
         title = payload.message.strip()[:60] or "New conversation"
-        conversation = Conversation(title=title)
+        conversation = Conversation(title=title, tester_id=tester_id)
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
+
+    persona_action = chat_actions.try_handle_persona_action(db, conversation, tester_id, payload.message)
+    action = persona_action or chat_actions.try_handle_action(db, payload.message, tester_id)
+    if action is not None:
+        echo_msg = _save_action_turn(db, conversation, payload.message, action)
+
+        def action_event_stream():
+            yield _sse("token", {"text": action.response_text})
+            yield _sse(
+                "done",
+                {
+                    "conversation_id": conversation.id,
+                    "message_id": echo_msg.id,
+                    "content": action.response_text,
+                    "reasoning": None,
+                    "provider_used": "system",
+                    "atlas_citations": [],
+                    "memory_update": None,
+                    "conversation_snippets": [],
+                    "fallback_note": None,
+                    "independence_nudge_reason": None,
+                    "envelope_status": "missing",
+                    "envelope_degradation_reason": None,
+                    "sources_used": [],
+                    "current_info_intent": None,
+                    "search_failure_reason": None,
+                },
+            )
+
+        return StreamingResponse(action_event_stream(), media_type="text/event-stream")
 
     history = [
         ChatMessage(role=_ROLE_MAP[m.role], content=m.content) for m in conversation.messages
@@ -411,6 +570,8 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
         explicit_remember_request=explicit_remember,
         prior_user_messages=prior_user_messages,
         conversation_id=conversation.id,
+        tester_id=tester_id,
+        conversation=conversation,
     )
     history.append(ChatMessage(role="user", content=payload.message))
 
@@ -470,6 +631,7 @@ def send_chat_message_stream(payload: schemas.ChatRequest, db: Session = Depends
             db.refresh(echo_msg)
             conversation_search.index_message(user_msg)
             conversation_search.index_message(echo_msg)
+            human_persona.upsert_thread_state(db, conversation, tester_id, user_message, result.text)
         except Exception:
             logger.exception("Failed to save streamed chat turn")
             db.rollback()
@@ -506,6 +668,7 @@ async def send_chat_message_with_files(
     provider: str = Form("auto"),
     files: list[UploadFile] = File(default_factory=list),
     db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
 ):
     settings = get_settings()
     uploads: list[tuple[UploadFile, bytes]] = []
@@ -524,11 +687,11 @@ async def send_chat_message_with_files(
 
     if conversation_id:
         conversation = db.get(Conversation, conversation_id)
-        if conversation is None:
+        if conversation is None or conversation.tester_id != tester_id:
             raise HTTPException(status_code=404, detail="Conversation not found")
     else:
         title = message.strip()[:60] or (uploads[0][0].filename if uploads else "New conversation")
-        conversation = Conversation(title=title[:60])
+        conversation = Conversation(title=title[:60], tester_id=tester_id)
         db.add(conversation)
         db.commit()
         db.refresh(conversation)
@@ -547,6 +710,8 @@ async def send_chat_message_with_files(
         explicit_remember_request=explicit_remember,
         prior_user_messages=prior_user_messages,
         conversation_id=conversation.id,
+        tester_id=tester_id,
+        conversation=conversation,
     )
 
     if uploads:

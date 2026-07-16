@@ -1,5 +1,5 @@
-from app.models import Conversation
 from app.db import SessionLocal
+from app.models import Conversation
 
 
 def test_conversation_model_exists():

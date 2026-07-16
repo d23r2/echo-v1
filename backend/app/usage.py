@@ -5,7 +5,7 @@ vary and change over time. This only records what actually happened (a successfu
 call, or a real 429 response) and lets the caller react to that.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
@@ -19,14 +19,14 @@ from app.provider_errors import ErrorCategory
 # reasonable default for those rather than guessing wrong.
 _PROVIDER_RESET_TZ = {
     "gemini": ZoneInfo("America/Los_Angeles"),
-    "anthropic": timezone.utc,
-    "openai": timezone.utc,
-    "grok": timezone.utc,
+    "anthropic": UTC,
+    "openai": UTC,
+    "grok": UTC,
 }
 
 
 def _date_key(provider: str) -> str:
-    tz = _PROVIDER_RESET_TZ.get(provider, timezone.utc)
+    tz = _PROVIDER_RESET_TZ.get(provider, UTC)
     return datetime.now(tz).strftime("%Y-%m-%d")
 
 
@@ -37,7 +37,7 @@ def _as_utc_isoformat(dt: datetime) -> str:
     # time instead of UTC — silently corrupting the "is this recent" comparison the
     # frontend does against last_429_at by however many hours off UTC the browser is.
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
 
 
@@ -62,7 +62,7 @@ def record_request(db: Session, provider: str) -> None:
 
 def record_429(db: Session, provider: str) -> None:
     row = _get_or_create_row(db, provider)
-    row.last_429_at = datetime.now(timezone.utc)
+    row.last_429_at = datetime.now(UTC)
     db.commit()
 
 
@@ -94,7 +94,7 @@ def set_cooldown(db: Session, provider: str, category: ErrorCategory) -> None:
     settings = get_settings()
     if settings.provider_cooldown_minutes <= 0:
         return
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     row = db.query(ProviderCooldown).filter_by(provider=provider).first()
     if row is None:
         row = ProviderCooldown(provider=provider, category=category, started_at=now, cooldown_until=now)
@@ -113,8 +113,8 @@ def get_active_cooldown(db: Session, provider: str) -> ProviderCooldown | None:
         return None
     cooldown_until = row.cooldown_until
     if cooldown_until.tzinfo is None:
-        cooldown_until = cooldown_until.replace(tzinfo=timezone.utc)
-    if cooldown_until <= datetime.now(timezone.utc):
+        cooldown_until = cooldown_until.replace(tzinfo=UTC)
+    if cooldown_until <= datetime.now(UTC):
         return None
     return row
 

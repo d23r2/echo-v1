@@ -42,6 +42,39 @@ def init_db() -> None:
     _ensure_column("messages", "sources_used", "TEXT DEFAULT '[]'")
     _ensure_column("messages", "current_info_intent", "TEXT")
     _ensure_column("messages", "search_failure_reason", "TEXT")
+    _ensure_column("conversations", "tester_id", "TEXT DEFAULT 'default'")
+    _ensure_column("conversations", "active_operational_mode", "TEXT")
+    _ensure_column("conversations", "session_style_override", "TEXT DEFAULT '{}'")
+    _ensure_column("persona_settings", "local_answer_quality_mode", "TEXT DEFAULT 'balanced'")
+    _ensure_column("persona_settings", "voice_mode", "TEXT DEFAULT 'push_to_talk'")
+    _ensure_column("persona_settings", "tts_enabled", "BOOLEAN DEFAULT 0")
+    _seed_action_reliability_core()
+    _seed_cognitive_core()
+
+
+def _seed_action_reliability_core() -> None:
+    """Delegates to each service's own ensure_registered()/ensure_defaults()
+    — the same idempotent functions tests call directly against the
+    isolated db_session fixture, so there's exactly one seeding
+    implementation per system rather than one for real startup and a
+    second duplicated one for tests. Imports are local to avoid a circular
+    import (these services import from app.models)."""
+    from app.services import action_system, permission_center, tool_registry
+
+    with SessionLocal() as db:
+        action_system.ensure_registered(db)
+        permission_center.ensure_defaults(db)
+        tool_registry.ensure_registered(db)
+
+
+def _seed_cognitive_core() -> None:
+    """Same delegation pattern as _seed_action_reliability_core() — one
+    idempotent seeding implementation, called both here (real startup) and
+    directly by tests using the isolated db_session fixture."""
+    from app.services import cognitive_core
+
+    with SessionLocal() as db:
+        cognitive_core.seed_world_model(db)
 
 
 def _ensure_atlas_memory_type_column() -> None:

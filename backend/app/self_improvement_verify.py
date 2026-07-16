@@ -7,8 +7,9 @@ import shutil
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+
 
 def _resolve_repo_root() -> Path:
     """Local dev: this file lives at <repo>/backend/app/…, so the repo root is
@@ -44,7 +45,7 @@ class CheckResult:
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _truncate(text: str, limit: int = _MAX_OUTPUT_CHARS) -> str:

@@ -104,6 +104,15 @@ export default function ChatActionMenu({
           <button
             role="menuitem"
             disabled
+            title="Camera/visual analysis is not configured yet."
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-600 disabled:cursor-not-allowed"
+          >
+            📷 Camera (not configured yet)
+          </button>
+
+          <button
+            role="menuitem"
+            disabled
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-600"
           >
             🔧 More tools coming later

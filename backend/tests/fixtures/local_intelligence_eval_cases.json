@@ -1,0 +1,133 @@
+[
+  {
+    "id": "simple_chat",
+    "message": "Explain entropy simply.",
+    "expect": {
+      "intent": "normal_chat",
+      "source_need": "none",
+      "model_role": "fast",
+      "critic_required": false,
+      "should_use_cloud": false,
+      "confidence": "low",
+      "metadata_via_contains": []
+    }
+  },
+  {
+    "id": "prompt_generation",
+    "message": "Give me a Claude Code prompt to test Android APK.",
+    "expect": {
+      "intent": "prompt_generation",
+      "source_need": "none",
+      "model_role": "coding",
+      "critic_required": true,
+      "should_use_cloud": false,
+      "confidence": "low",
+      "metadata_via_contains": []
+    }
+  },
+  {
+    "id": "current_info",
+    "message": "What is the latest Liverpool score?",
+    "expect": {
+      "intent": "current_info",
+      "source_need": "web",
+      "model_role": "fast",
+      "critic_required": true,
+      "should_use_cloud": false,
+      "confidence": "unverified",
+      "metadata_via_contains": []
+    }
+  },
+  {
+    "id": "memory",
+    "message": "What did we decide about SearXNG?",
+    "expect": {
+      "intent": "personal_memory",
+      "source_need": "memory",
+      "model_role": "fast",
+      "critic_required": false,
+      "should_use_cloud": false,
+      "confidence": "low_or_high_depending_on_data",
+      "metadata_via_contains": ["Atlas"]
+    }
+  },
+  {
+    "id": "coding_review",
+    "message": "Review this function for bugs.",
+    "expect": {
+      "intent": "code_review",
+      "source_need": "none",
+      "model_role": "coding",
+      "critic_required": true,
+      "should_use_cloud": false,
+      "confidence": "low",
+      "metadata_via_contains": []
+    }
+  },
+  {
+    "id": "release_testing",
+    "message": "Is ECHO Green now?",
+    "expect": {
+      "intent": "release_testing",
+      "source_need": "memory",
+      "model_role": "fast",
+      "critic_required": true,
+      "should_use_cloud": false,
+      "confidence": "low",
+      "metadata_via_contains": []
+    }
+  },
+  {
+    "id": "emotional_support",
+    "message": "I'm overwhelmed. What should I do next?",
+    "expect": {
+      "intent": "emotional_support",
+      "source_need": "none",
+      "model_role": "fast",
+      "critic_required": false,
+      "should_use_cloud": false,
+      "confidence": "low",
+      "metadata_via_contains": []
+    }
+  },
+  {
+    "id": "library_file",
+    "message": "Summarize the PDF I uploaded.",
+    "expect": {
+      "intent": "library_file",
+      "source_need": "file",
+      "model_role": "fast",
+      "critic_required": false,
+      "should_use_cloud": false,
+      "confidence": "medium_if_found",
+      "metadata_via_contains": ["Library"]
+    }
+  },
+  {
+    "id": "tasks",
+    "message": "What tasks are due today?",
+    "expect": {
+      "intent": "project_task",
+      "source_need": "memory",
+      "model_role": "fast",
+      "critic_required": false,
+      "should_use_cloud": false,
+      "confidence": "low_or_high_depending_on_data",
+      "metadata_via_contains": ["Tasks"]
+    }
+  },
+  {
+    "id": "personality",
+    "message": "From now on, explain with examples first.",
+    "expect": {
+      "intent": "current_info",
+      "source_need": "web",
+      "model_role": "fast",
+      "critic_required": true,
+      "should_use_cloud": false,
+      "confidence": "low",
+      "metadata_via_contains": [],
+      "note": "This is really a durable-preference statement, handled by app/preference_detection.py's own deterministic detector before it would ever reach this engine's pipeline — not something this engine needs to get right on its own. It's included here per the spec's exact case list. The intent/source_need/critic_required values reflect a genuine, pre-existing quirk in app/search_intent.py's current-info regex: the bare word 'now' inside 'from now on' matches its \\bnow\\b live-info trigger. That module is shared, extensively tested elsewhere, and out of scope to change for this milestone — documented here rather than silently worked around."
+    }
+  }
+]

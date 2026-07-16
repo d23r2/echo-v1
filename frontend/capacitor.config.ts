@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.godtear.echo',
-  appName: 'Echo',
+  appName: 'ECHO',
   webDir: 'dist',
   server: {
     // Default "https" makes the WebView load the app shell over

@@ -9,10 +9,10 @@ on raw, sometimes-messy model output every chat turn.
 
 import pytest
 
-from app import atlas, memory_extraction as mx
+from app import atlas
+from app import memory_extraction as mx
 from app.providers.base import ChatResult
 from app.routers.chat import _extract_memory
-
 
 # ---- 1. MEMORY: NONE saves nothing ----
 

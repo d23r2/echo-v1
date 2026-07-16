@@ -1,7 +1,30 @@
+import { getCurrentTesterId } from "../state/testerContext";
+
 // Nullish (not ||) coalescing: an explicitly empty string means "same origin"
 // (used in the production Docker build, proxied by nginx), vs. unset falling
 // back to the local dev API port.
-export const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+//
+// A configured value that still points at localhost is only correct when the
+// page itself was also loaded from localhost. vite.config.ts sets `host: true`
+// specifically so the dev server can be reached from a phone/other device over
+// LAN/Tailscale (e.g. http://100.x.x.x:5174) — in that case "localhost:8000"
+// resolves to the *phone*, not the dev machine, and every API call silently
+// fails, which is what makes the whole app look like it's not loading. Match
+// the page's own hostname instead whenever that's the situation.
+function resolveBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (typeof window !== "undefined") {
+    const pageHost = window.location.hostname;
+    const isLoopback = pageHost === "localhost" || pageHost === "127.0.0.1";
+    const configuredIsLoopback = configured === undefined || /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(configured);
+    if (!isLoopback && configuredIsLoopback) {
+      return `http://${pageHost}:8000`;
+    }
+  }
+  return configured ?? "http://localhost:8000";
+}
+
+export const BASE_URL = resolveBaseUrl();
 
 export class ApiError extends Error {
   status: number;
@@ -51,6 +74,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         "Content-Type": "application/json",
+        // Lightweight tester identity (Human Persona Layer) — attached to every
+        // request so relationship/persona/mood/thread data stays scoped to
+        // whichever tester this browser is currently acting as. Defaults to
+        // "default" (the primary user) when nothing's been chosen yet.
+        "X-Tester-Id": getCurrentTesterId(),
         ...(init?.headers || {}),
       },
     });
@@ -67,7 +95,11 @@ async function requestMultipart<T>(path: string, formData: FormData): Promise<T>
   const url = `${BASE_URL}${path}`;
   let res: Response;
   try {
-    res = await fetch(url, { method: "POST", body: formData });
+    res = await fetch(url, {
+      method: "POST",
+      body: formData,
+      headers: { "X-Tester-Id": getCurrentTesterId() },
+    });
   } catch (err) {
     console.error(`[api] fetch failed for ${url}`, err);
     throw new NetworkError(url, err);
@@ -139,6 +171,9 @@ export interface ChatResponse {
   conversation_snippets: ConversationSnippetOut[];
   envelope_status: EnvelopeStatus;
   envelope_degradation_reason: string | null;
+  sources_used: SourceUsed[];
+  current_info_intent: string | null;
+  search_failure_reason: string | null;
 }
 
 export type EnvelopeStatus = "complete" | "partial" | "missing" | "malformed";
@@ -408,6 +443,14 @@ export interface FeatureAvailability {
   vision: VisionAvailability;
   image_generation_detail: ImageGenerationAvailability;
   providers: Record<string, ProviderStatusLabel>;
+  // Config-level flags (is a source configured at all), not live reachability —
+  // a per-turn search failure still surfaces via that message's own
+  // search_failure_reason, same as before this was added.
+  web_search_enabled: boolean;
+  wiki_enabled: boolean;
+  rss_enabled: boolean;
+  library: boolean;
+  schedule: boolean;
 }
 
 export const getFeatureAvailability = () => request<FeatureAvailability>("/api/features");
@@ -731,3 +774,779 @@ export const cancelScheduleItem = (id: string) =>
 
 export const deleteScheduleItem = (id: string) =>
   request<{ deleted: boolean }>(`/api/schedule/${id}`, { method: "DELETE" });
+
+// ---- Projects (ECHO Personal OS v1) ----
+export type ProjectStatus = "active" | "paused" | "completed" | "archived";
+export type TaskPriority = "low" | "medium" | "high";
+
+export interface ProjectOut {
+  id: string;
+  title: string;
+  description: string | null;
+  status: ProjectStatus;
+  priority: TaskPriority;
+  category: string | null;
+  tags: string[];
+  last_touched_at: string;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+export interface ProjectDetailOut extends ProjectOut {
+  tasks: TaskOut[];
+}
+
+export const createProject = (payload: {
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  category?: string;
+  tags?: string[];
+}) => request<ProjectOut>("/api/projects", { method: "POST", body: JSON.stringify(payload) });
+
+export const listProjects = (status?: ProjectStatus) =>
+  request<ProjectOut[]>(`/api/projects${status ? `?status=${status}` : ""}`);
+
+export const getProject = (id: string) => request<ProjectDetailOut>(`/api/projects/${id}`);
+
+export const updateProject = (
+  id: string,
+  payload: Partial<{
+    title: string;
+    description: string;
+    status: ProjectStatus;
+    priority: TaskPriority;
+    category: string;
+    tags: string[];
+  }>
+) => request<ProjectOut>(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+
+// Soft-archive, not a hard delete — matches deleteScheduleItem's naming but
+// the backend response is the archived ProjectOut, not a { deleted } flag.
+export const archiveProject = (id: string) => request<ProjectOut>(`/api/projects/${id}`, { method: "DELETE" });
+
+export const listProjectTasks = (id: string) => request<TaskOut[]>(`/api/projects/${id}/tasks`);
+
+// ---- Tasks (ECHO Personal OS v1) ----
+export type TaskStatus = "todo" | "in_progress" | "blocked" | "done" | "cancelled";
+
+export interface TaskOut {
+  id: string;
+  title: string;
+  description: string | null;
+  status: TaskStatus;
+  priority: TaskPriority;
+  project_id: string | null;
+  project_title: string | null;
+  due_at: string | null;
+  scheduled_item_id: string | null;
+  source_type: string | null;
+  source_id: string | null;
+  tags: string[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export const createTask = (payload: {
+  title: string;
+  description?: string;
+  priority?: TaskPriority;
+  project_id?: string;
+  due_at?: string;
+  tags?: string[];
+}) => request<TaskOut>("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
+
+export const listTasks = (filters?: {
+  status?: TaskStatus;
+  project_id?: string;
+  due_before?: string;
+  due_after?: string;
+}) => {
+  const params = new URLSearchParams();
+  if (filters?.status) params.set("status", filters.status);
+  if (filters?.project_id) params.set("project_id", filters.project_id);
+  if (filters?.due_before) params.set("due_before", filters.due_before);
+  if (filters?.due_after) params.set("due_after", filters.due_after);
+  const qs = params.toString();
+  return request<TaskOut[]>(`/api/tasks${qs ? `?${qs}` : ""}`);
+};
+
+export const updateTask = (
+  id: string,
+  payload: Partial<{
+    title: string;
+    description: string;
+    status: TaskStatus;
+    priority: TaskPriority;
+    project_id: string;
+    due_at: string;
+    tags: string[];
+    sort_order: number;
+  }>
+) => request<TaskOut>(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+
+export const completeTask = (id: string) => request<TaskOut>(`/api/tasks/${id}/complete`, { method: "POST" });
+
+// Soft-cancel, not a hard delete — same posture as archiveProject.
+export const cancelTask = (id: string) => request<TaskOut>(`/api/tasks/${id}`, { method: "DELETE" });
+
+// ---- Mission Control (ECHO Personal OS v1) ----
+export interface ContinueSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+  source_type: string;
+  source_id: string | null;
+  action_label: string;
+  created_at: string;
+}
+
+export interface SystemStatusOut {
+  ollama: boolean;
+  wiki: boolean;
+  rss: boolean;
+  searxng: boolean;
+  image_generation: boolean;
+  library: boolean;
+  schedule: boolean;
+}
+
+export interface MissionControlOut {
+  today_tasks: TaskOut[];
+  overdue_tasks: TaskOut[];
+  upcoming_tasks: TaskOut[];
+  active_projects: ProjectOut[];
+  recently_touched_projects: ProjectOut[];
+  recent_conversations: ConversationOut[];
+  recent_library_files: LibraryItemOut[];
+  upcoming_schedule_items: ScheduleItemOut[];
+  pending_memory_candidates: MemoryCandidateOut[];
+  system_status: SystemStatusOut | null;
+  continue_where_left_off: ContinueSuggestion[];
+  warnings: string[];
+}
+
+// ---- Human Persona Layer v1 ----
+export type FollowupFrequency = "low" | "medium" | "high";
+export type ChallengeStyle = "gentle" | "direct" | "strict";
+export type ComfortStyle = "practical" | "warm" | "minimal";
+export type DetailLevel = "minimal" | "short" | "normal" | "detailed" | "exhaustive";
+export type DisagreementStyle = "soft" | "direct" | "firm";
+export type HumourSafetyMode = "normal" | "serious_context_low_humour";
+export type OperationalMode =
+  | "normal"
+  | "coding_assistant"
+  | "research"
+  | "planning"
+  | "low_energy_support"
+  | "strict_coach"
+  | "study_tutor"
+  | "release_testing"
+  | "troubleshooting"
+  | "quick_answer";
+export type MoodMode =
+  | "neutral"
+  | "focused"
+  | "confused"
+  | "stressed"
+  | "excited"
+  | "low_energy"
+  | "coding_mode"
+  | "planning_mode"
+  | "reassurance_needed"
+  | "overwhelmed"
+  | "urgent";
+export type MoodConfidence = "low" | "medium" | "high";
+export type RitualType =
+  | "morning_check_in"
+  | "coding_session_start"
+  | "coding_session_wrap_up"
+  | "weekly_review"
+  | "release_checklist"
+  | "low_energy_reset"
+  | "study_session_start";
+
+export const OPERATIONAL_MODES: OperationalMode[] = [
+  "normal",
+  "coding_assistant",
+  "research",
+  "planning",
+  "low_energy_support",
+  "strict_coach",
+  "study_tutor",
+  "release_testing",
+  "troubleshooting",
+  "quick_answer",
+];
+
+export const RITUAL_TYPES: RitualType[] = [
+  "morning_check_in",
+  "coding_session_start",
+  "coding_session_wrap_up",
+  "weekly_review",
+  "release_checklist",
+  "low_energy_reset",
+  "study_session_start",
+];
+
+export interface PersonaSettingsOut {
+  tester_id: string;
+  preferred_name: string | null;
+  allowed_nicknames: string[];
+  disliked_names: string[];
+  formality_level: number;
+  emoji_level: number;
+  asks_followup_questions: FollowupFrequency;
+  bullet_points_preferred: boolean;
+  examples_first: boolean;
+  challenge_style: ChallengeStyle;
+  comfort_style: ComfortStyle;
+  humour_level: number;
+  sarcasm_level: number;
+  dry_wit_enabled: boolean;
+  humour_safety_mode: HumourSafetyMode;
+  detail_level: DetailLevel;
+  proactivity_level: number;
+  default_operational_mode: OperationalMode;
+  recommendation_strength: number;
+  disagreement_style: DisagreementStyle;
+  local_answer_quality_mode: AnswerQualityMode;
+  voice_mode: VoiceMode;
+  tts_enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type VoiceMode = "off" | "push_to_talk" | "hands_free_placeholder";
+
+export type PersonaSettingsUpdate = Partial<{
+  preferred_name: string;
+  allowed_nicknames: string[];
+  disliked_names: string[];
+  formality_level: number;
+  emoji_level: number;
+  asks_followup_questions: FollowupFrequency;
+  bullet_points_preferred: boolean;
+  examples_first: boolean;
+  challenge_style: ChallengeStyle;
+  comfort_style: ComfortStyle;
+  humour_level: number;
+  sarcasm_level: number;
+  dry_wit_enabled: boolean;
+  humour_safety_mode: HumourSafetyMode;
+  detail_level: DetailLevel;
+  proactivity_level: number;
+  default_operational_mode: OperationalMode;
+  recommendation_strength: number;
+  disagreement_style: DisagreementStyle;
+  local_answer_quality_mode: AnswerQualityMode;
+  voice_mode: VoiceMode;
+  tts_enabled: boolean;
+}>;
+
+export const getPersonaSettings = () => request<PersonaSettingsOut>("/api/persona-settings");
+
+export const updatePersonaSettings = (payload: PersonaSettingsUpdate) =>
+  request<PersonaSettingsOut>("/api/persona-settings", { method: "PATCH", body: JSON.stringify(payload) });
+
+export const resetPersonaSettings = () =>
+  request<PersonaSettingsOut>("/api/persona-settings/reset", { method: "POST" });
+
+export interface RelationshipProfileOut {
+  tester_id: string;
+  relationship_summary: string;
+  working_style_summary: string;
+  trust_notes: string | null;
+  support_preferences: string | null;
+  communication_preferences: string | null;
+  project_preferences: string | null;
+  version: number;
+  created_at: string;
+  last_updated_at: string;
+}
+
+export type RelationshipProfileUpdate = Partial<{
+  relationship_summary: string;
+  working_style_summary: string;
+  trust_notes: string;
+  support_preferences: string;
+  communication_preferences: string;
+  project_preferences: string;
+}>;
+
+export const getRelationshipProfile = () => request<RelationshipProfileOut>("/api/relationship-profile");
+
+export const updateRelationshipProfile = (payload: RelationshipProfileUpdate) =>
+  request<RelationshipProfileOut>("/api/relationship-profile", { method: "PATCH", body: JSON.stringify(payload) });
+
+export interface PersonalRitualOut {
+  id: string;
+  tester_id: string;
+  ritual_type: RitualType;
+  enabled: boolean;
+  preferred_time: string | null;
+  prompt_text: string;
+  last_triggered_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listRituals = () => request<PersonalRitualOut[]>("/api/rituals");
+
+export const updateRitual = (
+  ritualType: RitualType,
+  payload: Partial<{ enabled: boolean; preferred_time: string; prompt_text: string }>
+) => request<PersonalRitualOut>(`/api/rituals/${ritualType}`, { method: "PATCH", body: JSON.stringify(payload) });
+
+export interface ConversationModeOut {
+  conversation_id: string;
+  active_operational_mode: OperationalMode | null;
+  default_operational_mode: OperationalMode;
+  session_style_override: Record<string, unknown>;
+}
+
+export const getConversationMode = (conversationId: string) =>
+  request<ConversationModeOut>(`/api/conversations/${conversationId}/mode`);
+
+export const setConversationMode = (conversationId: string, mode: OperationalMode) =>
+  request<ConversationModeOut>(`/api/conversations/${conversationId}/mode`, {
+    method: "PATCH",
+    body: JSON.stringify({ mode }),
+  });
+
+export interface ConversationMoodStateOut {
+  conversation_id: string;
+  detected_mode: MoodMode;
+  confidence: MoodConfidence;
+  reason_summary: string | null;
+  updated_at: string;
+}
+
+// 404s until the conversation has had at least one turn — caller should
+// treat a thrown ApiError with status 404 as "no mood yet", not a failure.
+export const getConversationMood = (conversationId: string) =>
+  request<ConversationMoodStateOut>(`/api/conversations/${conversationId}/mood`);
+
+export const getMissionControl = () => request<MissionControlOut>("/api/mission-control");
+
+// ---- ECHO Local Intelligence Engine v1 ----
+export type AnswerQualityMode = "fast" | "balanced" | "deep";
+
+export interface LocalIntelligenceSettingsOut {
+  local_intelligence_engine_enabled: boolean;
+  local_model_routing_enabled: boolean;
+  local_answer_quality_mode: AnswerQualityMode;
+  local_critic_enabled: boolean;
+  cloud_fallback_enabled: boolean;
+  cloud_fallback_require_user_confirmation: boolean;
+  ollama_available: boolean;
+  ollama_status_reason: string | null;
+  installed_models: string[];
+}
+
+export const getLocalIntelligenceSettings = () =>
+  request<LocalIntelligenceSettingsOut>("/api/local-intelligence/settings");
+
+// ============================================================================
+// ECHO Action + Reliability Core v1
+// ============================================================================
+
+export type ConfidenceLevel = "high" | "medium" | "low" | "unverified";
+
+// ---- Action System ----
+export type RiskLevel = "low" | "medium" | "high" | "destructive";
+export type ActionRunStatus = "pending" | "approved" | "running" | "completed" | "failed" | "cancelled";
+
+export interface ActionDefinitionOut {
+  name: string;
+  description: string;
+  category: string;
+  risk_level: RiskLevel;
+  enabled: boolean;
+  requires_confirmation: boolean;
+  requires_permission_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ActionRunOut {
+  id: string;
+  action_name: string;
+  status: ActionRunStatus;
+  risk_level: RiskLevel;
+  input_json: Record<string, unknown>;
+  result_json: Record<string, unknown> | null;
+  error_summary: string | null;
+  user_confirmed: boolean;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
+export const listActions = () => request<ActionDefinitionOut[]>("/api/actions");
+export const listActionRuns = () => request<ActionRunOut[]>("/api/actions/runs");
+export const runAction = (action_name: string, input: Record<string, unknown> = {}, confirm = false) =>
+  request<ActionRunOut>("/api/actions/run", { method: "POST", body: JSON.stringify({ action_name, input, confirm }) });
+export const approveActionRun = (id: string) => request<ActionRunOut>(`/api/actions/runs/${id}/approve`, { method: "POST" });
+export const cancelActionRun = (id: string) => request<ActionRunOut>(`/api/actions/runs/${id}/cancel`, { method: "POST" });
+
+// ---- Permission Center ----
+export type PermissionLevel = "allowed" | "ask_first" | "disabled";
+
+export interface PermissionSettingOut {
+  permission_key: string;
+  level: PermissionLevel;
+  description: string;
+  risk_level: RiskLevel;
+  updated_at: string;
+}
+
+export const listPermissions = () => request<PermissionSettingOut[]>("/api/permissions");
+export const updatePermission = (key: string, level: PermissionLevel) =>
+  request<PermissionSettingOut>(`/api/permissions/${key}`, { method: "PATCH", body: JSON.stringify({ level }) });
+export const resetPermissionDefaults = () => request<PermissionSettingOut[]>("/api/permissions/reset-defaults", { method: "POST" });
+
+// ---- Reliability / Evaluation Lab ----
+export type EvalResultStatus = "pass" | "fail" | "warning";
+export type EvalSummary = "green" | "yellow" | "red" | "unknown";
+
+export interface EvaluationCaseOut {
+  id: string;
+  name: string;
+  category: string;
+  user_message: string;
+  notes: string | null;
+}
+
+export interface EvaluationResultOut {
+  id: string;
+  case_id: string;
+  status: EvalResultStatus;
+  reason: string;
+  observed_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface EvaluationRunOut {
+  id: string;
+  status: "running" | "completed" | "failed";
+  started_at: string;
+  completed_at: string | null;
+  result_summary: EvalSummary;
+  total_cases: number;
+  passed_cases: number;
+  failed_cases: number;
+  warnings: number;
+}
+
+export interface EvaluationRunDetailOut extends EvaluationRunOut {
+  results: EvaluationResultOut[];
+}
+
+export const listEvaluationCases = () => request<EvaluationCaseOut[]>("/api/evaluations/cases");
+export const runEvaluation = () => request<EvaluationRunOut>("/api/evaluations/run", { method: "POST" });
+export const listEvaluationRuns = () => request<EvaluationRunOut[]>("/api/evaluations/runs");
+export const getEvaluationRun = (id: string) => request<EvaluationRunDetailOut>(`/api/evaluations/runs/${id}`);
+
+// ---- Personal Knowledge Vault ----
+export type KnowledgeItemType =
+  | "note" | "decision" | "source" | "summary" | "idea" | "bug" | "release_note" | "study_note" | "prompt" | "reference" | "personal_rule";
+
+export interface KnowledgeItemOut {
+  id: string;
+  title: string;
+  body: string;
+  item_type: KnowledgeItemType;
+  source_type: string | null;
+  source_id: string | null;
+  project_id: string | null;
+  task_id: string | null;
+  tags: string[];
+  confidence: ConfidenceLevel;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+export const listKnowledgeItems = (item_type?: KnowledgeItemType) =>
+  request<KnowledgeItemOut[]>(`/api/knowledge${item_type ? `?item_type=${item_type}` : ""}`);
+export const searchKnowledgeItems = (q: string) => request<KnowledgeItemOut[]>(`/api/knowledge/search?q=${encodeURIComponent(q)}`);
+export const createKnowledgeItem = (payload: {
+  title: string;
+  body?: string;
+  item_type?: KnowledgeItemType;
+  tags?: string[];
+  confidence?: ConfidenceLevel;
+  project_id?: string;
+  task_id?: string;
+}) => request<KnowledgeItemOut>("/api/knowledge", { method: "POST", body: JSON.stringify(payload) });
+export const updateKnowledgeItem = (id: string, payload: Partial<{ title: string; body: string; item_type: KnowledgeItemType; tags: string[]; confidence: ConfidenceLevel }>) =>
+  request<KnowledgeItemOut>(`/api/knowledge/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const archiveKnowledgeItem = (id: string) => request<KnowledgeItemOut>(`/api/knowledge/${id}`, { method: "DELETE" });
+
+// ---- Conversation Auto-Summary ----
+export interface ConversationSummaryOut {
+  id: string;
+  conversation_id: string;
+  title: string;
+  summary: string;
+  decisions_json: string[];
+  tasks_json: string[];
+  open_questions_json: string[];
+  next_steps_json: string[];
+  memories_to_review_json: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export const summarizeConversation = (conversationId: string, saveToKnowledgeVault = false) =>
+  request<ConversationSummaryOut>(`/api/conversations/${conversationId}/summarize`, {
+    method: "POST",
+    body: JSON.stringify({ save_to_knowledge_vault: saveToKnowledgeVault }),
+  });
+export const getConversationSummary = (conversationId: string) => request<ConversationSummaryOut>(`/api/conversations/${conversationId}/summary`);
+
+// ---- Release / Build Manager ----
+export type ReleaseStatus = "draft" | "testing" | "green" | "yellow" | "red" | "released";
+export type ReleasePlatform = "backend" | "web" | "android" | "windows" | "docs" | "manual";
+export type ReleaseCheckStatus = "pass" | "fail" | "warning" | "not_run";
+
+export interface ReleaseCheckOut {
+  id: string;
+  check_name: string;
+  platform: ReleasePlatform;
+  command: string | null;
+  status: ReleaseCheckStatus;
+  output_summary: string | null;
+  artifact_path: string | null;
+  created_at: string;
+}
+
+export interface ReleaseArtifactOut {
+  id: string;
+  platform: ReleasePlatform;
+  artifact_type: string;
+  path: string;
+  created_at: string;
+}
+
+export interface ReleaseOut {
+  id: string;
+  version_name: string;
+  status: ReleaseStatus;
+  summary: string;
+  git_commit: string | null;
+  git_tag: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReleaseDetailOut extends ReleaseOut {
+  checks: ReleaseCheckOut[];
+  artifacts: ReleaseArtifactOut[];
+}
+
+export const listReleases = () => request<ReleaseOut[]>("/api/releases");
+export const createRelease = (payload: { version_name: string; summary?: string; git_commit?: string; git_tag?: string }) =>
+  request<ReleaseOut>("/api/releases", { method: "POST", body: JSON.stringify(payload) });
+export const getRelease = (id: string) => request<ReleaseDetailOut>(`/api/releases/${id}`);
+export const addReleaseCheck = (
+  id: string,
+  payload: { check_name: string; platform: ReleasePlatform; command?: string; status?: ReleaseCheckStatus; output_summary?: string; artifact_path?: string }
+) => request<ReleaseCheckOut>(`/api/releases/${id}/checks`, { method: "POST", body: JSON.stringify(payload) });
+export const seedReleaseChecklist = (id: string) => request<ReleaseCheckOut[]>(`/api/releases/${id}/checklist/seed`, { method: "POST" });
+export const addReleaseArtifact = (id: string, payload: { platform: ReleasePlatform; artifact_type: string; path: string }) =>
+  request<ReleaseArtifactOut>(`/api/releases/${id}/artifacts`, { method: "POST", body: JSON.stringify(payload) });
+export const markReleaseStatus = (id: string, status: ReleaseStatus) =>
+  request<ReleaseOut>(`/api/releases/${id}/mark-status`, { method: "POST", body: JSON.stringify({ status }) });
+
+// ---- Internal Plugin / Tool System ----
+export type ToolRunStatus = "pending" | "running" | "completed" | "failed" | "blocked";
+
+export interface ToolDefinitionOut {
+  tool_name: string;
+  display_name: string;
+  description: string;
+  category: string;
+  enabled: boolean;
+  risk_level: RiskLevel;
+  requires_confirmation: boolean;
+  permission_key: string | null;
+  input_schema_json: Record<string, unknown>;
+  output_schema_json: Record<string, unknown>;
+}
+
+export interface ToolRunOut {
+  id: string;
+  tool_name: string;
+  status: ToolRunStatus;
+  input_json: Record<string, unknown>;
+  output_json: Record<string, unknown> | null;
+  error_summary: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export const listTools = () => request<ToolDefinitionOut[]>("/api/tools");
+export const listToolRuns = () => request<ToolRunOut[]>("/api/tools/runs");
+export const runTool = (toolName: string, input: Record<string, unknown> = {}, confirm = false) =>
+  request<ToolRunOut>(`/api/tools/${toolName}/run`, { method: "POST", body: JSON.stringify({ input, confirm }) });
+
+// ============================================================================
+// ECHO Cognitive Core v1 — World Model + Task Understanding Engine
+// ============================================================================
+
+export type ConceptType = "project" | "system" | "tool" | "file" | "process" | "person_preference" | "domain" | "technical" | "goal" | "constraint" | "risk" | "source" | "other";
+export type CognitiveConfidence = "high" | "medium" | "low" | "inferred";
+export type RelationType = "uses" | "depends_on" | "causes" | "blocks" | "enables" | "part_of" | "conflicts_with" | "similar_to" | "requires" | "produces" | "verifies" | "belongs_to";
+export type TaskType =
+  | "ask_question" | "build_feature" | "fix_bug" | "run_test" | "plan_project" | "research_topic" | "summarize_file"
+  | "make_decision" | "create_prompt" | "release_build" | "troubleshoot" | "study_learn" | "personal_support" | "other";
+export type TaskConfidence = "high" | "medium" | "low" | "incomplete";
+export type SkillCategory = "coding" | "release" | "research" | "study" | "planning" | "troubleshooting" | "writing" | "personal" | "system" | "other";
+
+export interface CognitiveConceptOut {
+  id: string;
+  name: string;
+  description: string | null;
+  concept_type: ConceptType;
+  confidence: CognitiveConfidence;
+  source_type: string | null;
+  source_id: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+export interface CognitiveRelationshipOut {
+  id: string;
+  from_concept_id: string;
+  to_concept_id: string;
+  relation_type: RelationType;
+  description: string | null;
+  confidence: CognitiveConfidence;
+  source_type: string | null;
+  source_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GraphNodeOut {
+  concept: CognitiveConceptOut;
+  relationships: CognitiveRelationshipOut[];
+}
+
+export interface TaskUnderstandingOut {
+  id: string;
+  conversation_id: string | null;
+  user_message: string;
+  goal_summary: string;
+  domain: string;
+  task_type: TaskType;
+  known_facts_json: string[];
+  unknowns_json: string[];
+  constraints_json: string[];
+  assumptions_json: string[];
+  success_criteria_json: string[];
+  risks_json: string[];
+  relevant_concepts_json: string[];
+  recommended_next_step: string | null;
+  confidence: TaskConfidence;
+  created_at: string;
+}
+
+export interface SkillPatternOut {
+  id: string;
+  name: string;
+  description: string;
+  category: SkillCategory;
+  trigger_patterns_json: string[];
+  steps_json: string[];
+  required_tools_json: string[];
+  success_criteria_json: string[];
+  common_failures_json: string[];
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+export interface SuggestPlanOut {
+  skill: SkillPatternOut;
+  plan_steps: string[];
+}
+
+export interface CausalNoteOut {
+  id: string;
+  title: string;
+  cause: string;
+  effect: string;
+  explanation: string;
+  confidence: CognitiveConfidence;
+  source_type: string | null;
+  source_id: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+export interface CognitiveBriefOut {
+  id: string;
+  conversation_id: string | null;
+  task_understanding_id: string | null;
+  brief_text: string;
+  selected_concepts_json: string[];
+  selected_skills_json: string[];
+  selected_context_sources_json: string[];
+  created_at: string;
+}
+
+export interface CognitiveSettingsOut {
+  cognitive_core_enabled: boolean;
+  cognitive_concept_extraction_enabled: boolean;
+  cognitive_skill_matching_enabled: boolean;
+  cognitive_show_developer_diagnostics: boolean;
+}
+
+// ---- Task understanding + briefs ----
+export const understandTask = (user_message: string, conversation_id?: string) =>
+  request<TaskUnderstandingOut | null>("/api/cognitive/understand", { method: "POST", body: JSON.stringify({ user_message, conversation_id }) });
+export const listTaskUnderstandings = () => request<TaskUnderstandingOut[]>("/api/cognitive/task-understandings");
+export const listCognitiveBriefs = () => request<CognitiveBriefOut[]>("/api/cognitive/briefs");
+
+// ---- Concepts (World Model) ----
+export const listConcepts = (params?: { concept_type?: string; q?: string }) => {
+  const search = new URLSearchParams();
+  if (params?.concept_type) search.set("concept_type", params.concept_type);
+  if (params?.q) search.set("q", params.q);
+  const qs = search.toString();
+  return request<CognitiveConceptOut[]>(`/api/cognitive/concepts${qs ? `?${qs}` : ""}`);
+};
+export const createConcept = (payload: { name: string; description?: string; concept_type?: ConceptType; confidence?: CognitiveConfidence }) =>
+  request<CognitiveConceptOut>("/api/cognitive/concepts", { method: "POST", body: JSON.stringify(payload) });
+export const getConcept = (id: string) => request<CognitiveConceptOut>(`/api/cognitive/concepts/${id}`);
+export const archiveConcept = (id: string) => request<CognitiveConceptOut>(`/api/cognitive/concepts/${id}`, { method: "DELETE" });
+
+// ---- Relationships ----
+export const listRelationships = (conceptId?: string) =>
+  request<CognitiveRelationshipOut[]>(`/api/cognitive/relationships${conceptId ? `?concept_id=${conceptId}` : ""}`);
+export const graphSearch = (query: string) => request<GraphNodeOut[]>(`/api/cognitive/graph?query=${encodeURIComponent(query)}`);
+
+// ---- Skills ----
+export const listSkills = (category?: string) => request<SkillPatternOut[]>(`/api/cognitive/skills${category ? `?category=${category}` : ""}`);
+export const archiveSkill = (id: string) => request<SkillPatternOut>(`/api/cognitive/skills/${id}`, { method: "DELETE" });
+export const suggestPlan = (skillId: string, userMessage: string) =>
+  request<SuggestPlanOut>(`/api/cognitive/skills/${skillId}/suggest-plan`, { method: "POST", body: JSON.stringify({ user_message: userMessage }) });
+
+// ---- Causal notes ----
+export const listCausalNotes = () => request<CausalNoteOut[]>("/api/cognitive/causal-notes");
+export const createCausalNote = (payload: { title: string; cause: string; effect: string; explanation?: string; confidence?: CognitiveConfidence }) =>
+  request<CausalNoteOut>("/api/cognitive/causal-notes", { method: "POST", body: JSON.stringify(payload) });
+export const archiveCausalNote = (id: string) => request<CausalNoteOut>(`/api/cognitive/causal-notes/${id}`, { method: "DELETE" });
+
+// ---- Settings ----
+export const getCognitiveSettings = () => request<CognitiveSettingsOut>("/api/cognitive/settings");
+export const updateCognitiveSettings = (payload: Partial<CognitiveSettingsOut>) =>
+  request<CognitiveSettingsOut>("/api/cognitive/settings", { method: "PATCH", body: JSON.stringify(payload) });

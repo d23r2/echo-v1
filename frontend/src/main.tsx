@@ -4,14 +4,17 @@ import App from "./App";
 import "./index.css";
 import { ConversationsProvider } from "./state/conversationsContext";
 import { RoleProvider } from "./state/roleContext";
+import { TesterProvider } from "./state/testerContext";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <RoleProvider>
-      <ConversationsProvider>
-        <App />
-      </ConversationsProvider>
-    </RoleProvider>
+    <TesterProvider>
+      <RoleProvider>
+        <ConversationsProvider>
+          <App />
+        </ConversationsProvider>
+      </RoleProvider>
+    </TesterProvider>
   </React.StrictMode>
 );
 

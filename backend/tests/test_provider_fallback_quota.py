@@ -8,7 +8,7 @@ No real provider calls anywhere — every provider is a FakeProvider
 isolated `db_session` fixture (tests/conftest.py), never the real app DB.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -116,8 +116,8 @@ def test_expired_cooldown_provider_is_retried(db_session):
     row = ProviderCooldown(
         provider="gemini",
         category="quota_exceeded",
-        started_at=datetime.now(timezone.utc) - timedelta(hours=1),
-        cooldown_until=datetime.now(timezone.utc) - timedelta(minutes=1),
+        started_at=datetime.now(UTC) - timedelta(hours=1),
+        cooldown_until=datetime.now(UTC) - timedelta(minutes=1),
     )
     db_session.add(row)
     db_session.commit()

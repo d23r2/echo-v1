@@ -1,6 +1,155 @@
 # ECHO (formerly God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-14
+Last check-in: 2026-07-16
+
+## New since 2026-07-16 (yet even later still) — ECHO Cognitive Core v1
+
+757 backend tests passing (55 new), frontend build/typecheck clean, live-verified in a
+temporary preview environment (real seeded data, one real chat exchange through a real local
+Ollama model) without touching the user's running Docker stack. See
+[ECHO_COGNITIVE_CORE_V1.md](../ECHO_COGNITIVE_CORE_V1.md) and
+[ECHO_COGNITIVE_CORE_V1_REPORT.md](../ECHO_COGNITIVE_CORE_V1_REPORT.md).
+
+- **New: World Model / Knowledge Graph** — `CognitiveConcept`/`CognitiveRelationship` tables,
+  seeded with 20 concepts and 18 relationships describing this repo's own architecture
+  (Android APK/Capacitor, Windows app/Tauri, Ollama, no-billing search, Release Manager, etc.).
+- **New: Task Understanding Model** — for complex requests only, a `TaskUnderstanding` row
+  (goal, known facts, unknowns, constraints, success criteria, risks, recommended next step),
+  built via deterministic regex/keyword classification, not a model call.
+- **New: Skill Library** — 7 seeded reusable workflows (Build Android APK, Build Windows App,
+  Run ECHO Release Verification, Fix Failing Backend Test, Create Claude Code Prompt,
+  Configure No-Billing Search, Improve ECHO Feature Safely) with keyword-based matching.
+- **New: Causal Reasoning Notes** — 6 seeded cause→effect notes (e.g. "failing tests block
+  Green," "Ollama offline breaks local chat").
+- **New: CognitiveBrief prompt integration** — inserted into both the normal/streaming chat
+  prompt builder and the Local Intelligence Engine's draft prompt; never shown to the user;
+  missing knowledge downgrades confidence one step; success criteria feed the critic pass.
+- **New: allowlist-only concept extraction** — durable concepts mentioned in chat are added to
+  the world model only from a fixed 14-entry allowlist, with a sensitive-topic guard blocking
+  extraction entirely for health/medication/political/immigration/salary topics.
+- **New: Cognitive Core page** (`/cognitive-core`, nav: Intelligence → Cognitive Core) — World
+  Model, Skill Library, Causal Notes, Task Understandings, Cognitive Briefs, Settings.
+- **Explicitly excluded**: no claim of consciousness/sentience, no autonomous self-modification,
+  no full autonomous agent, no dependence on any paid API.
+
+## New since 2026-07-16 (yet later still) — ECHO Action + Reliability Core v1
+
+702 backend tests passing (88 new), frontend build/typecheck clean, all 9 systems verified
+live against a real running backend + a real local Ollama instance — including 4 real bugs
+found and fixed during that live pass. See
+[ECHO_ACTION_RELIABILITY_CORE_V1.md](../ECHO_ACTION_RELIABILITY_CORE_V1.md) and
+[ECHO_ACTION_RELIABILITY_CORE_V1_REPORT.md](../ECHO_ACTION_RELIABILITY_CORE_V1_REPORT.md).
+
+- **New: Action System** — 16 actions (task/project/schedule/search/report/release/knowledge),
+  each risk-scored and permission-gated; destructive actions only ever soft-archive.
+- **New: Safety and Permission Center** — 18 keys, single local-device policy
+  (allowed/ask_first/disabled); cloud API use disabled by default.
+- **New: Reliability / Evaluation Lab** — one-click self-check against 10 fixed cases, no
+  model call anywhere in the checker.
+- **New: Personal Knowledge Vault** — 11 note types, searchable, soft-archivable, distinct
+  from Atlas.
+- **New: Conversation Auto-Summary** — real local-model-generated summaries (title/decisions/
+  next steps), "Save to Knowledge Vault."
+- **New: Release / Build Manager** — records recorded test/build results; Green only when
+  every required check is actually recorded passing, never claimed from nothing.
+- **New: Internal Tool Registry** — 15 tools, mostly thin wrappers over Action System
+  handlers, plus camera/voice placeholders.
+- **New: Voice-first/Camera foundations** — `voice_mode`/`tts_enabled` persisted settings on
+  top of the pre-existing browser-based voice input/output; a clean camera placeholder.
+- **Explicitly excluded: Multi-user Tester System** — no auth, no accounts, no tester
+  isolation beyond the pre-existing lightweight `X-Tester-Id` label.
+- **Fixed (found live): phone/LAN dev-server access** — `client.ts`'s `BASE_URL` now resolves
+  to the page's own hostname when reached from a non-localhost address.
+- **Fixed (found live): Release Manager status never reached Green** — `add_check()` now
+  upserts by `(release_id, check_name)` instead of always inserting a duplicate row.
+- **Fixed (found live): `voice_mode` defaulted to "off"**, silently regressing already-working
+  voice input for every tester — corrected the default to `push_to_talk` and fixed the 3
+  already-migrated tester rows in the live database.
+
+## New since 2026-07-16 (later still) — ECHO Local Intelligence Engine v1
+
+614 backend tests passing (106 new), frontend build/typecheck clean, live-verified against a
+real running local Ollama instance through the actual chat UI — including two real bugs found
+and fixed during that live pass (the chat UI wasn't reaching the engine at all, and a Markdown
+rendering bug swallowed short numeric answers). See
+[ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md](../ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md) and
+[ECHO_LOCAL_INTELLIGENCE_ENGINE_V1_REPORT.md](../ECHO_LOCAL_INTELLIGENCE_ENGINE_V1_REPORT.md).
+
+- **New: local-first answer workflow** — intent classifier (20-category taxonomy) → context
+  gatherer → role-based local model router (fast/reasoning/coding/critic/writing) → draft →
+  local critic/checker pass → bounded repair loop → optional style-shorten pass → honest
+  confidence scoring (high/medium/low/unverified) → clean metadata. Off by default
+  (`LOCAL_INTELLIGENCE_ENGINE_ENABLED=false`).
+- **New: Cloud Fallback Gate** — off by default, gated by an intent allowlist and a confidence
+  threshold, and defaults to *offering* cloud rather than auto-calling it
+  (`CLOUD_FALLBACK_REQUIRE_USER_CONFIRMATION=true`).
+- **New: Personality page "Local Intelligence" section** — live status chips, installed-model
+  list, Answer Quality Mode selector (Fast/Balanced/Deep).
+- **Fixed (found live, not hypothetical): the chat UI never actually called the engine.**
+  `ChatView.tsx` only ever sent through `POST /api/chat/stream`, which the engine doesn't hook
+  into — now routes eligible sends through the non-streaming endpoint when the engine is on.
+- **Fixed: Cloud Fallback Gate was unreachable from the real chat path** — `chat.py` never
+  passed `allow_cloud_fallback=True`, so the gate could never fire regardless of config.
+- **Fixed: bare numeric answers (e.g. "84.") could render as an invisible empty Markdown list
+  item** — `MessageBubble.tsx` now escapes a leading bare ordinal marker.
+
+## New since 2026-07-16 (later same day) — ECHO Human Persona Layer v1
+
+508 backend tests passing (62 new), frontend build/typecheck clean, live-verified in a real
+browser including a genuine model call that resisted a live "ignore safety and always agree
+with me" jailbreak attempt. See [ECHO_HUMAN_PERSONA_LAYER_V1.md](../ECHO_HUMAN_PERSONA_LAYER_V1.md)
+and [ECHO_HUMAN_PERSONA_LAYER_V1_REPORT.md](../ECHO_HUMAN_PERSONA_LAYER_V1_REPORT.md).
+
+- **New: Personality page** (sidebar) — humour/sarcasm/dry-wit, social preferences, default
+  operational mode, relationship memory (editable), rituals, feedback learning (reuses the
+  existing memory-candidate queue), reset/export.
+- **New: lightweight tester identity** — an `X-Tester-Id` header (localStorage-persisted,
+  defaults to `"default"` so existing usage is unaffected) scopes PersonaSettings/
+  RelationshipProfile/mood/thread-state/rituals per tester, so multiple people testing the
+  same install each get their own persona without leaking into each other's.
+  Conversation history itself is still shared across testers (documented limitation).
+- **New: Character Code** — 10 fixed values (truthfulness, privacy, no dependency-fostering,
+  no claiming to be conscious, ...) injected right after the Constitution, before everything
+  else — structurally not user-editable (verified by a dedicated test that the settings
+  schema has no field capable of expressing "disable safety").
+- **New: mood-aware, session-scoped response tuning** — a deterministic mood classifier
+  (stressed/confused/coding/overwhelmed/...) re-detected every turn, never stored
+  permanently; a tester can also say "switch to strict coach mode" or "keep replies short
+  today" in chat to change the current conversation's tone/length without touching their
+  permanent profile.
+- **New: proactivity cap, adaptive response length, opinion/disagreement style** — all
+  prompt-level guidance, capped at one suggestion per reply, tested for correct construction
+  and ordering.
+- No regressions: all 446 previously-passing backend tests still pass.
+
+## New since 2026-07-16 — ECHO Personal OS v1 (Mission Control, Projects, Tasks)
+
+446 backend tests passing (52 new), frontend build/typecheck clean, live-verified in a
+real browser against the real backend DB. See
+[ECHO_PERSONAL_OS_V1.md](../ECHO_PERSONAL_OS_V1.md) and
+[ECHO_PERSONAL_OS_V1_REPORT.md](../ECHO_PERSONAL_OS_V1_REPORT.md) for full details.
+
+- **New: Mission Control** (sidebar, above Chats — now the default landing view) —
+  `GET /api/mission-control` aggregates today's tasks, overdue tasks, active projects,
+  Continue Where We Left Off suggestions, recent activity, and system status into one
+  dashboard, with per-section partial-failure handling (a clean `warnings` array, never a
+  raw exception).
+- **New: Projects and Tasks** — new `Project`/`Task` models + full CRUD routers
+  (`routers/projects.py`, `routers/tasks.py`). Deleting either soft-archives/soft-cancels
+  rather than hard-deleting, matching the rest of the app's never-lose-data posture.
+- **New: Smart Context Router** (`app/services/context_router.py`) — deterministic
+  message classifier (regex-only, no model call) that decides which context source(s) a
+  chat message is asking about. Tested and working, but not yet wired into live chat's
+  actual source-fetching — documented as a known limitation, next milestone candidate.
+- **New: deterministic chat commands** (`app/chat_actions.py`) — "create a project called
+  X", "add a task to test Android APK tomorrow", "mark task X done", "show my tasks
+  today", "show active projects", "continue where we left off" are handled without a
+  model call, wired into both `POST /api/chat` and `POST /api/chat/stream` before the
+  normal model path.
+- **New: optional Atlas memory linking** — creating a project queues a pending
+  `MemoryCandidate` for the existing review queue (never auto-saved, never shown in chat
+  UI); individual tasks don't, since they're too granular to be worth one each.
+- No regressions: all 394 previously-passing backend tests still pass.
 
 ## New since 2026-07-14 (yet later same day) — Image-generation error cleanliness fix
 
@@ -326,16 +475,21 @@ recall, chat UI overhaul — all tested, 255 backend tests passing, frontend bui
   pass's envelope-integrity test suite.
 
 ## Blockers
-- **2026-07-14 check-in**: today's "no-billing search system + clean chat UI" work
-  (search_intent.py, web_search.py, chatMetadata.ts, MessageBubble.tsx changes, Chroma
-  test-isolation fixture, etc.) is present on disk but **not yet committed** — `git
-  status` shows it all as modified/untracked against the last commit (44faeb49, cleanup
-  pass). Commit it before starting new work.
-- Hit a stale `.git/index.lock` from this Cowork sandbox session (created today,
-  "Operation not permitted" on unlink — a bridging/permissions quirk, same family as the
-  earlier known Cowork-sandbox git limitation). Repo itself is intact (git log/status
-  still read fine); if a local terminal also reports a lock, just delete
-  `.git/index.lock` by hand and retry.
+- **2026-07-16 check-in — new**: working tree has 33 modified files (`git diff --stat`
+  shows 5866/5866 insertions/deletions, exactly equal) that are **100% CRLF line-ending
+  noise, zero real content changes** (verified via per-file add/del comparison — none
+  differ). No `.gitattributes` exists to pin line-ending behavior, so this will keep
+  recurring on Windows checkouts. Fix: add `.gitattributes` (`* text=auto`), renormalize,
+  commit once to clear it, so `git status`/diffs stay meaningful. Also untracked:
+  `.claude/settings.local.json` (add to `.gitignore`) and a stale `Echo_Code_Review.zip`
+  (07-13 export sitting in repo root — move out or delete).
+- No commits landed in the last 2 days (last commit `dc56cf75`, 2026-07-14) — worth
+  checking in on whether that's intentional or blocked on something.
+
+**Resolved since 2026-07-14**: both prior blockers here (uncommitted search-system work;
+stale `.git/index.lock` from a Cowork sandbox session) are gone — the search-system work
+is in commits `b144ef37`/`dc56cf75`, and git reads/writes cleanly from this sandbox now
+with no lock issue.
 
 ## Notes for the daily check-in task
 - This file is the source of truth for "where things stand." Update the **Last check-in**

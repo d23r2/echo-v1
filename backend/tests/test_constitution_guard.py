@@ -10,13 +10,11 @@ not a substitute for an actual Guardian Council vote.
 Test names double as the case documentation the task asked for.
 """
 
-from fastapi.testclient import TestClient
-
 import pytest
+from fastapi.testclient import TestClient
 
 from app import constitution, council
 from app.main import app
-
 
 # ---- Obvious attempts: unambiguous requests to weaken an invariant ----
 

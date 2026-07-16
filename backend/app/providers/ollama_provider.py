@@ -21,31 +21,33 @@ class OllamaProvider(ModelProvider):
         except httpx.HTTPError:
             return False, "Ollama not reachable (is it running locally?)"
 
-    def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
+    def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
         settings = get_settings()
         payload = {
-            "model": settings.ollama_model,
+            "model": model or settings.ollama_model,
             "messages": [{"role": "system", "content": system_prompt}]
             + [{"role": m.role, "content": m.content} for m in messages],
             "stream": False,
         }
-        resp = httpx.post(f"{settings.ollama_base_url}/api/chat", json=payload, timeout=120)
+        resp = httpx.post(
+            f"{settings.ollama_base_url}/api/chat", json=payload, timeout=settings.local_model_timeout_seconds
+        )
         resp.raise_for_status()
         raw = resp.json().get("message", {}).get("content", "")
         return split_reasoning_and_answer(raw)
 
-    def stream_chat(self, system_prompt: str, messages: list[ChatMessage]) -> Iterator[str]:
+    def stream_chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> Iterator[str]:
         """Real token-level streaming via Ollama's `stream: true`, which returns
         newline-delimited JSON objects, each carrying the next content fragment."""
         settings = get_settings()
         payload = {
-            "model": settings.ollama_model,
+            "model": model or settings.ollama_model,
             "messages": [{"role": "system", "content": system_prompt}]
             + [{"role": m.role, "content": m.content} for m in messages],
             "stream": True,
         }
         with httpx.stream(
-            "POST", f"{settings.ollama_base_url}/api/chat", json=payload, timeout=120
+            "POST", f"{settings.ollama_base_url}/api/chat", json=payload, timeout=settings.local_model_timeout_seconds
         ) as resp:
             resp.raise_for_status()
             for line in resp.iter_lines():

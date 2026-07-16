@@ -21,7 +21,7 @@ import re
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import urlparse
 
 import httpx
@@ -141,7 +141,7 @@ def searxng_search(query: str, max_results: int | None = None) -> SearchOutcome:
         return SearchOutcome([], query, "SearXNG returned an unparseable response.")
 
     raw_results = data.get("results", [])[:max_results]
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     results = []
     for r in raw_results:
         url = r.get("url") or ""
@@ -198,7 +198,7 @@ def wiki_search(query: str, max_results: int | None = None) -> SearchOutcome:
     if not hits:
         return SearchOutcome([], query, "No wiki results found.")
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     provider_name = "wikimedia" if settings.wiki_provider == "wikimedia" else "custom_wiki"
     results = []
     for h in hits:
@@ -279,7 +279,7 @@ def rss_search(query: str, max_results: int | None = None) -> SearchOutcome:
     max_results = max_results or settings.web_search_max_results
     query_words = {w for w in re.findall(r"[a-z0-9']+", query.lower()) if len(w) > 2}
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     matches: list[SourceResult] = []
     any_feed_succeeded = False
 
@@ -356,7 +356,7 @@ def fetch_direct_page(url: str) -> SourceResult | None:
         url=url,
         domain=urlparse(url).netloc or None,
         snippet=text or None,
-        retrieved_at=datetime.now(timezone.utc).isoformat(),
+        retrieved_at=datetime.now(UTC).isoformat(),
         reliability_note="Directly fetched page text; formatting/structure stripped.",
     )
 

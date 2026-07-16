@@ -33,12 +33,69 @@ separate `available()` call — not visible to mypy — already guarantees the v
 before `chat()` runs) but is **not wired into CI or a required gate** — treat it as an
 optional second opinion, not a blocker.
 
-**pytest**: 386 tests as of 2026-07-14, all passing, no real external API calls anywhere
+**pytest**: 757 tests as of 2026-07-16, all passing, no real external API calls anywhere
 (every provider is a fake/mock — see `tests/fake_providers.py` and `tests/README.md`).
 The no-billing web/wiki/RSS search system (`app/search_intent.py`, `app/web_search.py`)
 is covered the same way — `tests/fake_http.py` fakes `httpx.get()` with real (but
 offline) `httpx.Response` objects, so `test_search_intent.py`/`test_web_search.py`/
 `test_persona_search_injection.py` never touch a real SearXNG/Wikipedia/RSS endpoint.
+
+**ECHO Personal OS v1** (Projects/Tasks/Mission Control/Smart Context Router/chat
+actions) adds `test_projects.py`, `test_tasks.py`, `test_mission_control.py`,
+`test_context_router.py`, `test_chat_actions.py` — run just those with:
+```bash
+pytest tests/test_projects.py tests/test_tasks.py tests/test_mission_control.py tests/test_context_router.py tests/test_chat_actions.py -v
+```
+See [ECHO_PERSONAL_OS_V1.md](ECHO_PERSONAL_OS_V1.md) for what these features do and their
+known limitations.
+
+**ECHO Human Persona Layer v1** (relationship memory, mood, operational modes, humour,
+proactivity, personality settings, rituals) adds `test_human_persona.py` — run it with:
+```bash
+pytest tests/test_human_persona.py -v
+```
+See [ECHO_HUMAN_PERSONA_LAYER_V1.md](ECHO_HUMAN_PERSONA_LAYER_V1.md) for what these features
+do, safety limits, and known limitations.
+
+**ECHO Local Intelligence Engine v1** (intent classifier, context gatherer, local model
+router, draft/critic/repair/style pipeline, cloud fallback gate) adds
+`test_intent_classifier.py`, `test_context_gatherer.py`, `test_local_model_router.py`,
+`test_local_intelligence_engine.py`, `test_local_intelligence_eval_cases.py`,
+`test_local_intelligence_chat_integration.py` — run just those with:
+```bash
+pytest tests/test_intent_classifier.py tests/test_context_gatherer.py tests/test_local_model_router.py tests/test_local_intelligence_engine.py tests/test_local_intelligence_eval_cases.py tests/test_local_intelligence_chat_integration.py -v
+```
+Off by default (`LOCAL_INTELLIGENCE_ENGINE_ENABLED=false`); no real Ollama or cloud call in
+any of these tests. See [ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md](ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md)
+for what it does, config variables, and known limitations.
+
+**ECHO Action + Reliability Core v1** (Action System, Permission Center, Evaluation Lab,
+Knowledge Vault, Conversation Auto-Summary, Release Manager, Tool Registry) adds
+`test_action_system.py`, `test_permission_center.py`, `test_evaluation_lab.py`,
+`test_knowledge_vault.py`, `test_conversation_summary.py`, `test_release_manager.py`,
+`test_tool_registry.py`, `test_action_reliability_integration.py` — run just those with:
+```bash
+pytest tests/test_action_system.py tests/test_permission_center.py tests/test_evaluation_lab.py tests/test_knowledge_vault.py tests/test_conversation_summary.py tests/test_release_manager.py tests/test_tool_registry.py tests/test_action_reliability_integration.py -v
+```
+No real network/Ollama/cloud call in any of these tests — the one system that touches a
+model (Conversation Auto-Summary) is tested with a `FakeProvider`-backed `LocalModelRouter`,
+same pattern as the Local Intelligence Engine's own tests. See
+[ECHO_ACTION_RELIABILITY_CORE_V1.md](ECHO_ACTION_RELIABILITY_CORE_V1.md) for what it does,
+config variables, and known limitations. Multi-user tester accounts were explicitly **not**
+part of this milestone.
+
+**ECHO Cognitive Core v1** (world model/knowledge graph, task understanding, skill library,
+causal notes, missing-knowledge/success-criteria generation, prompt integration) adds
+`test_cognitive_core.py`, `test_cognitive_router.py`, `test_cognitive_prompt_integration.py`
+— run just those with:
+```bash
+pytest tests/test_cognitive_core.py tests/test_cognitive_router.py tests/test_cognitive_prompt_integration.py -v
+```
+All classification/matching is deterministic (regex/keyword), no model call of its own; the
+two tests that touch the Local Intelligence Engine path use the same `ScriptedProvider`/
+`FakeProvider` pattern as the rest of this suite. See
+[ECHO_COGNITIVE_CORE_V1.md](ECHO_COGNITIVE_CORE_V1.md) for what it does, the data model, and
+known limitations.
 
 ## Frontend (TypeScript)
 
@@ -61,6 +118,70 @@ checker plus manual/browser testing, not an automated test suite.
 high) as of 2026-07-13 — pre-existing, not introduced by any recent work. Run `npm audit`
 for details before deciding whether `npm audit fix` is worth the risk of a breaking
 transitive version bump; it hasn't been applied here since it wasn't tested.
+
+## Native app builds (Android / Windows)
+
+Both native builds run on top of the same web build — `npm run build` produces
+`frontend/dist/`, which Capacitor/Tauri then package. **Always set the correct
+`VITE_API_BASE_URL` in `frontend/.env` *before* building for a native target** — it's
+baked into the JS bundle at build time, not read at runtime:
+- Android emulator: `http://10.0.2.2:8000` (the emulator's alias for the host machine;
+  `localhost` inside the app means the device itself, not your dev machine).
+- Android physical device / Windows on another machine: your host's LAN or Tailscale IP,
+  e.g. `http://100.x.x.x:8000`.
+- Windows app running on the same machine as the backend: `http://localhost:8000` is fine.
+
+**Android:**
+```bash
+cd frontend
+npm run build
+npx cap sync android
+cd android
+./gradlew.bat assembleDebug   # or gradlew on macOS/Linux
+```
+APK output: `frontend/android/app/build/outputs/apk/debug/app-debug.apk`
+
+`@capacitor/android`'s bundled Gradle module requires **JDK 21+** to compile
+(`sourceCompatibility JavaVersion.VERSION_21`) — if `JAVA_HOME` points at an older JDK
+(17 is common), the build fails with `invalid source release: 21`. Point `JAVA_HOME` at
+a JDK 21+ install for this one command if needed, e.g. on Windows:
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-25.0.3.9-hotspot"
+```
+
+**Windows (Tauri):**
+```bash
+cd frontend
+npm run tauri build
+```
+Requires the Rust toolchain (`rustc`/`cargo`) installed. Output installer(s) under
+`frontend/src-tauri/target/release/bundle/` (`.msi`/`.exe` depending on target). If a
+previously-built `app.exe` is still running, the build fails trying to overwrite it —
+close it first.
+
+Both `capacitor.config.ts`'s `appId` and `tauri.conf.json`'s `identifier` are
+`com.godtear.echo` — a leftover from the pre-rename codebase, left as-is deliberately.
+Changing either is a breaking change (existing installs, Play Store/signing identity)
+and isn't done casually; the user-visible app name/title (`ECHO`) is what's kept current.
+
+## How to back up ECHO data before upgrading
+
+All persisted state lives under `backend/data/` (created by `app/config.py`'s
+`DATA_DIR`, gitignored):
+- `backend/data/echo.db` — SQLite, the source of truth for conversations, Atlas
+  memories, Projects, Tasks, Schedule items, Library records, and everything else.
+- `backend/data/chroma/` — ChromaDB's persisted vector index (a mirror of Atlas/
+  conversation content for semantic search, rebuilt from SQLite if lost — but faster to
+  just copy it).
+- `backend/data/attachments/` — uploaded files, generated images, and other binary
+  attachments referenced by SQLite rows.
+
+Before pulling a new version or running a schema-affecting change, stop the backend and
+copy the whole `backend/data/` directory somewhere safe. New tables (like ECHO Personal
+OS v1's `projects`/`tasks`) are added via SQLAlchemy's `Base.metadata.create_all()` on
+startup, which only creates tables that don't exist yet — it never drops or alters an
+existing table, so upgrading in place is safe, but a backup costs nothing and covers you
+against anything unexpected.
 
 ## Recommended pre-commit workflow
 

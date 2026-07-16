@@ -11,7 +11,6 @@ from app.models import MemoryCandidate
 from app.providers.base import ChatResult
 from app.routers.chat import _extract_memory
 
-
 # ---- conflict detection ----
 
 

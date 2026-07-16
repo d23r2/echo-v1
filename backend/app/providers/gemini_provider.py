@@ -51,7 +51,7 @@ class GeminiProvider(ModelProvider):
             return False, "GEMINI_API_KEY not set"
         return True, None
 
-    def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
+    def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
         settings = get_settings()
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"

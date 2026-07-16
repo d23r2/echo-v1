@@ -151,7 +151,17 @@ def test_features_endpoint_reports_azure_daily_limit_reached(monkeypatch):
     fake_router = ModelRouter(providers=[FakeProvider("azure", available=True)])
     monkeypatch.setattr("app.routers.features.model_router", fake_router)
     monkeypatch.setattr(
-        "app.routers.features.get_settings", lambda: SimpleNamespace(azure_daily_request_limit=1)
+        "app.routers.features.get_settings",
+        lambda: SimpleNamespace(
+            azure_daily_request_limit=1,
+            web_search_enabled=False,
+            web_search_provider="searxng",
+            searxng_base_url=None,
+            wiki_search_enabled=True,
+            wiki_provider="wikimedia",
+            rss_search_enabled=False,
+            rss_feed_url_list=[],
+        ),
     )
 
     session = SessionLocal()

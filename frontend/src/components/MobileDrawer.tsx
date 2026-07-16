@@ -54,31 +54,33 @@ export default function MobileDrawer({
           </button>
         </div>
 
-        <nav className="flex flex-col gap-1 px-2">
-          {NAV_ITEMS.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                onChange(item.id);
-                onClose();
-              }}
-              className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-sm transition-colors ${
-                active === item.id
-                  ? "bg-accent/15 text-accent"
-                  : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
-              }`}
-            >
-              <span>{item.icon}</span>
-              <span>{item.label}</span>
-            </button>
-          ))}
-        </nav>
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <nav className="flex flex-col gap-1 px-2">
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                onClick={() => {
+                  onChange(item.id);
+                  onClose();
+                }}
+                className={`flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-sm transition-colors ${
+                  active === item.id
+                    ? "bg-accent/15 text-accent"
+                    : "text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200"
+                }`}
+              >
+                <span>{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
+          </nav>
 
-        {active === "chat" && (
-          <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-zinc-800 px-2 pt-3">
-            <ConversationList onSelect={onClose} />
-          </div>
-        )}
+          {active === "chat" && (
+            <div className="mt-4 flex min-h-0 flex-1 flex-col border-t border-zinc-800 px-2 pt-3">
+              <ConversationList onSelect={onClose} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

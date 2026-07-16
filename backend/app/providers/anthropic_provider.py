@@ -12,7 +12,7 @@ class AnthropicProvider(ModelProvider):
             return False, "ANTHROPIC_API_KEY not set"
         return True, None
 
-    def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
+    def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
         import anthropic
 
         settings = get_settings()

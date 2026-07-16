@@ -60,11 +60,26 @@ def get_feature_availability(db: Session = Depends(get_db)):
     image_gen_active, image_gen_reason = image_router.select_provider()
     image_gen_statuses = image_router.statuses()
 
+    settings = get_settings()
+    # Mirrors the same gating each provider function in app/web_search.py
+    # checks itself, so this flag never claims a source is configured when a
+    # real search call would immediately report it isn't.
+    web_search_enabled = bool(
+        settings.web_search_enabled and settings.web_search_provider == "searxng" and settings.searxng_base_url
+    )
+    wiki_enabled = bool(settings.wiki_search_enabled and settings.wiki_provider != "disabled")
+    rss_enabled = bool(settings.rss_search_enabled and settings.rss_feed_url_list)
+
     return schemas.FeatureAvailability(
         chat=any_chat_provider,
         voice_input=True,  # browser-native (SpeechRecognition) — frontend checks support itself
         file_upload=True,  # attachments are always stored; analysis depth varies (see Attachment.analysis_status)
         image_generation=image_gen_active is not None,
+        web_search_enabled=web_search_enabled,
+        wiki_enabled=wiki_enabled,
+        rss_enabled=rss_enabled,
+        library=True,
+        schedule=True,
         vision=schemas.VisionAvailability(
             available=vision_available,
             provider=_VISION_PROVIDER,

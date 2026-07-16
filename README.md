@@ -195,6 +195,69 @@ Generated images are saved to disk and automatically registered in the Library.
   you away from the app; that's a reasonable future addition, not something implemented
   today.
 
+## Personal OS: Mission Control, Projects, Tasks
+
+Beyond chat, ECHO tracks ongoing work: **Projects** (ongoing bodies of work — a study
+track, a job search, a coding project), **Tasks** (standalone or linked to a project),
+and **Mission Control** (sidebar, above Chats) — a dashboard of what's due, what's active,
+and a **Continue Where We Left Off** panel suggesting what to pick back up based on
+overdue tasks, recently-touched projects, and recent conversations. A small set of
+deterministic chat commands ("create a project called X", "add a task to test Android APK
+tomorrow", "show my tasks today", "what projects are active?", "continue where we left
+off") are handled without a model call — see `backend/app/chat_actions.py`. See
+[ECHO_PERSONAL_OS_V1.md](ECHO_PERSONAL_OS_V1.md) for full details, limitations, and the
+manual test checklist.
+
+## Human Persona Layer: relationship memory, mood, mode, personality
+
+Beyond the base persona, ECHO has a Personality page (sidebar) controlling how it talks —
+humour, formality, directness, response length, proactivity — plus a durable Relationship
+Memory of how it works with you specifically, and a fixed Character Code (10 values, not
+user-editable) that sits right after the Constitution in every prompt. Mood is detected fresh
+each message and never stored permanently. Say "switch to strict coach mode" or "keep replies
+short today" in chat to change the current conversation's tone/length without touching your
+permanent settings. Multiple people testing the same install can each get their own persona —
+type a name into the Personality page's "Acting as tester" field. See
+[ECHO_HUMAN_PERSONA_LAYER_V1.md](ECHO_HUMAN_PERSONA_LAYER_V1.md) for full details, safety
+limits, and the manual test checklist.
+
+## Local Intelligence Engine: local-first workflow for Ollama-only use
+
+Beyond plain single-call Ollama chat, ECHO can run a full local workflow — intent detection,
+context gathering, role-based local model routing, a draft pass, a local critic/checker pass,
+an optional repair pass, an optional style pass, and honest confidence scoring — entirely on
+local models, with cloud as an explicit, off-by-default, gated fallback only. Off by default
+(`LOCAL_INTELLIGENCE_ENGINE_ENABLED=false`); turn it on in `.env` or via the Personality
+page's "Local Intelligence" section, which also shows live Ollama connection status and the
+installed model list. See [ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md](ECHO_LOCAL_INTELLIGENCE_ENGINE_V1.md)
+for the full pipeline, config variables, and manual test checklist.
+
+## Action + Reliability Core: actions, permissions, evaluation, knowledge, releases, tools
+
+ECHO can safely *do* things (create tasks/projects/reminders, search web/wiki/RSS/memory,
+summarize files/conversations, seed a release checklist, ...) — every action carries a risk
+level and goes through a single Permission Center (allowed/ask-first/disabled) before running;
+destructive actions only ever soft-archive. A one-click Evaluation Lab checks 10 fixed cases
+against ECHO's own deterministic routing/safety rules (no model call). A Knowledge Vault holds
+your own notes/decisions/prompts, separate from Atlas. A Release Manager tracks recorded
+test/build results — Green only when every required check has actually been recorded passing.
+An internal Tool Registry backs both the Action System and future automation. Multi-user
+tester accounts were **not** part of this pass. See
+[ECHO_ACTION_RELIABILITY_CORE_V1.md](ECHO_ACTION_RELIABILITY_CORE_V1.md) for the full system
+list, config variables, and manual test checklist.
+
+## Cognitive Core: world model + task understanding
+
+Beyond storing facts (Atlas) and doing things (Action System), ECHO keeps a small structured
+world model — durable concepts and how they relate, reusable skill workflows, and simple
+cause-effect notes — and, for genuinely complex requests only, builds an internal task
+understanding (goal, known facts, unknowns, constraints, success criteria) that's folded into
+the prompt as a compact `CognitiveBrief`. It's deterministic bookkeeping, not a claim of
+consciousness, and it's never shown in a normal chat reply. Browse it under
+Intelligence → Cognitive Core. See
+[ECHO_COGNITIVE_CORE_V1.md](ECHO_COGNITIVE_CORE_V1.md) for the full model, config, and manual
+test checklist.
+
 ## Multi-device
 
 The frontend is a fully responsive web app — the same build works on desktop and mobile

@@ -26,7 +26,7 @@ class AzureOpenAIProvider(ModelProvider):
             return False, "AZURE_OPENAI_DEPLOYMENT not set"
         return True, None
 
-    def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
+    def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
         from openai import AzureOpenAI
 
         settings = get_settings()

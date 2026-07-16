@@ -109,10 +109,14 @@ class ModelProvider(ABC):
         """Return (is_available, reason_if_not)."""
 
     @abstractmethod
-    def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
-        ...
+    def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
+        """`model` is an optional per-call override of whichever model this
+        provider would otherwise use — only OllamaProvider currently honors
+        it (see app/services/local_model_router.py's role-based routing);
+        cloud providers ignore it and keep using their configured model,
+        since role-based local routing has no cloud equivalent in v1."""
 
-    def stream_chat(self, system_prompt: str, messages: list[ChatMessage]) -> Iterator[str]:
+    def stream_chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> Iterator[str]:
         """Yield raw reply text as it becomes available, for POST /api/chat/stream.
         Default: no real token-level streaming — call the existing non-streaming
         chat() and re-emit its already-parsed result as one chunk, reconstructed
@@ -121,7 +125,7 @@ class ModelProvider(ABC):
         AND the same envelope_status — never inventing markers the model didn't
         actually produce. Providers with a cheap native streaming transport
         override this for real incremental delivery (currently just Ollama)."""
-        result = self.chat(system_prompt, messages)
+        result = self.chat(system_prompt, messages, model=model)
         if result.envelope_status == "missing":
             # No envelope at all originally — don't fabricate REASONING:/MEMORY:
             # markers that were never in the model's output; yielding the raw

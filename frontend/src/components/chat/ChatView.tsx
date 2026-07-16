@@ -9,7 +9,11 @@ import {
   generateImage,
   getConversation,
   getFeatureAvailability,
+  ConversationSummaryOut,
+  getLocalIntelligenceSettings,
+  getPersonaSettings,
   getWelcomeGreeting,
+  summarizeConversation,
   sendChatMessage,
   sendChatMessageWithFiles,
   streamChatMessage,
@@ -114,12 +118,17 @@ export default function ChatView() {
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [features, setFeatures] = useState<FeatureAvailability | null>(null);
+  const [localIntelligenceEnabled, setLocalIntelligenceEnabled] = useState(false);
+  const [voiceMode, setVoiceMode] = useState<"off" | "push_to_talk" | "hands_free_placeholder">("push_to_talk");
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ConversationSummaryOut | null>(null);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
@@ -147,6 +156,11 @@ export default function ChatView() {
       : sending
         ? "thinking"
         : "idle";
+
+  useEffect(() => {
+    setSummary(null);
+    setSummaryError(null);
+  }, [conversationId]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -180,6 +194,29 @@ export default function ChatView() {
     getFeatureAvailability()
       .then(setFeatures)
       .catch(() => setFeatures(null));
+  }, []);
+
+  // Local Intelligence Engine only hooks into the non-streaming POST /api/chat —
+  // when it's on, route eligible sends there instead of /api/chat/stream so the
+  // engine (intent -> context -> local model -> critic -> style) is actually reachable.
+  useEffect(() => {
+    getLocalIntelligenceSettings()
+      .then((s) => setLocalIntelligenceEnabled(s.local_intelligence_engine_enabled))
+      .catch(() => setLocalIntelligenceEnabled(false));
+  }, []);
+
+  // ECHO Action + Reliability Core v1 — Voice-first Mode foundation. STT/TTS
+  // themselves already run entirely client-side (Web Speech API, unchanged
+  // below); this just applies the persisted voice_mode/tts_enabled
+  // preference from the Personality/Permissions page instead of always
+  // defaulting to push-to-talk-on, speak-off.
+  useEffect(() => {
+    getPersonaSettings()
+      .then((s) => {
+        setVoiceMode(s.voice_mode);
+        setSpeakEnabled(s.tts_enabled);
+      })
+      .catch(() => {});
   }, []);
 
   const geminiAvailable = features ? features.vision.available : null;
@@ -426,6 +463,40 @@ export default function ChatView() {
       return;
     }
 
+    // Local Intelligence Engine path: it only integrates into non-streaming
+    // POST /api/chat, so route there directly (no live typing indicator) when
+    // it's enabled and the provider pin wouldn't bypass it anyway.
+    if (localIntelligenceEnabled && (provider === "auto" || provider === "ollama")) {
+      const result = await runSend(text, provider, conversationId);
+      if (!result) return;
+      selectConversation(result.conversation_id);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: result.message_id,
+          role: "echo",
+          content: result.content,
+          reasoning: result.reasoning,
+          provider: result.provider_used,
+          atlas_citations: result.atlas_citations,
+          attachments: [],
+          memory_update: result.memory_update,
+          fallback_note: result.fallback_note,
+          independence_nudge_reason: result.independence_nudge_reason,
+          conversation_snippets: result.conversation_snippets,
+          envelope_status: result.envelope_status,
+          envelope_degradation_reason: result.envelope_degradation_reason,
+          sources_used: result.sources_used,
+          current_info_intent: result.current_info_intent,
+          search_failure_reason: result.search_failure_reason,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+      speak(result.content);
+      refreshConversations();
+      return;
+    }
+
     // Streaming path (text-only — file uploads use the non-streaming branch
     // above, since POST /api/chat/stream doesn't accept attachments).
     const streamingId = `streaming-${Date.now()}`;
@@ -559,6 +630,19 @@ export default function ChatView() {
     refreshConversations();
   }
 
+  async function handleSummarize(saveToKnowledgeVault: boolean) {
+    if (!conversationId) return;
+    setSummarizing(true);
+    setSummaryError(null);
+    try {
+      setSummary(await summarizeConversation(conversationId, saveToKnowledgeVault));
+    } catch (err) {
+      setSummaryError(err instanceof Error ? err.message : "Couldn't summarize this conversation.");
+    } finally {
+      setSummarizing(false);
+    }
+  }
+
   return (
     <div className="flex h-full">
       <aside className="hidden lg:flex w-60 flex-col border-r border-zinc-800 bg-zinc-950 p-3">
@@ -588,10 +672,52 @@ export default function ChatView() {
                 {isSpeaking ? "⏹" : speakEnabled ? "🔊" : "🔈"}
               </button>
             )}
+            {conversationId && (
+              <button
+                onClick={() => void handleSummarize(false)}
+                disabled={summarizing}
+                title="Summarize this conversation"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-sm text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300 disabled:opacity-50"
+              >
+                📝
+              </button>
+            )}
             <ModelPicker />
             <UsageStatus />
           </div>
         </header>
+
+        {(summary || summaryError || summarizing) && (
+          <div className="border-b border-zinc-800 bg-zinc-950/80 px-4 py-3 text-sm">
+            {summarizing && <div className="text-zinc-500">Summarizing…</div>}
+            {summaryError && <div className="text-red-400">{summaryError}</div>}
+            {summary && !summarizing && (
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-zinc-100">{summary.title}</div>
+                  <p className="mt-1 text-zinc-400">{summary.summary}</p>
+                  {summary.decisions_json.length > 0 && (
+                    <p className="mt-1 text-xs text-zinc-500">Decisions: {summary.decisions_json.join("; ")}</p>
+                  )}
+                  {summary.next_steps_json.length > 0 && (
+                    <p className="mt-1 text-xs text-zinc-500">Next steps: {summary.next_steps_json.join("; ")}</p>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={() => void handleSummarize(true)}
+                    className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-900"
+                  >
+                    Save to Knowledge Vault
+                  </button>
+                  <button onClick={() => setSummary(null)} className="rounded-lg border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300 hover:bg-zinc-900">
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="relative flex-1 overflow-y-auto p-4 space-y-4">
           {/* Ambient atmosphere: two large, very low-opacity blurred blobs drifting
@@ -718,7 +844,7 @@ export default function ChatView() {
               onAttachFile={() => fileInputRef.current?.click()}
               onToggleVoice={toggleListening}
               onGenerateImage={handleGenerateImage}
-              voiceSupported={!!SpeechRecognitionCtor}
+              voiceSupported={!!SpeechRecognitionCtor && voiceMode !== "off"}
               listening={listening}
               canGenerateImage={canGenerateImage}
               imageGenerationUnavailableReason={imageGenerationUnavailableReason}

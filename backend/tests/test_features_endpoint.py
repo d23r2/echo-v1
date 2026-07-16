@@ -3,6 +3,8 @@ features actually work right now so it can disable things cleanly instead of
 letting the user hit a failure. No real provider calls: FakeProvider throughout.
 """
 
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from app.db import init_db
@@ -106,3 +108,33 @@ def test_voice_and_file_upload_always_reported_available(monkeypatch):
     body = resp.json()
     assert body["voice_input"] is True  # browser-native, not a backend concern
     assert body["file_upload"] is True  # attachments are always stored
+
+
+def test_search_flags_reflect_settings_not_just_enabled_toggle(monkeypatch):
+    """web_search_enabled must require both WEB_SEARCH_ENABLED and a real
+    SEARXNG_BASE_URL — same gate app/web_search.py's searxng_search() itself
+    checks — so this flag never claims a source is ready when a real search
+    call would immediately report it isn't."""
+    fake_router = ModelRouter(providers=[FakeProvider("gemini", available=False, unavailable_reason="no key")])
+    monkeypatch.setattr("app.routers.features.model_router", fake_router)
+    monkeypatch.setattr(
+        "app.routers.features.get_settings",
+        lambda: SimpleNamespace(
+            azure_daily_request_limit=None,
+            web_search_enabled=True,
+            web_search_provider="searxng",
+            searxng_base_url=None,  # enabled but no URL — should NOT report ready
+            wiki_search_enabled=True,
+            wiki_provider="wikimedia",
+            rss_search_enabled=True,
+            rss_feed_url_list=["https://example.com/feed.xml"],
+        ),
+    )
+
+    resp = client.get("/api/features")
+    body = resp.json()
+    assert body["web_search_enabled"] is False
+    assert body["wiki_enabled"] is True
+    assert body["rss_enabled"] is True
+    assert body["library"] is True
+    assert body["schedule"] is True

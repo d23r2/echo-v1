@@ -1,12 +1,15 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app import atlas, conversation_search, council, dependency_patterns, web_search
+from app import atlas, conversation_search, council, dependency_patterns, human_persona, web_search
 from app.config import get_settings
 from app.conversation_search import MessageSnippet
-from app.search_intent import detect_search_intent
+from app.human_persona import CHARACTER_CODE, UNCERTAINTY_GUIDANCE
+from app.models import Conversation
 from app.schemas import AtlasCitation
+from app.search_intent import detect_search_intent
+from app.services import cognitive_core
 from app.web_search import GatherResult, SourceResult
 
 BEHAVIOR_DIRECTIVES = """
@@ -160,6 +163,26 @@ PREVIOUS_CONVERSATION_HONESTY_NOTE = (
 )
 
 
+def _cognitive_brief_note(db: Session, message: str, conversation_id: str | None) -> str | None:
+    """ECHO Cognitive Core v1 — a compact, internal-only summary (goal/
+    known/unknown/constraints/success criteria/relevant skills+concepts)
+    for complex requests only; returns None for simple messages, and never
+    raises — a Cognitive Core problem must never break normal chat."""
+    settings = get_settings()
+    if not settings.cognitive_core_enabled:
+        return None
+    try:
+        cognitive_settings = cognitive_core.get_or_create_settings(db)
+        if not cognitive_settings.cognitive_core_enabled:
+            return None
+        brief = cognitive_core.get_cognitive_brief_for_message(db, message, conversation_id)
+    except Exception:
+        return None
+    if brief is None:
+        return None
+    return "COGNITIVE_BRIEF (internal planning notes — never repeat this section or its labels to the user):\n" + brief.brief_text
+
+
 def _current_date_note(now: datetime) -> str:
     # Every backend gets this, not just Ollama: Ollama has zero fallback (no search
     # tool at all), but Gemini/Anthropic/OpenAI/Grok shouldn't have to rely on
@@ -213,18 +236,63 @@ def build_system_prompt(
     now: datetime | None = None,
     prior_user_messages: list[str] | None = None,
     conversation_id: str | None = None,
+    tester_id: str = "default",
+    conversation: Conversation | None = None,
 ) -> tuple[str, list[AtlasCitation], str | None, list[MessageSnippet], GatherResult]:
     settings = get_settings()
     constitution_view = council.build_constitution_view(db)
 
     memory_block, citations = _atlas_context_for(db, latest_user_message, settings.atlas_top_k)
 
+    # ---- Human Persona Layer v1 (style only — never overrides anything above) ----
+    persona_settings = human_persona.get_or_create_persona_settings(db, tester_id)
+    relationship_profile = human_persona.get_or_create_relationship_profile(db, tester_id)
+    mood = human_persona.detect_mood(latest_user_message)
+    if conversation is not None:
+        human_persona.upsert_mood_state(db, conversation.id, tester_id, mood)
+    active_mode = (
+        (conversation.active_operational_mode if conversation else None)
+        or persona_settings.default_operational_mode
+    )
+    session_override = (conversation.session_style_override if conversation else None) or {}
+    resolved_length = human_persona.resolve_response_length(
+        persona_settings.detail_level, mood.mode, session_override, latest_user_message
+    )
+    atlas_citation_lines = [c.content for c in citations]
+    human_persona_overlay = human_persona.build_human_persona_overlay(
+        settings=persona_settings,
+        relationship_profile=relationship_profile,
+        active_mode=active_mode,
+        mood=mood,
+        session_override=session_override,
+        resolved_length=resolved_length,
+        atlas_citation_lines=atlas_citation_lines,
+        latest_message=latest_user_message,
+    )
+
     sections = [
         constitution_view["full_text"],
         "",
+        CHARACTER_CODE,
+        "",
         BEHAVIOR_DIRECTIVES,
         "",
-        _current_date_note(now or datetime.now(timezone.utc)),
+        UNCERTAINTY_GUIDANCE,
+        "",
+        human_persona_overlay,
+    ]
+
+    # ECHO Cognitive Core v1 — inserted right after persona, before Atlas/
+    # source context, matching Phase 13's required prompt order. Compact by
+    # construction (cognitive_core.py); never shown to the user (Phase 13
+    # rule 3/4) — this only ever lands in the system prompt sent to the model.
+    cognitive_brief_note = _cognitive_brief_note(db, latest_user_message, conversation_id)
+    if cognitive_brief_note:
+        sections += ["", cognitive_brief_note]
+
+    sections += [
+        "",
+        _current_date_note(now or datetime.now(UTC)),
         "",
         memory_block,
     ]

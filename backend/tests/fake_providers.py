@@ -54,12 +54,17 @@ class FakeProvider(ModelProvider):
         self._stream_raises_after = stream_raises_after
         self.chat_call_count = 0
         self.stream_call_count = 0
+        # Records the `model` kwarg from the most recent chat()/stream_chat()
+        # call — lets role-based-routing tests (LocalModelRouter) assert which
+        # model name was actually requested without needing a real Ollama.
+        self.last_model_requested: str | None = None
 
     def available(self) -> tuple[bool, str | None]:
         return self._available, self._unavailable_reason
 
-    def chat(self, system_prompt: str, messages: list[ChatMessage]) -> ChatResult:
+    def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
         self.chat_call_count += 1
+        self.last_model_requested = model
         if self._raises is not None:
             raise self._raises
         if self._chat_result is not None:
@@ -72,10 +77,11 @@ class FakeProvider(ModelProvider):
         # tests that only check .text.
         return split_reasoning_and_answer(self._response_text)
 
-    def stream_chat(self, system_prompt: str, messages: list[ChatMessage]) -> Iterator[str]:
+    def stream_chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> Iterator[str]:
         self.stream_call_count += 1
+        self.last_model_requested = model
         if self._stream_chunks is None:
-            yield from super().stream_chat(system_prompt, messages)
+            yield from super().stream_chat(system_prompt, messages, model=model)
             return
         for i, piece in enumerate(self._stream_chunks):
             if self._stream_raises_after is not None and i == self._stream_raises_after:

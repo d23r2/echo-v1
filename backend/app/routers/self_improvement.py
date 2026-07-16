@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -63,7 +63,7 @@ def verify_request(request_id: str, db: Session = Depends(get_db)):
     request.verification_checks = checks
     request.verification_status = status
     request.verification_notes = notes
-    request.verified_at = datetime.now(timezone.utc)
+    request.verified_at = datetime.now(UTC)
     request.patch_summary = (
         "No code was modified — this ran read-only checks against the current working tree."
     )

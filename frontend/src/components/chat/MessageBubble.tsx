@@ -158,11 +158,19 @@ const markdownComponents: Components = {
   ),
 };
 
+// CommonMark treats a bare "<digits>." or "<digits>)" at the start of a line as an
+// ordered-list marker. A short numeric answer like "84." with nothing else on that
+// line gets swallowed into an empty, invisible list item — escape it so it renders
+// as plain text instead.
+function escapeLeadingBareOrdinal(content: string): string {
+  return content.replace(/^(\d{1,9})([.)])(?=\s*(?:\n|$))/, "$1\\$2");
+}
+
 function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="text-[15px]">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {content}
+        {escapeLeadingBareOrdinal(content)}
       </ReactMarkdown>
     </div>
   );
