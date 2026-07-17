@@ -2,6 +2,88 @@
 
 Last check-in: 2026-07-17
 
+## New since 2026-07-17 (later still) — ECHO Layer 2A: Cognitive Core v2 and Task Understanding
+
+1056 backend tests passing (61 new), frontend build/typecheck clean, live-verified in a real
+browser against an isolated temporary backend (created a complex task via the new API, confirmed
+extracted deadline/local-only constraints and generated acceptance tests in the UI, saved a goal
+correction end-to-end). Extends Cognitive Core v1 in place — all 56 v1 tests still pass unchanged.
+See [ECHO_LAYER_2A_COGNITIVE_CORE_V2_ARCHITECTURE.md](../ECHO_LAYER_2A_COGNITIVE_CORE_V2_ARCHITECTURE.md),
+[ECHO_LAYER_2A_COGNITIVE_CORE_V2_REPORT.md](../ECHO_LAYER_2A_COGNITIVE_CORE_V2_REPORT.md), and
+[ECHO_LAYER_2A_COGNITIVE_CORE_V2_SMOKE_TEST.md](../ECHO_LAYER_2A_COGNITIVE_CORE_V2_SMOKE_TEST.md).
+
+- **Unified task model** — `TaskUnderstanding` extended in place (not a parallel table) with
+  intent hierarchy, explicit/inferred constraint split, tiered missing-info classification,
+  acceptance tests/failure conditions, risk/consequence/reversibility, and a re-analysis
+  fingerprint — the legacy `task_type` taxonomy is completely untouched for backward compatibility.
+- **New: constraint/assumption engine** — extracts deadline/budget/platform/privacy/local-only/
+  format/approval constraints directly from the user's words, labels inferred constraints with a
+  stated basis, detects contradictory pairs. Found and fixed a real bug: extracted constraints
+  weren't actually being merged into the stored `constraints_json` before this was caught by a
+  dedicated end-to-end test.
+- **New: clarification policy** — missing information is tiered blocking/important/optional/
+  safely-inferable; only blocking items ever trigger a question (capped at 2), everything else
+  gets a stated safe assumption instead of an interruption.
+- **New: CognitiveBrief v2** — stays deterministic (no model call, same as v1) and compact by
+  construction (verified under a 2000-character budget, no raw JSON ever rendered).
+- **New: task re-analysis** — an unchanged repeated message reuses the existing task (no duplicate
+  re-analysis); explicit re-analysis supersedes the old row and preserves history via
+  `parent_task_id`; user corrections rebuild the linked brief.
+- **New: `/api/intelligence/*`** — additive alongside the untouched `/api/cognitive/*`.
+- **Upgraded: Cognitive Core page** — Task Understandings tab now shows status/constraints/
+  assumptions/missing-info/success-criteria/risks, a "why ECHO needs clarification" panel, goal
+  correction, and re-analyse — all live-verified.
+- **Audit finding, not built**: the milestone's referenced "two-pass NEED_TOOL_RUN/NEED_USER_INPUT/
+  DONE protocol" doesn't exist anywhere in this codebase (confirmed by repo-wide search) — tool
+  orchestration is explicitly Layer 2D's scope, not 2A's, so nothing was built here to avoid
+  duplicating that future milestone.
+- Database schema bumped to v3 (additive-only). **Per the milestone's own sequencing instruction,
+  Layer 2B (Systems Thinking and Simulation Engine) has not been started** — it begins only after
+  this report is reviewed.
+
+## New since 2026-07-17 (later than all of the above) — ECHO Layer 1: Memory Foundation v1
+
+995 backend tests passing (129 new), `ruff check .` clean, frontend build/typecheck clean,
+live-verified in a real browser against an isolated temporary backend (real memories created, a
+real conflict detected and resolved, maintenance run, Settings' new Memory section confirmed) —
+the real Docker backend's data was never touched. See
+[ECHO_LAYER_1_MEMORY_FOUNDATION.md](../ECHO_LAYER_1_MEMORY_FOUNDATION.md),
+[ECHO_LAYER_1_MEMORY_REPORT.md](../ECHO_LAYER_1_MEMORY_REPORT.md), and
+[ECHO_LAYER_1_MEMORY_SMOKE_TEST.md](../ECHO_LAYER_1_MEMORY_SMOKE_TEST.md).
+
+- **Unified memory model** — `AtlasEntry` extended in place (not a parallel table) with a Layer 1
+  taxonomy (`category`: profile/preference/project/task/episodic/semantic/skill/relationship/
+  environment/temporary), verification/lifecycle status, importance/stability, retention policy,
+  capture method, and project/task scoping — the legacy `memory_type` field is completely
+  untouched for backward compatibility.
+- **New: sensitivity/privacy engine** (`memory_privacy.py`) — secret-shaped content (API keys,
+  tokens, card numbers) is never stored, no exception for explicit requests; highly sensitive
+  content requires an explicit ask; "do not remember the next thing I say" blocks capture outright.
+- **New: duplicate consolidation** (`memory_consolidation.py`) — containment-based similarity
+  (not the existing conflict detector's Jaccard overlap, which was found to score the milestone's
+  own worked examples too low) drives reject-duplicate/update-existing/supersede-existing/
+  keep-both decisions, every non-trivial one audited via `MemoryConsolidationEvent`.
+- **New: typed conflict system** (extends `memory_conflicts.py`) — 9 conflict types, severity
+  scoring (never auto-critical), explicit-only resolution.
+- **New: lifecycle/aging** (`memory_lifecycle.py`) — category-specific review intervals,
+  idempotent maintenance pass, never deletes. Caught and fixed a real bug during testing: SQLite
+  drops tzinfo on `DateTime(timezone=True)` read-back, which would have crashed maintenance with a
+  naive/aware subtraction error the first time it ran for real.
+- **New: hybrid retrieval + MemoryBrief** (`memory_retrieval.py`) — semantic + lexical-fallback
+  (verified live to survive a simulated vector-store outage), feeds a compact, sensitivity-filtered
+  prompt block into `persona.py` in place of the old flat Atlas citation list; the existing
+  `atlas_citations` API shape is unchanged so nothing downstream needed to change.
+- **New: Memory Center** (`/memory-center`, Advanced → Knowledge & Memory) — overview stats,
+  filters, per-memory archive/restore/confirm/mark-outdated/delete, conflict review with
+  one-click resolution, maintenance trigger, JSON export.
+- **New: "forget that"** — a narrow, reversible (archive, not hard-delete) chat command, the one
+  deliberate exception to this app's existing "destructive actions stay UI-only" rule.
+- **New: export/import** — import always stages a `MemoryCandidate` for review, never writes
+  `AtlasEntry` directly, so an import can never silently overwrite an active memory.
+- **Explicitly deferred**: full chunked-document memory (`DocumentRecord`/`DocumentChunk`) — a
+  documented Layer 2 candidate, not silently skipped.
+- Database schema bumped to v2 (additive-only, no Alembic, same pattern as Layer 0).
+
 ## New since 2026-07-17 — ECHO Layer 0: Infrastructure Foundation v1
 
 866 backend tests passing (81 new), `ruff check .` clean, frontend build/typecheck clean,

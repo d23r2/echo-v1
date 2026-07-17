@@ -11,6 +11,7 @@ export type View =
   | "library"
   | "knowledge-vault"
   | "atlas"
+  | "memory-center"
   | "personality"
   | "evaluation-lab"
   | "action-center"
@@ -45,6 +46,7 @@ export const ADVANCED_NAV_GROUPS: { label: string; items: { id: View; label: str
     items: [
       { id: "knowledge-vault", label: "Knowledge Vault", icon: "🧠" },
       { id: "atlas", label: "Atlas", icon: "🗺️" },
+      { id: "memory-center", label: "Memory Center", icon: "💾" },
       { id: "cognitive-core", label: "Cognitive Core", icon: "🧩" },
     ],
   },

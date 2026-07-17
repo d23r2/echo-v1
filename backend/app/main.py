@@ -19,9 +19,11 @@ from app.routers import (
     evaluations,
     features,
     human_persona,
+    intelligence,
     knowledge,
     library,
     local_intelligence,
+    memory,
     memory_candidates,
     mission_control,
     models,
@@ -78,6 +80,7 @@ app.include_router(models.router)
 app.include_router(self_improvement.router)
 app.include_router(usage.router)
 app.include_router(memory_candidates.router)
+app.include_router(memory.router)
 app.include_router(features.router)
 app.include_router(library.router)
 app.include_router(schedule.router)
@@ -94,6 +97,7 @@ app.include_router(conversation_summary.router)
 app.include_router(releases.router)
 app.include_router(tools.router)
 app.include_router(cognitive.router)
+app.include_router(intelligence.router)
 app.include_router(operational_self_model.router)
 app.include_router(system.router)
 

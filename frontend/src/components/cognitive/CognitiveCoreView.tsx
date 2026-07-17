@@ -6,7 +6,9 @@ import {
   CognitiveSettingsOut,
   GraphNodeOut,
   SkillPatternOut,
+  TaskUnderstandingCorrection,
   TaskUnderstandingOut,
+  correctTaskUnderstanding,
   createCausalNote,
   createConcept,
   getCognitiveSettings,
@@ -16,6 +18,7 @@ import {
   listConcepts,
   listSkills,
   listTaskUnderstandings,
+  reanalyseTaskUnderstanding,
   updateCognitiveSettings,
 } from "../../api/client";
 
@@ -312,32 +315,172 @@ function CausalNotesTab() {
   );
 }
 
+const STATUS_COLOR: Record<string, string> = {
+  ready: "text-emerald-400 border-emerald-900",
+  needs_clarification: "text-amber-400 border-amber-900",
+  analyzing: "text-zinc-400 border-zinc-700",
+  draft: "text-zinc-400 border-zinc-700",
+  stale: "text-orange-400 border-orange-900",
+  superseded: "text-zinc-500 border-zinc-700",
+};
+
 function TaskUnderstandingsTab() {
   const [items, setItems] = useState<TaskUnderstandingOut[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setItems(await listTaskUnderstandings());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load task understandings.");
+    }
+  }
 
   useEffect(() => {
-    listTaskUnderstandings()
-      .then(setItems)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load task understandings."));
+    void refresh();
   }, []);
+
+  // Hide superseded rows from the top-level list by default — history is
+  // still reachable (they're just old revisions, see TaskDetail's re-analyse
+  // note), not deleted, but shouldn't clutter the everyday view.
+  const visible = items.filter((t) => t.status !== "superseded");
 
   return (
     <div className="flex flex-col gap-2">
       {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">{error}</div>}
-      {items.length === 0 && !error && <p className="text-sm text-zinc-500">No complex tasks understood yet — this only fills in for medium/hard requests, not simple chat.</p>}
-      {items.map((tu) => (
+      {visible.length === 0 && !error && (
+        <p className="text-sm text-zinc-500">No complex tasks understood yet — this only fills in for medium/hard requests, not simple chat.</p>
+      )}
+      {visible.map((tu) => (
         <div key={tu.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="text-sm font-medium text-zinc-100">{tu.goal_summary}</span>
-            <span className={`text-[10px] uppercase tracking-wide ${CONFIDENCE_COLOR[tu.confidence]}`}>{tu.confidence}</span>
-          </div>
+          <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" onClick={() => setExpandedId(expandedId === tu.id ? null : tu.id)}>
+            <span className="text-sm font-medium text-zinc-100">{tu.primary_goal || tu.goal_summary}</span>
+            <div className="flex items-center gap-2">
+              <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${STATUS_COLOR[tu.status] || "text-zinc-400 border-zinc-700"}`}>{tu.status.replace("_", " ")}</span>
+              <span className={`text-[10px] uppercase tracking-wide ${CONFIDENCE_COLOR[tu.confidence]}`}>{tu.confidence}</span>
+              <span className="text-xs text-zinc-500">{expandedId === tu.id ? "▲" : "▼"}</span>
+            </div>
+          </button>
           <div className="mt-1 text-xs text-zinc-500">
-            {tu.domain} / {tu.task_type}
+            {tu.domain} / {tu.task_type} ({tu.task_category})
           </div>
-          {tu.success_criteria_json.length > 0 && <p className="mt-1 text-xs text-zinc-400">Success: {tu.success_criteria_json.slice(0, 2).join("; ")}</p>}
+          {expandedId === tu.id && <TaskDetail task={tu} onChanged={refresh} />}
         </div>
       ))}
+    </div>
+  );
+}
+
+function ListSection({ label, items, tone }: { label: string; items: string[]; tone?: string }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-2">
+      <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">{label}</div>
+      <ul className={`mt-1 list-disc space-y-0.5 pl-4 text-xs ${tone || "text-zinc-300"}`}>
+        {items.map((item, i) => (
+          <li key={i}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function TaskDetail({ task, onChanged }: { task: TaskUnderstandingOut; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [goalDraft, setGoalDraft] = useState(task.primary_goal || task.goal_summary);
+  const [error, setError] = useState<string | null>(null);
+
+  const blocking = task.missing_information_json.filter((m) => m.tier === "blocking").map((m) => m.item);
+  const nonBlocking = task.missing_information_json.filter((m) => m.tier !== "blocking").map((m) => m.item);
+
+  async function handleReanalyse() {
+    setBusy(true);
+    try {
+      await reanalyseTaskUnderstanding(task.id);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Re-analysis failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCorrect() {
+    setBusy(true);
+    try {
+      const correction: TaskUnderstandingCorrection = { primary_goal: goalDraft };
+      await correctTaskUnderstanding(task.id, correction);
+      setEditing(false);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Correction failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-zinc-800/60 pt-3">
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-2 py-1 text-xs text-red-300">{error}</div>}
+
+      {blocking.length > 0 && (
+        <div className="rounded-lg border border-amber-900/60 bg-amber-950/20 p-2">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-amber-400">Why ECHO needs clarification</div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-amber-200">
+            {blocking.map((item, i) => (
+              <li key={i}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {nonBlocking.length > 0 && <ListSection label="Assumed safely (not asked about)" items={nonBlocking} tone="text-zinc-500" />}
+
+      {editing ? (
+        <div className="flex flex-col gap-2">
+          <label className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Correct the goal</label>
+          <input
+            value={goalDraft}
+            onChange={(e) => setGoalDraft(e.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm text-zinc-100"
+          />
+          <div className="flex gap-2">
+            <button disabled={busy} onClick={() => void handleCorrect()} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">
+              Save correction
+            </button>
+            <button onClick={() => setEditing(false)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300">
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <ListSection label="Goal" items={[task.primary_goal || task.goal_summary]} />
+      )}
+
+      <ListSection label="Explicit constraints" items={task.constraints_json} />
+      <ListSection label="Inferred (not stated by you)" items={task.inferred_constraints_json} tone="text-zinc-500" />
+      <ListSection label="Known" items={task.known_facts_json} />
+      <ListSection label="Success criteria" items={task.success_criteria_json} />
+      <ListSection label="Acceptance tests" items={task.acceptance_tests_json} />
+      <ListSection label="Risks" items={task.risks_json} tone="text-red-300" />
+      {task.confirmation_requirement && (
+        <div className="rounded-lg border border-red-900/60 bg-red-950/20 p-2 text-xs text-red-300">
+          {task.risk_level} risk, {task.reversibility.replace("_", " ")} — confirmation required before proceeding.
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 pt-1">
+        {!editing && (
+          <button onClick={() => setEditing(true)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500">
+            Correct goal
+          </button>
+        )}
+        <button disabled={busy} onClick={() => void handleReanalyse()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+          Re-analyse
+        </button>
+      </div>
     </div>
   );
 }

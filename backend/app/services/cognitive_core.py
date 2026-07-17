@@ -32,6 +32,7 @@ from app.models import (
     SkillPattern,
     TaskUnderstanding,
 )
+from app.services import task_understanding_v2 as tuv2
 from app.services.intent_classifier import IntentClassification, classify_intent
 
 # ============================================================================
@@ -405,22 +406,60 @@ def select_relevant_causal_notes(db: Session, task_type: str, domain: str, limit
 
 
 def build_task_understanding(
-    db: Session, user_message: str, conversation_id: str | None = None, user_id: str | None = None
+    db: Session,
+    user_message: str,
+    conversation_id: str | None = None,
+    user_id: str | None = None,
+    *,
+    project_id: str | None = None,
+    force_reanalyse: bool = False,
 ) -> TaskUnderstanding | None:
     """Returns None for simple messages (Phase 4 rule 5 / Phase 1 test 2) —
     the caller should treat a None return as "use the lightweight path,
     nothing stored." Only medium/hard-difficulty or always-complex-intent
-    requests get a real, stored TaskUnderstanding row."""
+    requests get a real, stored TaskUnderstanding row.
+
+    ECHO Layer 2A: also populates the v2 fields (intent hierarchy,
+    constraints, missing-info tiers, acceptance tests, risk profile) via
+    task_understanding_v2.py, and skips re-analysis entirely when the same
+    conversation's most recent TaskUnderstanding has an identical content
+    fingerprint and hasn't been superseded (Phase 7's "prevent repeated
+    re-analysis when the task has not materially changed")."""
     intent = classify_intent(user_message, conversation_id)
     if not is_complex_task(intent, user_message):
         return None
+
+    fingerprint = tuv2.compute_fingerprint(user_message)
+    if not force_reanalyse and conversation_id:
+        existing = (
+            db.query(TaskUnderstanding)
+            .filter(TaskUnderstanding.conversation_id == conversation_id)
+            .order_by(TaskUnderstanding.created_at.desc())
+            .first()
+        )
+        if existing is not None and existing.content_fingerprint == fingerprint and existing.status == "ready":
+            return existing
 
     task_type = _task_type_for(user_message, intent)
     domain = _detect_domain(user_message)
     template = _merge_template(task_type, domain)
     relevant_concepts = select_relevant_concepts(db, user_message)
+    relevant_skills = select_relevant_skills(db, user_message)
     unknowns = template["unknown"]
     confidence = "incomplete" if unknowns else "medium"
+
+    # ECHO Layer 2A additions
+    task_category = tuv2.map_task_type_to_category(task_type)
+    scope = tuv2.detect_scope(user_message)
+    risk_profile = tuv2.derive_risk_profile(user_message, task_category)
+    explicit_constraints = tuv2.extract_explicit_constraints(user_message)
+    inferred_constraints = tuv2.infer_soft_constraints(task_type, domain, {c["type"] for c in explicit_constraints})
+    contradiction_notes = tuv2.detect_contradictory_constraints(explicit_constraints + inferred_constraints)
+    missing_info = tuv2.classify_missing_information(
+        unknowns, risk_level=risk_profile["risk_level"], consequence_level=risk_profile["consequence_level"]
+    )
+    intent_hierarchy = tuv2.build_intent_hierarchy(user_message, task_type, task_category)
+    intent_hierarchy["underlying_objective"] = template["goal"]
 
     tu = TaskUnderstanding(
         conversation_id=conversation_id,
@@ -430,17 +469,89 @@ def build_task_understanding(
         task_type=task_type,
         known_facts_json=template["known"],
         unknowns_json=unknowns,
-        constraints_json=template["constraints"],
+        constraints_json=[*template["constraints"], *(c["label"] for c in explicit_constraints), *contradiction_notes],
         assumptions_json=[],
         success_criteria_json=template["success"],
         risks_json=template["risks"],
         relevant_concepts_json=[c.id for c in relevant_concepts],
         recommended_next_step=_next_step_for(task_type, unknowns),
         confidence=confidence,
+        project_id=project_id,
+        normalized_request=user_message.strip()[:2000],
+        task_category=task_category,
+        complexity="complex" if intent.difficulty == "hard" else "moderate",
+        primary_goal=template["goal"],
+        user_intent=intent_hierarchy["requested_output"],
+        expected_output=intent_hierarchy["requested_output"],
+        inferred_constraints_json=[c["label"] for c in inferred_constraints],
+        missing_information_json=missing_info,
+        failure_conditions_json=tuv2.build_failure_conditions(task_type, task_category),
+        acceptance_tests_json=tuv2.build_acceptance_tests(task_type, task_category),
+        candidate_skills_json=[s.name for s in relevant_skills],
+        risk_level=risk_profile["risk_level"],
+        consequence_level=risk_profile["consequence_level"],
+        reversibility=risk_profile["reversibility"],
+        confirmation_requirement=risk_profile["confirmation_requirement"],
+        status="needs_clarification" if any(m["tier"] == "blocking" for m in missing_info) else "ready",
+        intent_hierarchy_json=intent_hierarchy,
+        scope=scope,
+        clarification_questions_json=tuv2.build_clarification_policy(missing_info)["questions"],
+        content_fingerprint=fingerprint,
     )
     db.add(tu)
     db.commit()
     db.refresh(tu)
+    return tu
+
+
+def reanalyse_task_understanding(db: Session, tu_id: str) -> TaskUnderstanding | None:
+    """Forces a fresh build ignoring the fingerprint cache — marks the old
+    row superseded (history preserved, never overwritten) and links the new
+    row via parent_task_id."""
+    old = db.get(TaskUnderstanding, tu_id)
+    if old is None:
+        return None
+    new_tu = build_task_understanding(
+        db, old.user_message, old.conversation_id, project_id=old.project_id, force_reanalyse=True
+    )
+    if new_tu is None:
+        return None
+    old.status = "superseded"
+    new_tu.parent_task_id = old.id
+    db.commit()
+    db.refresh(new_tu)
+    return new_tu
+
+
+def apply_task_correction(db: Session, tu_id: str, correction: dict) -> TaskUnderstanding | None:
+    """A user-driven correction of a misunderstood goal/constraint/scope —
+    never a blind field-by-field overwrite, just the specific fields the
+    frontend correction control exposes. Rebuilds the linked CognitiveBrief
+    afterward (Phase 7's "invalidate/rebuild after important user
+    corrections") rather than leaving a stale one attached."""
+    tu = db.get(TaskUnderstanding, tu_id)
+    if tu is None:
+        return None
+    if correction.get("primary_goal") is not None:
+        tu.primary_goal = correction["primary_goal"]
+        tu.goal_summary = correction["primary_goal"]
+    if correction.get("expected_output") is not None:
+        tu.expected_output = correction["expected_output"]
+    if correction.get("explicit_constraints") is not None:
+        tu.constraints_json = correction["explicit_constraints"]
+    if correction.get("forbidden_actions") is not None:
+        tu.forbidden_actions_json = correction["forbidden_actions"]
+    if correction.get("scope") is not None:
+        tu.scope = correction["scope"]
+    tu.status = "ready"
+    db.commit()
+    db.refresh(tu)
+
+    existing_brief = (
+        db.query(CognitiveBrief).filter(CognitiveBrief.task_understanding_id == tu.id).order_by(CognitiveBrief.created_at.desc()).first()
+    )
+    if existing_brief is not None:
+        build_cognitive_brief(db, tu, tu.conversation_id)
     return tu
 
 
@@ -450,21 +561,30 @@ def build_task_understanding(
 
 
 def _build_brief_text(tu: TaskUnderstanding, concepts: list[CognitiveConcept], skills: list[SkillPattern], causal_notes: list[CausalNote]) -> str:
-    """Compact by design (Phase 3 rule 1) — a handful of short lines, never
-    a JSON dump, never chain-of-thought. This is what gets inserted into
-    the prompt builder, so every line here is something that should
-    genuinely help the model answer better, not internal bookkeeping."""
-    lines = [f"Goal: {tu.goal_summary}", f"Domain: {tu.domain} / Task type: {tu.task_type}"]
+    """Compact by design (Phase 3 rule 1 / Layer 2A Phase 6) — a handful of
+    short lines, never a JSON dump, never chain-of-thought. This is what
+    gets inserted into the prompt builder, so every line here is something
+    that should genuinely help the model answer better, not internal
+    bookkeeping. Layer 2A adds constraints/assumptions/missing-info/risk
+    lines, still capped to short single-line summaries."""
+    lines = [f"Goal: {tu.goal_summary}", f"Domain: {tu.domain} / Task type: {tu.task_type} ({tu.task_category})"]
     if tu.known_facts_json:
         lines.append("Known: " + "; ".join(tu.known_facts_json))
     if tu.unknowns_json:
         lines.append("Unknown (verify, don't guess): " + "; ".join(tu.unknowns_json))
     if tu.constraints_json:
         lines.append("Constraints: " + "; ".join(tu.constraints_json))
+    if tu.inferred_constraints_json:
+        lines.append("Inferred (not stated by user): " + "; ".join(tu.inferred_constraints_json))
     if tu.success_criteria_json:
         lines.append("Success looks like: " + "; ".join(tu.success_criteria_json))
     if tu.risks_json:
         lines.append("Watch out for: " + "; ".join(tu.risks_json))
+    if tu.confirmation_requirement:
+        lines.append(f"Risk: {tu.risk_level}, {tu.reversibility} — ask for confirmation before proceeding.")
+    blocking = [m["item"] for m in (tu.missing_information_json or []) if m.get("tier") == "blocking"]
+    if blocking:
+        lines.append("Missing info that must be clarified, not guessed: " + "; ".join(blocking))
     if concepts:
         lines.append("Relevant concepts: " + "; ".join(c.name for c in concepts))
     if skills:
@@ -491,6 +611,11 @@ def build_cognitive_brief(db: Session, tu: TaskUnderstanding, conversation_id: s
     if causal_notes:
         context_sources.append("causal_notes")
 
+    risk_summary = None
+    if tu.confirmation_requirement:
+        risk_summary = f"{tu.risk_level} risk, {tu.reversibility} — confirmation required before any consequential action."
+    next_stage = "clarify" if tu.status == "needs_clarification" else "answer"
+
     brief = CognitiveBrief(
         conversation_id=conversation_id or tu.conversation_id,
         task_understanding_id=tu.id,
@@ -498,6 +623,10 @@ def build_cognitive_brief(db: Session, tu: TaskUnderstanding, conversation_id: s
         selected_concepts_json=[c.name for c in concepts],
         selected_skills_json=[s.name for s in skills],
         selected_context_sources_json=context_sources,
+        candidate_tools_json=list(tu.candidate_tools_json or []),
+        risk_and_confirmation_summary=risk_summary,
+        confidence=tu.confidence,
+        next_reasoning_stage=next_stage,
     )
     db.add(brief)
     db.commit()

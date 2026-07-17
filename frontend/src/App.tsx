@@ -12,6 +12,7 @@ import ConstitutionView from "./components/constitution/ConstitutionView";
 import EvaluationLabView from "./components/evaluations/EvaluationLabView";
 import KnowledgeVaultView from "./components/knowledge/KnowledgeVaultView";
 import LibraryView from "./components/library/LibraryView";
+import MemoryCenterView from "./components/memory/MemoryCenterView";
 import MissionControlView from "./components/mission-control/MissionControlView";
 import PermissionCenterView from "./components/permissions/PermissionCenterView";
 import PersonalityView from "./components/personality/PersonalityView";
@@ -72,6 +73,7 @@ export default function App() {
           {view === "library" && <LibraryView />}
           {view === "schedule" && <ScheduleView />}
           {view === "atlas" && <AtlasView />}
+          {view === "memory-center" && <MemoryCenterView />}
           {view === "personality" && <PersonalityView />}
           {view === "knowledge-vault" && <KnowledgeVaultView />}
           {view === "evaluation-lab" && <EvaluationLabView />}

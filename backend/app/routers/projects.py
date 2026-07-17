@@ -107,6 +107,22 @@ def update_project(project_id: str, payload: schemas.ProjectUpdate, db: Session 
         project.category = payload.category
     if payload.tags is not None:
         project.tags = payload.tags
+    # ECHO Layer 1 (Phase 12) — lightweight project memory profile fields.
+    reviewed = False
+    if payload.objective is not None:
+        project.objective = payload.objective
+        reviewed = True
+    if payload.constraints_json is not None:
+        project.constraints_json = payload.constraints_json
+        reviewed = True
+    if payload.decisions_json is not None:
+        project.decisions_json = payload.decisions_json
+        reviewed = True
+    if payload.blockers_json is not None:
+        project.blockers_json = payload.blockers_json
+        reviewed = True
+    if reviewed:
+        project.last_reviewed_at = _now()
     project.last_touched_at = _now()
     db.commit()
     db.refresh(project)

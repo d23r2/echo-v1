@@ -285,6 +285,34 @@ behavior changed. See
 [ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md](ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md)
 and [ECHO_LAYER_0_INFRASTRUCTURE_REPORT.md](ECHO_LAYER_0_INFRASTRUCTURE_REPORT.md).
 
+## Memory foundation (Layer 1)
+
+Atlas is now a unified, categorized memory model — 10 categories (profile,
+preference, project, task, episodic, semantic, skill, relationship,
+environment, temporary), provenance/evidence, sensitivity-gated capture
+(secrets are never stored; highly sensitive content requires an explicit
+ask), duplicate consolidation, typed conflict detection, category-aware
+lifecycle/aging, hybrid (semantic + lexical-fallback) retrieval feeding a
+compact `MemoryBrief` into the prompt, archive/restore/forget flows, and
+export/import. Browse and manage it under Advanced → Knowledge & Memory →
+Memory Center. See
+[ECHO_LAYER_1_MEMORY_FOUNDATION.md](ECHO_LAYER_1_MEMORY_FOUNDATION.md) and
+[ECHO_LAYER_1_MEMORY_REPORT.md](ECHO_LAYER_1_MEMORY_REPORT.md).
+
+## Cognitive Core v2 / Task Understanding (Layer 2A)
+
+Cognitive Core now separates literal request from underlying objective and
+requested output, splits explicit from inferred constraints (with
+contradiction detection), classifies missing information into blocking/
+important/optional/safely-inferable tiers with a real clarification policy,
+generates category-aware acceptance tests, and produces a token-budgeted
+`CognitiveBrief` for the prompt and future Layer 2 systems. Extends
+Cognitive Core v1 in place — nothing removed, all 56 v1 tests still pass
+unchanged. Inspect, correct, and re-analyse a task's understanding under
+Advanced → Knowledge & Memory → Cognitive Core → Task Understandings. See
+[ECHO_LAYER_2A_COGNITIVE_CORE_V2_ARCHITECTURE.md](ECHO_LAYER_2A_COGNITIVE_CORE_V2_ARCHITECTURE.md)
+and [ECHO_LAYER_2A_COGNITIVE_CORE_V2_REPORT.md](ECHO_LAYER_2A_COGNITIVE_CORE_V2_REPORT.md).
+
 ## Multi-device
 
 The frontend is a fully responsive web app — the same build works on desktop and mobile

@@ -5,22 +5,32 @@ app/search_intent.py: a message either matches one exact pattern and the
 action runs immediately, or it doesn't match anything here and falls
 through to normal chat unchanged.
 
-Deliberately conservative: no delete/archive commands are exposed through
-chat at all (only create-project, add-task, mark-task-done, and two
-read-only summaries) — anything destructive stays a UI-only action per the
-"ask confirmation for destructive actions" rule, and the smaller safe
-command set avoids that question entirely for v1. Ambiguous matches (e.g.
-"mark task X done" matching more than one task) are reported back rather
-than guessed at.
+Deliberately conservative: no *destructive* (hard-delete) commands are
+exposed through chat (only create-project, add-task, mark-task-done, two
+read-only summaries, and — ECHO Layer 1 — a single narrow, reversible
+"forget" action) — anything destructive stays a UI-only action per the "ask
+confirmation for destructive actions" rule, and the smaller safe command set
+avoids that question entirely for v1. Ambiguous matches (e.g. "mark task X
+done" matching more than one task) are reported back rather than guessed at.
+
+ECHO Layer 1 (Phase 17) adds `try_handle_forget_action()`: "forget that" /
+"delete this memory" archives (never hard-deletes) the single most recently
+captured memory, and only when unambiguous — anything less clear-cut points
+the user at Memory Center instead of guessing. Archiving is reversible
+(memory_lifecycle.restore()), which is why this one exception to the
+"destructive stays UI-only" rule above is safe: nothing irreversible happens
+from chat text alone.
 """
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from app import human_persona
-from app.models import Conversation, Project, Task, _now
+from app.models import AtlasEntry, Conversation, Project, Task, _now
+from app.services import memory_lifecycle, memory_privacy
 
 _ACTIVE_TASK_STATUSES = ("todo", "in_progress", "blocked")
 
@@ -142,6 +152,17 @@ def _mark_task_done(db: Session, title: str) -> ActionResult:
     task = matches[0]
     task.status = "done"
     task.completed_at = _now()
+    # ECHO Layer 1 (Phase 12) — a completed task is exactly the kind of
+    # project-state change the milestone lists as one that should
+    # automatically update project memory ("a milestone is completed").
+    # Kept lightweight: append a short note, don't re-derive the whole
+    # project profile.
+    if task.project_id is not None:
+        project = db.get(Project, task.project_id)
+        if project is not None:
+            note = f"Completed: {task.title}"
+            project.decisions_json = [*(project.decisions_json or []), note][-20:]
+            project.last_touched_at = _now()
     db.commit()
     return ActionResult(f"Marked \"{task.title}\" as done.", "mark_task_done", task.id)
 
@@ -263,3 +284,55 @@ def try_handle_persona_action(
         return ActionResult(confirmation, "session_style_override")
 
     return None
+
+
+# ECHO Layer 1 (Phase 17) — how recent "just now" has to be for "forget that"
+# to have an unambiguous target. Deliberately short: this is meant to catch
+# "forget what I just told you," not to search arbitrarily far back — an
+# older or less obvious target should go through Memory Center instead.
+_FORGET_RECENT_WINDOW_MINUTES = 10
+
+
+def try_handle_forget_action(db: Session, message: str) -> ActionResult | None:
+    """"Forget that" / "delete this memory" — archives (never hard-deletes)
+    the single most recently captured memory, only when there's exactly one
+    candidate in the recent window. Zero or multiple candidates is reported
+    back rather than guessed at, matching this module's existing
+    ambiguity-handling convention. See the module docstring for why this is
+    the one exception to "destructive actions stay UI-only": archiving is
+    reversible (memory_lifecycle.restore())."""
+    text = message.strip()
+    if not text or not memory_privacy.detect_forget_request(text):
+        return None
+
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=_FORGET_RECENT_WINDOW_MINUTES)
+    candidates = (
+        db.query(AtlasEntry)
+        .filter(AtlasEntry.status == "active")
+        .filter(AtlasEntry.capture_method.in_(["explicit_user_request", "approved_candidate"]))
+        .filter(AtlasEntry.created_at >= cutoff)
+        .order_by(AtlasEntry.created_at.desc())
+        .all()
+    )
+
+    if len(candidates) == 0:
+        return ActionResult(
+            "I don't see anything I've just remembered to forget. For an older memory, "
+            "open Memory Center to find and remove it directly.",
+            "forget_memory_not_found",
+        )
+    if len(candidates) > 1:
+        return ActionResult(
+            "I've remembered a few things recently, so I don't want to guess which one to forget. "
+            "Open Memory Center to pick the exact one.",
+            "forget_memory_ambiguous",
+        )
+
+    target = candidates[0]
+    memory_lifecycle.archive(db, target)
+    return ActionResult(
+        "Done — I've archived that memory and won't use it going forward. "
+        "You can restore it from Memory Center if this was a mistake.",
+        "forget_memory",
+        target_id=target.id,
+    )

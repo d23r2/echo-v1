@@ -17,6 +17,28 @@ from app.config import get_settings
 
 _COLLECTION_NAME = "atlas"
 
+# ECHO Layer 1 — maps the legacy `memory_type` taxonomy (fact|preference|mood|
+# goal|fear|capability|project|relationship|event) to the new `category`
+# taxonomy (profile|preference|project|task|episodic|semantic|skill|
+# relationship|environment|temporary), used both for legacy-row backfill and
+# for new writes that only specify the old field. Kept as a plain module-level
+# dict (not a DB migration) — a compatibility adapter, per Phase 1 rule 4.
+_LEGACY_TYPE_TO_CATEGORY = {
+    "fact": "semantic",
+    "preference": "preference",
+    "mood": "episodic",
+    "goal": "task",
+    "fear": "episodic",
+    "capability": "skill",
+    "project": "project",
+    "relationship": "relationship",
+    "event": "episodic",
+}
+
+
+def legacy_type_to_category(memory_type: str | None) -> str:
+    return _LEGACY_TYPE_TO_CATEGORY.get(memory_type or "fact", "semantic")
+
 
 @lru_cache
 def _get_collection():
@@ -45,6 +67,21 @@ def create_entry(db: Session, data: schemas.AtlasEntryCreate) -> models.AtlasEnt
         confidence=data.confidence,
         source=data.source,
         valid_until=data.valid_until,
+        # ECHO Layer 1 — category defaults from the legacy memory_type when the
+        # caller doesn't specify one, so every existing create_entry() call
+        # site (none of which know about `category` yet) still gets a sane
+        # value instead of the raw column default.
+        category=data.category or legacy_type_to_category(data.memory_type),
+        importance=data.importance or "medium",
+        stability=data.stability or "semi_stable",
+        retention_policy=data.retention_policy or "periodic_review",
+        capture_method=data.capture_method or "manual_entry",
+        project_id=data.project_id,
+        task_id=data.task_id,
+        source_type=data.source_type,
+        source_reference=data.source_reference,
+        expires_at=data.expires_at,
+        verification_status="verified" if data.epistemic_status == "Verified" else "unverified",
     )
     db.add(entry)
     db.commit()
@@ -89,6 +126,14 @@ def merge_entries(
 
 def delete_entry(db: Session, entry: models.AtlasEntry) -> None:
     entry_id = entry.id
+    # ECHO Layer 1 (Phase 17, rule 18) — deleting a memory must safely
+    # deactivate its relationships, not leave dangling MemoryRelationship
+    # rows pointing at an id that no longer exists. Deactivate (not delete)
+    # the edges themselves, matching this table's own audit-friendly design.
+    db.query(models.MemoryRelationship).filter(
+        (models.MemoryRelationship.source_memory_id == entry_id)
+        | (models.MemoryRelationship.target_memory_id == entry_id)
+    ).update({"status": "deactivated"}, synchronize_session=False)
     db.delete(entry)
     db.commit()
     try:

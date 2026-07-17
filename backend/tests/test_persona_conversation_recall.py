@@ -83,8 +83,27 @@ def test_atlas_retrieval_still_works_alongside_conversation_search(db_session, m
         memory_type="fact",
         tags=[],
         confidence=1.0,
+        # ECHO Layer 1 fields — not applied automatically since this object is
+        # never persisted (SQLAlchemy column defaults only fire on INSERT);
+        # set explicitly here to match what a real row would have, since
+        # memory_retrieval.retrieve() (which persona.py now delegates to)
+        # filters/scores on these.
+        category="semantic",
+        status="active",
+        verification_status="verified",
+        importance="medium",
+        capture_method="migration",
+        outdated=False,
+        review_state="none",
+        project_id=None,
+        access_count=0,
     )
-    monkeypatch.setattr("app.persona.atlas.search", lambda db, query, top_k: [(fake_entry, 0.1)])
+    # persona.py's _atlas_context_for now delegates to
+    # memory_retrieval.build_memory_brief(), which calls atlas.search() —
+    # patch it at its source (app.atlas.search) rather than the old
+    # app.persona.atlas.search path, since persona.py no longer imports atlas
+    # directly.
+    monkeypatch.setattr("app.atlas.search", lambda db, query, top_k: [(fake_entry, 0.1)])
 
     prompt, citations, _nudge, _snippets, _gather_result = persona.build_system_prompt(
         db_session, "What's my favorite color?", turn_count=0

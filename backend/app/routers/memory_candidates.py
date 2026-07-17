@@ -55,8 +55,16 @@ def accept_candidate(
             tags=candidate.tags,
             confidence=candidate.confidence,
             source=candidate.source,
+            category=candidate.category,
+            importance=candidate.importance,
+            stability=candidate.stability,
+            capture_method="approved_candidate",
         ),
     )
+    # A human explicitly reviewed and accepted this — that's real verification,
+    # stronger than whatever epistemic_status the candidate started with.
+    entry.verification_status = "verified"
+    db.commit()
     candidate.status = "accepted"
     candidate.review_note = payload.note
     db.commit()

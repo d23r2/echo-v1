@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import {
   getInfraSystemStatus,
   getInterfaceSettings,
+  getMemoryStats,
   getSystemVersion,
   InfraSystemStatusOut,
   InterfaceSettingsOut,
+  MemoryStatsOut,
   ShowInnerState,
   SystemVersionOut,
   updateInterfaceSettings,
@@ -45,6 +47,7 @@ export default function SettingsView() {
   const [systemStatus, setSystemStatus] = useState<InfraSystemStatusOut | null>(null);
   const [systemVersion, setSystemVersion] = useState<SystemVersionOut | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [memoryStats, setMemoryStats] = useState<MemoryStatsOut | null>(null);
 
   async function refresh() {
     try {
@@ -66,9 +69,18 @@ export default function SettingsView() {
     }
   }
 
+  async function refreshMemoryStats() {
+    try {
+      setMemoryStats(await getMemoryStats());
+    } catch {
+      // Non-critical widget — Settings still works if this fails.
+    }
+  }
+
   useEffect(() => {
     void refresh();
     void refreshStatus();
+    void refreshMemoryStats();
   }, []);
 
   function flashSaved() {
@@ -177,6 +189,26 @@ export default function SettingsView() {
             This never shows raw internal notes — at most a plain sentence like "I'll switch to troubleshooting mode."
           </span>
         </label>
+      </Section>
+
+      <Section
+        title="Memory"
+        description="ECHO's long-term memory (Layer 1) — profile facts, preferences, project context, and more, each with a source, confidence, and lifecycle status. Secrets and credential-shaped text are never stored, and highly sensitive personal information is only ever saved when you explicitly ask."
+      >
+        {memoryStats && (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 border-t border-zinc-800/60 pt-3 text-xs text-zinc-400 first:border-t-0 first:pt-0">
+            <span>Active memories</span>
+            <span className="text-right text-zinc-200">{memoryStats.total_active}</span>
+            <span>Pending review candidates</span>
+            <span className="text-right text-zinc-200">{memoryStats.pending_candidates}</span>
+            <span>Open conflicts</span>
+            <span className="text-right text-zinc-200">{memoryStats.open_conflicts}</span>
+          </div>
+        )}
+        <p className="text-xs text-zinc-500">
+          Review, correct, archive, or permanently delete anything ECHO remembers from the Memory
+          Center (Advanced → Knowledge &amp; Memory → Memory Center).
+        </p>
       </Section>
 
       <Section title="System Status" description="A quick health snapshot — no secrets, no raw prompts, just what's working right now.">

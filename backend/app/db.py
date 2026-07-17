@@ -69,9 +69,109 @@ def init_db() -> None:
     _ensure_column("persona_settings", "local_answer_quality_mode", "TEXT DEFAULT 'balanced'")
     _ensure_column("persona_settings", "voice_mode", "TEXT DEFAULT 'push_to_talk'")
     _ensure_column("persona_settings", "tts_enabled", "BOOLEAN DEFAULT 0")
+    _ensure_layer1_memory_columns()
+    _ensure_layer2a_cognitive_columns()
     _seed_action_reliability_core()
     _seed_cognitive_core()
     _ensure_schema_version()
+
+
+def _ensure_layer2a_cognitive_columns() -> None:
+    """ECHO Layer 2A — additive columns on task_understandings/cognitive_briefs,
+    same non-destructive pattern as Layer 0/1."""
+    for column, ddl_type in (
+        ("project_id", "TEXT"),
+        ("parent_task_id", "TEXT"),
+        ("normalized_request", "TEXT"),
+        ("task_category", "TEXT DEFAULT 'mixed'"),
+        ("urgency", "TEXT DEFAULT 'normal'"),
+        ("complexity", "TEXT DEFAULT 'moderate'"),
+        ("primary_goal", "TEXT"),
+        ("secondary_goals_json", "TEXT DEFAULT '[]'"),
+        ("user_intent", "TEXT"),
+        ("expected_output", "TEXT"),
+        ("inferred_constraints_json", "TEXT DEFAULT '[]'"),
+        ("preferences_json", "TEXT DEFAULT '[]'"),
+        ("forbidden_actions_json", "TEXT DEFAULT '[]'"),
+        ("uncertainties_json", "TEXT DEFAULT '[]'"),
+        ("missing_information_json", "TEXT DEFAULT '[]'"),
+        ("failure_conditions_json", "TEXT DEFAULT '[]'"),
+        ("acceptance_tests_json", "TEXT DEFAULT '[]'"),
+        ("required_capabilities_json", "TEXT DEFAULT '[]'"),
+        ("candidate_skills_json", "TEXT DEFAULT '[]'"),
+        ("candidate_tools_json", "TEXT DEFAULT '[]'"),
+        ("required_sources_json", "TEXT DEFAULT '[]'"),
+        ("risk_level", "TEXT DEFAULT 'low'"),
+        ("consequence_level", "TEXT DEFAULT 'low'"),
+        ("reversibility", "TEXT DEFAULT 'reversible'"),
+        ("confirmation_requirement", "BOOLEAN DEFAULT 0"),
+        ("status", "TEXT DEFAULT 'ready'"),
+        ("intent_hierarchy_json", "TEXT DEFAULT '{}'"),
+        ("scope", "TEXT DEFAULT 'current_turn'"),
+        ("clarification_questions_json", "TEXT DEFAULT '[]'"),
+        ("content_fingerprint", "TEXT"),
+        ("updated_at", "DATETIME"),
+    ):
+        _ensure_column("task_understandings", column, ddl_type)
+
+    for column, ddl_type in (
+        ("candidate_tools_json", "TEXT DEFAULT '[]'"),
+        ("risk_and_confirmation_summary", "TEXT"),
+        ("confidence", "TEXT DEFAULT 'medium'"),
+        ("next_reasoning_stage", "TEXT"),
+    ):
+        _ensure_column("cognitive_briefs", column, ddl_type)
+
+
+def _ensure_layer1_memory_columns() -> None:
+    """ECHO Layer 1 — additive columns on tables that already existed before
+    this milestone (atlas_entries, memory_candidates, projects,
+    conversation_summaries). Every legacy row gets the field's declared
+    default via SQLite's ADD COLUMN ... DEFAULT, so nothing pre-Layer-1 ever
+    reads an unset value."""
+    for column, ddl_type in (
+        ("category", "TEXT DEFAULT 'semantic'"),
+        ("verification_status", "TEXT DEFAULT 'unverified'"),
+        ("importance", "TEXT DEFAULT 'medium'"),
+        ("stability", "TEXT DEFAULT 'semi_stable'"),
+        ("retention_policy", "TEXT DEFAULT 'periodic_review'"),
+        ("expires_at", "DATETIME"),
+        ("last_verified_at", "DATETIME"),
+        ("last_accessed_at", "DATETIME"),
+        ("access_count", "INTEGER DEFAULT 0"),
+        ("capture_method", "TEXT DEFAULT 'migration'"),
+        ("project_id", "TEXT"),
+        ("task_id", "TEXT"),
+        ("source_type", "TEXT"),
+        ("source_reference", "TEXT"),
+        ("parent_memory_id", "TEXT"),
+        ("supersedes_memory_id", "TEXT"),
+        ("contradiction_group_id", "TEXT"),
+        ("duplicate_group_id", "TEXT"),
+        ("review_state", "TEXT DEFAULT 'none'"),
+        ("status", "TEXT DEFAULT 'active'"),
+    ):
+        _ensure_column("atlas_entries", column, ddl_type)
+
+    for column, ddl_type in (
+        ("category", "TEXT"),
+        ("sensitivity_level", "TEXT DEFAULT 'ordinary_personal'"),
+        ("recommendation", "TEXT"),
+        ("capture_reason", "TEXT"),
+        ("duplicate_memory_id", "TEXT"),
+        ("importance", "TEXT DEFAULT 'medium'"),
+        ("stability", "TEXT DEFAULT 'semi_stable'"),
+    ):
+        _ensure_column("memory_candidates", column, ddl_type)
+
+    _ensure_column("projects", "objective", "TEXT")
+    _ensure_column("projects", "constraints_json", "TEXT DEFAULT '[]'")
+    _ensure_column("projects", "decisions_json", "TEXT DEFAULT '[]'")
+    _ensure_column("projects", "blockers_json", "TEXT DEFAULT '[]'")
+    _ensure_column("projects", "last_reviewed_at", "DATETIME")
+
+    _ensure_column("conversation_summaries", "summary_type", "TEXT DEFAULT 'final'")
+    _ensure_column("conversation_summaries", "candidate_memory_ids_json", "TEXT DEFAULT '[]'")
 
 
 # ECHO Layer 0 — bump this by hand whenever a schema change genuinely
@@ -79,7 +179,11 @@ def init_db() -> None:
 # table — this is a coarse marker, not a migration counter). See
 # models.SchemaVersion's own docstring for why this app doesn't use Alembic
 # in v1.
-CURRENT_SCHEMA_VERSION = 1
+# v2 (ECHO Layer 1): Memory Foundation columns/tables — see
+# _ensure_layer1_memory_columns() above and ECHO_LAYER_1_MEMORY_FOUNDATION.md.
+# v3 (ECHO Layer 2A): Cognitive Core v2 / Task Understanding columns — see
+# _ensure_layer2a_cognitive_columns() above.
+CURRENT_SCHEMA_VERSION = 3
 
 
 def _ensure_schema_version() -> None:

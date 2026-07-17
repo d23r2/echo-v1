@@ -2,14 +2,14 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from app import atlas, conversation_search, council, dependency_patterns, human_persona, web_search
+from app import conversation_search, council, dependency_patterns, human_persona, web_search
 from app.config import get_settings
 from app.conversation_search import MessageSnippet
 from app.human_persona import CHARACTER_CODE, UNCERTAINTY_GUIDANCE
 from app.models import Conversation, TaskUnderstanding
 from app.schemas import AtlasCitation
 from app.search_intent import detect_search_intent
-from app.services import cognitive_core, operational_self_model
+from app.services import cognitive_core, memory_retrieval, operational_self_model
 from app.web_search import GatherResult, SourceResult
 
 BEHAVIOR_DIRECTIVES = """
@@ -266,26 +266,24 @@ def _current_date_note(now: datetime) -> str:
 def _atlas_context_for(db: Session, message: str, top_k: int) -> tuple[str, list[AtlasCitation]]:
     """Cross-conversation memory: any Atlas entry, regardless of which conversation it
     came from, is a candidate — semantic search is what makes 'relevant' work here
-    rather than scoping to the current conversation_id."""
-    memories = atlas.search(db, message, top_k=top_k)
+    rather than scoping to the current conversation_id.
+
+    ECHO Layer 1 (Phase 10): delegates to memory_retrieval.build_memory_brief()
+    for the actual hybrid-scored, sensitivity-filtered, conflict-aware
+    selection — this function's job is now just adapting that result back
+    into the AtlasCitation shape every existing caller (atlas_citations
+    response field, human_persona's overlay, conflict detection) already
+    depends on, so nothing downstream had to change."""
+    block, results = memory_retrieval.build_memory_brief(db, message, top_k=top_k)
     citations = [
         AtlasCitation(
-            id=entry.id,
-            content=entry.content,
-            epistemic_status=entry.epistemic_status,
-            confidence=entry.confidence,
+            id=r.memory_id,
+            content=r.content,
+            epistemic_status=r.epistemic_status,
+            confidence=r.confidence,
         )
-        for entry, _distance in memories
+        for r in results
     ]
-
-    block = "No relevant Atlas memories found for this message."
-    if citations:
-        lines = [
-            f"- [{c.epistemic_status}, confidence {c.confidence:.2f}] {c.content}" for c in citations
-        ]
-        block = "Relevant Atlas memories (cite epistemic status/confidence if you use these):\n" + "\n".join(
-            lines
-        )
     return block, citations
 
 

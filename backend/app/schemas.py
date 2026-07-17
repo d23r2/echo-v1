@@ -7,6 +7,48 @@ EpistemicStatus = Literal["Verified", "Inferred", "Hypothesis", "Narrative"]
 MemoryType = Literal[
     "fact", "preference", "mood", "goal", "fear", "capability", "project", "relationship", "event"
 ]
+
+# ---- ECHO Layer 1: Memory Foundation v1 enums (see AtlasEntry/MemoryCandidate) ----
+MemoryCategory = Literal[
+    "profile", "preference", "project", "task", "episodic", "semantic",
+    "skill", "relationship", "environment", "temporary",
+]
+VerificationStatus = Literal[
+    "verified", "partially_verified", "unverified", "disputed", "outdated", "not_applicable"
+]
+MemoryImportance = Literal["critical", "high", "medium", "low"]
+MemoryStability = Literal["durable", "semi_stable", "volatile", "temporary"]
+RetentionPolicy = Literal[
+    "permanent_until_deleted", "periodic_review", "expire_after_period",
+    "conversation_only", "project_lifetime", "manual_only",
+]
+CaptureMethod = Literal[
+    "explicit_user_request", "approved_candidate", "manual_entry", "project_import",
+    "document_extraction", "conversation_summary", "system_generated", "migration",
+]
+MemoryLifecycleStatus = Literal["active", "pending_review", "archived", "superseded", "rejected", "deleted"]
+MemoryReviewState = Literal["none", "pending_review", "reviewed"]
+SensitivityLevel = Literal["public", "ordinary_personal", "private", "highly_sensitive", "secret"]
+CandidateRecommendation = Literal[
+    "auto_accept", "ask_user", "merge", "update_existing", "ignore", "reject_sensitive", "temporary_only"
+]
+RelationshipType = Literal[
+    "related_to", "part_of", "belongs_to_project", "supports", "contradicts", "supersedes",
+    "derived_from", "depends_on", "caused_by", "preference_for", "skill_for", "person_related_to",
+    "task_related_to", "evidence_for", "example_of", "version_of", "duplicates",
+    "temporal_predecessor", "temporal_successor",
+]
+ConflictType = Literal[
+    "direct_contradiction", "temporal_update", "scope_conflict", "source_disagreement",
+    "user_preference_change", "project_version_conflict", "identity_ambiguity",
+    "confidence_conflict", "environment_drift",
+]
+ConflictSeverity = Literal["low", "medium", "high", "critical"]
+ConflictStatus = Literal["open", "auto_resolved", "user_review_required", "resolved", "ignored"]
+ConsolidationAction = Literal[
+    "keep_both", "merge", "update_existing", "supersede_existing",
+    "reject_duplicate", "ask_user", "create_summary_memory",
+]
 Role = Literal["founder", "guardian_a", "guardian_b", "guardian_c", "verifier"]
 VoteDecision = Literal["approve", "reject"]
 # Needed early — PersonaSettingsOut (below) references it directly as a
@@ -200,6 +242,18 @@ class AtlasEntryCreate(BaseModel):
     confidence: float = Field(0.5, ge=0.0, le=1.0)
     source: str | None = None
     valid_until: datetime | None = None
+    # ECHO Layer 1 (all optional — a caller that doesn't know about these gets
+    # the model's own defaults, same backward-compatible pattern as memory_type).
+    category: MemoryCategory | None = None
+    importance: MemoryImportance | None = None
+    stability: MemoryStability | None = None
+    retention_policy: RetentionPolicy | None = None
+    capture_method: CaptureMethod | None = None
+    project_id: str | None = None
+    task_id: str | None = None
+    source_type: str | None = None
+    source_reference: str | None = None
+    expires_at: datetime | None = None
 
 
 class AtlasEntryUpdate(BaseModel):
@@ -211,6 +265,16 @@ class AtlasEntryUpdate(BaseModel):
     source: str | None = None
     valid_until: datetime | None = None
     outdated: bool | None = None
+    # ECHO Layer 1
+    category: MemoryCategory | None = None
+    verification_status: VerificationStatus | None = None
+    importance: MemoryImportance | None = None
+    stability: MemoryStability | None = None
+    retention_policy: RetentionPolicy | None = None
+    expires_at: datetime | None = None
+    status: MemoryLifecycleStatus | None = None
+    project_id: str | None = None
+    task_id: str | None = None
 
 
 class AtlasEntryOut(BaseModel):
@@ -226,6 +290,27 @@ class AtlasEntryOut(BaseModel):
     outdated: bool = False
     created_at: datetime
     updated_at: datetime
+    # ECHO Layer 1
+    category: MemoryCategory = "semantic"
+    verification_status: VerificationStatus = "unverified"
+    importance: MemoryImportance = "medium"
+    stability: MemoryStability = "semi_stable"
+    retention_policy: RetentionPolicy = "periodic_review"
+    capture_method: CaptureMethod = "migration"
+    status: MemoryLifecycleStatus = "active"
+    review_state: MemoryReviewState = "none"
+    project_id: str | None = None
+    task_id: str | None = None
+    source_type: str | None = None
+    source_reference: str | None = None
+    expires_at: datetime | None = None
+    last_verified_at: datetime | None = None
+    last_accessed_at: datetime | None = None
+    access_count: int = 0
+    parent_memory_id: str | None = None
+    supersedes_memory_id: str | None = None
+    contradiction_group_id: str | None = None
+    duplicate_group_id: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -275,6 +360,14 @@ class MemoryCandidateOut(BaseModel):
     review_note: str | None
     created_at: datetime
     updated_at: datetime
+    # ECHO Layer 1
+    category: MemoryCategory | None = None
+    sensitivity_level: SensitivityLevel = "ordinary_personal"
+    recommendation: CandidateRecommendation | None = None
+    capture_reason: str | None = None
+    duplicate_memory_id: str | None = None
+    importance: MemoryImportance = "medium"
+    stability: MemoryStability = "semi_stable"
 
     model_config = {"from_attributes": True}
 
@@ -289,6 +382,119 @@ class MemoryCandidateEdit(BaseModel):
 
 class MemoryCandidateDecision(BaseModel):
     note: str | None = None
+
+
+# ---- ECHO Layer 1: Memory Foundation v1 — routers/memory.py schemas ----
+class MemorySearchRequest(BaseModel):
+    query: str
+    project_id: str | None = None
+    task_id: str | None = None
+    allowed_categories: list[MemoryCategory] | None = None
+    excluded_categories: list[MemoryCategory] | None = None
+    max_results: int = Field(5, ge=1, le=50)
+    include_archived: bool = False
+    minimum_confidence: float = Field(0.0, ge=0.0, le=1.0)
+    purpose: str = "general"
+
+
+class MemorySearchResultOut(BaseModel):
+    memory_id: str
+    content: str
+    category: MemoryCategory
+    relevance_score: float
+    confidence: float
+    verification_status: VerificationStatus
+    provenance_summary: str
+    freshness_status: str
+    conflict_warning: str | None
+    retrieval_reason: str
+    epistemic_status: EpistemicStatus
+    tags: list[str]
+
+
+class MemoryConflictOut(BaseModel):
+    id: str
+    memory_ids_json: list[str]
+    conflict_type: ConflictType
+    description: str
+    severity: ConflictSeverity
+    status: ConflictStatus
+    recommended_resolution: str | None
+    resolution: str | None
+    resolved_by: str | None
+    resolved_at: datetime | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ConflictResolveRequest(BaseModel):
+    resolution: str
+
+
+class MemoryMaintenanceResultOut(BaseModel):
+    checked: int
+    expired: int
+    needs_review: int
+    run_at: str
+
+
+class MemoryIndexStatusOut(BaseModel):
+    backend: str
+    collection: str
+    embedding_model: str
+    persist_dir: str
+    healthy: bool
+    error: str | None
+    sql_row_count: int
+    indexed_count: int
+    in_sync: bool
+
+
+FeedbackType = Literal[
+    "useful", "irrelevant", "incorrect", "outdated", "too_sensitive", "overused", "underused", "wrong_scope"
+]
+
+
+class MemoryFeedbackRequest(BaseModel):
+    feedback_type: FeedbackType
+    conversation_id: str | None = None
+    scope: str | None = None
+    reason: str | None = None
+
+
+class MemoryFeedbackOut(BaseModel):
+    id: str
+    memory_id: str
+    conversation_id: str | None
+    feedback_type: FeedbackType
+    scope: str | None
+    reason: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class MemoryMetricsOut(BaseModel):
+    retrieval_counters: dict[str, int]
+    provenance_coverage_pct: float
+    verification_coverage_pct: float
+    stale_memory_pct: float
+    unresolved_conflict_pct: float
+    duplicate_consolidation_events: int
+    total_active: int
+
+
+class MemoryStatsOut(BaseModel):
+    total_active: int
+    by_category: dict[str, int]
+    by_status: dict[str, int]
+    pending_candidates: int
+    accepted_candidates: int
+    rejected_candidates: int
+    open_conflicts: int
+    resolved_conflicts: int
+    consolidation_events: int
 
 
 # ---- Constitution ----
@@ -501,6 +707,11 @@ class ProjectUpdate(BaseModel):
     priority: Priority | None = None
     category: str | None = None
     tags: list[str] | None = None
+    # ECHO Layer 1 (Phase 12) — lightweight project memory profile
+    objective: str | None = None
+    constraints_json: list[str] | None = None
+    decisions_json: list[str] | None = None
+    blockers_json: list[str] | None = None
 
 
 class ProjectOut(BaseModel):
@@ -515,6 +726,12 @@ class ProjectOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+    # ECHO Layer 1 (Phase 12)
+    objective: str | None = None
+    constraints_json: list[str] = Field(default_factory=list)
+    decisions_json: list[str] = Field(default_factory=list)
+    blockers_json: list[str] = Field(default_factory=list)
+    last_reviewed_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 
@@ -1158,6 +1375,20 @@ TaskType = Literal[
 TaskConfidence = Literal["high", "medium", "low", "incomplete"]
 SkillCategory = Literal["coding", "release", "research", "study", "planning", "troubleshooting", "writing", "personal", "system", "other"]
 
+# ---- ECHO Layer 2A: Cognitive Core v2 / Task Understanding enums ----
+# The milestone's broader taxonomy, independent of the legacy TaskType above.
+TaskCategory = Literal[
+    "question", "explanation", "research", "coding", "debugging", "planning", "decision",
+    "document", "action", "reminder", "learning", "emotional_support", "creative", "mixed",
+]
+TaskUrgency = Literal["low", "normal", "high", "urgent"]
+TaskComplexity = Literal["trivial", "simple", "moderate", "complex"]
+TaskRiskLevel = Literal["low", "medium", "high", "critical"]
+TaskReversibility = Literal["reversible", "hard_to_reverse", "irreversible"]
+TaskStatus = Literal["draft", "analyzing", "ready", "needs_clarification", "stale", "superseded"]
+TaskScope = Literal["current_turn", "conversation", "project", "recurring_workflow", "long_term_goal"]
+MissingInfoTier = Literal["blocking", "important", "optional", "safely_inferable"]
+
 
 class CognitiveConceptCreate(BaseModel):
     name: str
@@ -1219,6 +1450,7 @@ class GraphNodeOut(BaseModel):
 class TaskUnderstandingRequest(BaseModel):
     user_message: str
     conversation_id: str | None = None
+    project_id: str | None = None
 
 
 class TaskUnderstandingOut(_UtcAssumingModel):
@@ -1238,6 +1470,83 @@ class TaskUnderstandingOut(_UtcAssumingModel):
     recommended_next_step: str | None
     confidence: TaskConfidence
     created_at: datetime
+    # ECHO Layer 2A
+    project_id: str | None = None
+    parent_task_id: str | None = None
+    normalized_request: str | None = None
+    task_category: TaskCategory = "mixed"
+    urgency: TaskUrgency = "normal"
+    complexity: TaskComplexity = "moderate"
+    primary_goal: str | None = None
+    secondary_goals_json: list[str] = Field(default_factory=list)
+    user_intent: str | None = None
+    expected_output: str | None = None
+    inferred_constraints_json: list[str] = Field(default_factory=list)
+    preferences_json: list[str] = Field(default_factory=list)
+    forbidden_actions_json: list[str] = Field(default_factory=list)
+    uncertainties_json: list[str] = Field(default_factory=list)
+    missing_information_json: list[dict] = Field(default_factory=list)
+    failure_conditions_json: list[str] = Field(default_factory=list)
+    acceptance_tests_json: list[str] = Field(default_factory=list)
+    required_capabilities_json: list[str] = Field(default_factory=list)
+    candidate_skills_json: list[str] = Field(default_factory=list)
+    candidate_tools_json: list[str] = Field(default_factory=list)
+    required_sources_json: list[str] = Field(default_factory=list)
+    risk_level: TaskRiskLevel = "low"
+    consequence_level: TaskRiskLevel = "low"
+    reversibility: TaskReversibility = "reversible"
+    confirmation_requirement: bool = False
+    status: TaskStatus = "ready"
+    intent_hierarchy_json: dict = Field(default_factory=dict)
+    scope: TaskScope = "current_turn"
+    clarification_questions_json: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+
+class TaskUnderstandingCorrection(BaseModel):
+    """User-driven correction of a misunderstood goal/constraint (Phase 7 /
+    frontend correction control) — never a raw field-by-field PATCH of
+    everything, just the handful of things a user would plausibly want to
+    fix directly."""
+
+    primary_goal: str | None = None
+    expected_output: str | None = None
+    explicit_constraints: list[str] | None = None
+    forbidden_actions: list[str] | None = None
+    scope: TaskScope | None = None
+
+
+class ClarificationViewOut(BaseModel):
+    """The compact 'why ECHO needs clarification' summary — never raw
+    reasoning, just the blocking questions and why they're blocking."""
+
+    needs_clarification: bool
+    questions: list[str]
+    blocking_items: list[str]
+    safe_assumptions_made: list[str]
+
+
+class ContextPreviewRequest(BaseModel):
+    user_message: str
+    conversation_id: str | None = None
+    project_id: str | None = None
+
+
+class ContextPreviewOut(BaseModel):
+    task_understanding: TaskUnderstandingOut | None
+    brief_text: str | None
+    clarification: ClarificationViewOut
+
+
+class TaskTypeInfo(BaseModel):
+    value: str
+    label: str
+    description: str
+
+
+class TaskTypesOut(BaseModel):
+    task_types: list[TaskTypeInfo]
+    task_categories: list[TaskTypeInfo]
 
 
 class SkillPatternCreate(BaseModel):
@@ -1329,6 +1638,11 @@ class CognitiveBriefOut(_UtcAssumingModel):
     selected_skills_json: list[str]
     selected_context_sources_json: list[str]
     created_at: datetime
+    # ECHO Layer 2A
+    candidate_tools_json: list[str] = Field(default_factory=list)
+    risk_and_confirmation_summary: str | None = None
+    confidence: TaskConfidence = "medium"
+    next_reasoning_stage: str | None = None
 
 
 class CognitiveSettingsOut(BaseModel):

@@ -147,6 +147,17 @@ class Attachment(Base):
 
 
 class AtlasEntry(Base):
+    """ECHO Layer 1 — this is the unified memory record ("MemoryRecord" in the
+    milestone spec). Rather than build a second, parallel memory table, this
+    existing model was extended in place with the Layer 1 fields below: it
+    was already the source-of-truth memory store with real semantic search
+    (see atlas.py), and rule 3 ("do not create a second independent memory
+    system") makes extension the correct call, not a new table. `memory_type`
+    (legacy: fact|preference|mood|goal|fear|capability|project|relationship|
+    event) is left completely unchanged for backward compatibility with
+    every existing row/filter/test; `category` below carries the new Layer 1
+    taxonomy going forward. See ECHO_LAYER_1_MEMORY_FOUNDATION.md."""
+
     __tablename__ = "atlas_entries"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
@@ -162,6 +173,42 @@ class AtlasEntry(Base):
     outdated: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    # --- ECHO Layer 1: Memory Foundation v1 (all additive, all default-safe) ---
+    # profile|preference|project|task|episodic|semantic|skill|relationship|environment|temporary
+    category: Mapped[str] = mapped_column(String, default="semantic")
+    # verified|partially_verified|unverified|disputed|outdated|not_applicable
+    verification_status: Mapped[str] = mapped_column(String, default="unverified")
+    importance: Mapped[str] = mapped_column(String, default="medium")  # critical|high|medium|low
+    stability: Mapped[str] = mapped_column(String, default="semi_stable")  # durable|semi_stable|volatile|temporary
+    # permanent_until_deleted|periodic_review|expire_after_period|conversation_only|project_lifetime|manual_only
+    retention_policy: Mapped[str] = mapped_column(String, default="periodic_review")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_accessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    # explicit_user_request|approved_candidate|manual_entry|project_import|document_extraction|
+    # conversation_summary|system_generated|migration
+    capture_method: Mapped[str] = mapped_column(String, default="migration")
+    # No ForeignKey constraint, matching this repo's existing cross-reference style
+    # (see CognitiveConcept/CognitiveRelationship) — Projects/Tasks are soft-archived
+    # not hard-deleted, so a stale reference here is safe and SQLite FK enforcement
+    # (ECHO Layer 0) would otherwise reject legitimate cross-entity references.
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # user_statement|uploaded_file|conversation|trusted_source|web_source|project_state|
+    # test_output|tool_result|inference|manual_verification|migration
+    source_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_reference: Mapped[str | None] = mapped_column(String, nullable=True)
+    parent_memory_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    supersedes_memory_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    contradiction_group_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    duplicate_group_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    review_state: Mapped[str] = mapped_column(String, default="none")  # none|pending_review|reviewed
+    # active|archived|superseded|deleted — distinct from the legacy `outdated` bool,
+    # which stays as the "don't treat as current" retrieval-exclusion flag it always
+    # was. `status` adds the richer lifecycle Layer 1 needs (see memory_lifecycle.py).
+    status: Mapped[str] = mapped_column(String, default="active")
 
 
 class SelfImprovementRequest(Base):
@@ -335,6 +382,17 @@ class MemoryCandidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
+    # --- ECHO Layer 1: Memory Foundation v1 candidate-pipeline fields ---
+    category: Mapped[str | None] = mapped_column(String, nullable=True)  # Layer 1 taxonomy, see AtlasEntry.category
+    # public|ordinary_personal|private|highly_sensitive|secret — see memory_privacy.py
+    sensitivity_level: Mapped[str] = mapped_column(String, default="ordinary_personal")
+    # auto_accept|ask_user|merge|update_existing|ignore|reject_sensitive|temporary_only
+    recommendation: Mapped[str | None] = mapped_column(String, nullable=True)
+    capture_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    duplicate_memory_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    importance: Mapped[str] = mapped_column(String, default="medium")
+    stability: Mapped[str] = mapped_column(String, default="semi_stable")
+
 
 class Project(Base):
     """ECHO Personal OS v1 — a durable body of ongoing work (a study track, a
@@ -361,6 +419,17 @@ class Project(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # --- ECHO Layer 1: lightweight project memory profile (Phase 12) ---
+    # A full separate ProjectMemoryProfile table was judged unnecessary — Project
+    # is already the first-class identity; these are just the memory-relevant
+    # fields it was missing, kept short/compact by construction (see
+    # memory_retrieval.py's project-scoped MemoryBrief section).
+    objective: Mapped[str | None] = mapped_column(Text, nullable=True)
+    constraints_json: Mapped[list] = mapped_column(JSON, default=list)
+    decisions_json: Mapped[list] = mapped_column(JSON, default=list)
+    blockers_json: Mapped[list] = mapped_column(JSON, default=list)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     tasks: Mapped[list["Task"]] = relationship(back_populates="project")
 
@@ -696,6 +765,12 @@ class ConversationSummary(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
+    # --- ECHO Layer 1 (Phase 11): distinguishes a full end-of-conversation
+    # summary (the only kind this app generates today) from the other summary
+    # granularities Layer 1's spec anticipates for later layers. ---
+    summary_type: Mapped[str] = mapped_column(String, default="final")  # rolling|final|topic|project_update|decision_log
+    candidate_memory_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+
 
 class ReleaseRecord(Base):
     __tablename__ = "release_records"
@@ -848,10 +923,19 @@ class TaskUnderstanding(Base):
     unknown, constraints, success criteria, risks. Only created for
     medium/hard-difficulty requests (see cognitive_core.py's gating rule) —
     not one row per chat message. The *_json fields are short lists of
-    plain strings, never raw chain-of-thought."""
+    plain strings, never raw chain-of-thought.
+
+    ECHO Layer 2A extended this in place (the milestone's own "unified task
+    model") rather than creating a parallel table — same consolidation
+    pattern Layer 1 used for AtlasEntry. `task_type` (the v1 taxonomy) is
+    untouched for backward compatibility; `task_category` carries the
+    broader Layer 2A taxonomy alongside it."""
 
     __tablename__ = "task_understandings"
-    __table_args__ = (Index("ix_task_understandings_conversation_id", "conversation_id"),)
+    __table_args__ = (
+        Index("ix_task_understandings_conversation_id", "conversation_id"),
+        Index("ix_task_understandings_project_id", "project_id"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -869,6 +953,53 @@ class TaskUnderstanding(Base):
     recommended_next_step: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[str] = mapped_column(String, default="medium")  # high|medium|low|incomplete
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    # --- ECHO Layer 2A: Cognitive Core v2 (all additive, all default-safe) ---
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    parent_task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    normalized_request: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # question|explanation|research|coding|debugging|planning|decision|document|
+    # action|reminder|learning|emotional_support|creative|mixed — the Layer 2A
+    # taxonomy, independent of the legacy `task_type` above.
+    task_category: Mapped[str] = mapped_column(String, default="mixed")
+    urgency: Mapped[str] = mapped_column(String, default="normal")  # low|normal|high|urgent
+    complexity: Mapped[str] = mapped_column(String, default="moderate")  # trivial|simple|moderate|complex
+    primary_goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    secondary_goals_json: Mapped[list] = mapped_column(JSON, default=list)
+    user_intent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expected_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Distinct from the legacy `constraints_json` (kept as-is, treated as
+    # "explicit" for backward compatibility): inferred constraints are new
+    # and always separately labelled, never merged into the explicit list.
+    inferred_constraints_json: Mapped[list] = mapped_column(JSON, default=list)
+    preferences_json: Mapped[list] = mapped_column(JSON, default=list)
+    forbidden_actions_json: Mapped[list] = mapped_column(JSON, default=list)
+    uncertainties_json: Mapped[list] = mapped_column(JSON, default=list)
+    # `unknowns_json` (legacy) stays as the general missing-knowledge list;
+    # `missing_information_json` is the Layer 2A classified version (each
+    # item tagged blocking/important/optional/safely_inferable — see
+    # task_understanding_v2.py).
+    missing_information_json: Mapped[list] = mapped_column(JSON, default=list)
+    failure_conditions_json: Mapped[list] = mapped_column(JSON, default=list)
+    acceptance_tests_json: Mapped[list] = mapped_column(JSON, default=list)
+    required_capabilities_json: Mapped[list] = mapped_column(JSON, default=list)
+    candidate_skills_json: Mapped[list] = mapped_column(JSON, default=list)
+    candidate_tools_json: Mapped[list] = mapped_column(JSON, default=list)
+    required_sources_json: Mapped[list] = mapped_column(JSON, default=list)
+    risk_level: Mapped[str] = mapped_column(String, default="low")  # low|medium|high|critical
+    consequence_level: Mapped[str] = mapped_column(String, default="low")  # low|medium|high|critical
+    reversibility: Mapped[str] = mapped_column(String, default="reversible")  # reversible|hard_to_reverse|irreversible
+    confirmation_requirement: Mapped[bool] = mapped_column(Boolean, default=False)
+    # draft|analyzing|ready|needs_clarification|stale|superseded
+    status: Mapped[str] = mapped_column(String, default="ready")
+    intent_hierarchy_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    scope: Mapped[str] = mapped_column(String, default="current_turn")  # current_turn|conversation|project|recurring_workflow|long_term_goal
+    clarification_questions_json: Mapped[list] = mapped_column(JSON, default=list)
+    # A short hash of the normalized request + key context, used to detect
+    # whether the task has "materially changed" (Phase 7 rule) without
+    # storing anything sensitive.
+    content_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
 class SkillPattern(Base):
@@ -932,6 +1063,12 @@ class CognitiveBrief(Base):
     selected_skills_json: Mapped[list] = mapped_column(JSON, default=list)
     selected_context_sources_json: Mapped[list] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    # --- ECHO Layer 2A: CognitiveBrief v2 fields (Phase 6) ---
+    candidate_tools_json: Mapped[list] = mapped_column(JSON, default=list)
+    risk_and_confirmation_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str] = mapped_column(String, default="medium")  # high|medium|low|incomplete
+    next_reasoning_stage: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class CognitiveSettings(Base):
@@ -1043,3 +1180,157 @@ class SchemaVersion(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: "singleton")
     version: Mapped[int] = mapped_column(Integer, default=1)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+# ============================================================================
+# ECHO Layer 1 — Memory Foundation v1
+#
+# AtlasEntry (above) and MemoryCandidate (above) were extended in place to
+# serve as the unified memory record and candidate pipeline — see their
+# docstrings. The six tables below are new only because nothing existing
+# covers what they represent: evidence records, memory-instance relationships
+# (deliberately separate from CognitiveConcept/CognitiveRelationship, which
+# model named *world concepts*, not individual memory statements — a
+# CognitiveConcept like "Ollama" is one node; many different AtlasEntry rows
+# can each independently relate to it), conflicts, consolidation history,
+# edit history, and usefulness feedback. No FK constraints on memory-id
+# columns, matching this repo's established cross-reference style (see
+# CognitiveRelationship) and avoiding SQLite FK-enforcement (Layer 0)
+# rejecting a reference to a memory that was since hard-deleted.
+# ============================================================================
+
+
+class MemoryEvidence(Base):
+    """Phase 3 — supporting/contradicting evidence for one AtlasEntry. Most
+    memories don't need this (epistemic_status + source on AtlasEntry itself
+    covers the common case); this exists for the less common case of
+    multiple, possibly-conflicting pieces of evidence for one memory."""
+
+    __tablename__ = "memory_evidence"
+    __table_args__ = (Index("ix_memory_evidence_memory_id", "memory_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    memory_id: Mapped[str] = mapped_column(String)
+    # user_statement|uploaded_file|conversation|trusted_source|web_source|project_state|
+    # test_output|tool_result|inference|manual_verification
+    evidence_type: Mapped[str] = mapped_column(String)
+    source_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_reference: Mapped[str | None] = mapped_column(String, nullable=True)
+    excerpt: Mapped[str | None] = mapped_column(Text, nullable=True)  # kept short by convention, never a full page
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    supports_or_contradicts: Mapped[str] = mapped_column(String, default="supports")  # supports|contradicts
+    retrieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class MemoryRelationship(Base):
+    """Phase 2 — a directed edge between two AtlasEntry memories (not
+    CognitiveConcept world-model nodes — see module docstring above for the
+    documented decision on why these are a separate graph layer)."""
+
+    __tablename__ = "memory_relationships"
+    __table_args__ = (
+        Index("ix_memory_relationships_source", "source_memory_id"),
+        Index("ix_memory_relationships_target", "target_memory_id"),
+        UniqueConstraint("source_memory_id", "target_memory_id", "relationship_type", name="uq_memory_relationship_edge"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    source_memory_id: Mapped[str] = mapped_column(String)
+    target_memory_id: Mapped[str] = mapped_column(String)
+    # related_to|part_of|belongs_to_project|supports|contradicts|supersedes|derived_from|
+    # depends_on|caused_by|preference_for|skill_for|person_related_to|task_related_to|
+    # evidence_for|example_of|version_of|duplicates|temporal_predecessor|temporal_successor
+    relationship_type: Mapped[str] = mapped_column(String)
+    confidence: Mapped[str] = mapped_column(String, default="medium")  # high|medium|low|inferred
+    source_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="active")  # active|deactivated
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class MemoryConflict(Base):
+    """Phase 6 — a detected conflict between two or more memories, richer
+    than the plain word-overlap "plausibly conflicting" flag already used at
+    candidate-creation time (see memory_conflicts.py) — this is for conflicts
+    that have been classified by type/severity and may need user review."""
+
+    __tablename__ = "memory_conflicts_v2"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    memory_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    # direct_contradiction|temporal_update|scope_conflict|source_disagreement|
+    # user_preference_change|project_version_conflict|identity_ambiguity|
+    # confidence_conflict|environment_drift
+    conflict_type: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text, default="")
+    severity: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high|critical
+    status: Mapped[str] = mapped_column(String, default="open")  # open|auto_resolved|user_review_required|resolved|ignored
+    # choose_newer|choose_verified|retain_both_with_scope|mark_outdated|merge|user_decision|unresolved
+    recommended_resolution: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolution: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class MemoryConsolidationEvent(Base):
+    """Phase 5 — a record of what the consolidation engine did (or
+    recommended) when it found duplicate/near-duplicate/superseding
+    memories, so consolidation is auditable and, where practical, reversible."""
+
+    __tablename__ = "memory_consolidation_events"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    source_memory_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    result_memory_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # keep_both|merge|update_existing|supersede_existing|reject_duplicate|ask_user|create_summary_memory
+    action: Mapped[str] = mapped_column(String)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    reversible: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    reversed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MemoryRevision(Base):
+    """Phase 15 — an append-only edit-history trail for one AtlasEntry. Never
+    stores secrets (memory_privacy.redact_for_log is applied before a
+    revision derived from system-generated content is written)."""
+
+    __tablename__ = "memory_revisions"
+    __table_args__ = (Index("ix_memory_revisions_memory_id", "memory_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    memory_id: Mapped[str] = mapped_column(String)
+    revision_number: Mapped[int] = mapped_column(Integer, default=1)
+    previous_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    previous_metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    new_metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # created|edited|confirmed|merged|superseded|archived|restored|deleted|reclassified|
+    # confidence_changed|provenance_added
+    change_type: Mapped[str] = mapped_column(String)
+    change_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    changed_by: Mapped[str] = mapped_column(String, default="system")  # "user" | "system"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class MemoryFeedback(Base):
+    """Phase 21 — lets the user correct retrieval/capture behaviour after the
+    fact. Used only to nudge retrieval ranking and flag review candidates —
+    never to silently rewrite truth from a single negative rating (see
+    memory_retrieval.py's use of this table)."""
+
+    __tablename__ = "memory_feedback"
+    __table_args__ = (Index("ix_memory_feedback_memory_id", "memory_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    memory_id: Mapped[str] = mapped_column(String)
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # useful|irrelevant|incorrect|outdated|too_sensitive|overused|underused|wrong_scope
+    feedback_type: Mapped[str] = mapped_column(String)
+    scope: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

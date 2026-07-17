@@ -32,6 +32,7 @@ from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError
 from app.router import router as model_router
+from app.services import memory_privacy
 from app.tester import get_tester_id
 from app.web_search import GatherResult
 
@@ -208,6 +209,15 @@ def _try_local_intelligence_engine(
 
 
 def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status: str, confidence: float, tags: list[str], source: str) -> schemas.MemoryUpdate:
+    # ECHO Layer 1 (Phase 4/16) — even an explicit "remember that..." request
+    # never stores a secret-shaped string (rule: "Secret content must never
+    # be stored as normal memory," no exception for explicit requests).
+    # Highly sensitive content IS allowed here since this path is only ever
+    # reached for explicit_request=True (see can_store()'s own rule).
+    sensitivity = memory_privacy.classify_sensitivity(content)
+    allowed, reason = memory_privacy.can_store(sensitivity, explicit_request=explicit)
+    if not allowed:
+        return schemas.MemoryUpdate(saved=False, explicit=explicit, content=None, error=reason)
     try:
         entry = atlas.create_entry(
             db,
@@ -217,6 +227,8 @@ def _save_memory(db: Session, *, content: str, explicit: bool, epistemic_status:
                 confidence=confidence,
                 tags=tags,
                 source=source,
+                capture_method="explicit_user_request" if explicit else "system_generated",
+                source_type="user_statement",
             ),
         )
         return schemas.MemoryUpdate(saved=True, explicit=explicit, content=entry.content)
@@ -269,6 +281,24 @@ def _extract_memory(
     conversation_id: str | None = None,
     message_id: str | None = None,
 ) -> schemas.MemoryUpdate | None:
+    # ECHO Layer 1 (Phase 4) — "do not remember the next thing I say" / "don't
+    # save this" must prevent storage outright, before any other extraction
+    # path runs (explicit, preference, or opportunistic).
+    if memory_privacy.detect_do_not_remember(payload_message):
+        _log_memory_diagnostic(
+            db,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            explicit_request=False,
+            memory_block_present=False,
+            was_none=False,
+            json_detected=False,
+            parse_succeeded=False,
+            saved=False,
+            rejection_reason="User explicitly asked ECHO not to remember this",
+        )
+        return None
+
     if memory_extraction.is_explicit_remember_request(payload_message):
         content = memory_extraction.extract_explicit_memory(payload_message)
         # Bypasses the model's own MEMORY: judgment entirely — an explicit ask is
@@ -307,6 +337,21 @@ def _extract_memory(
         # MEMORY: block. Queued for review like any other candidate rather
         # than saved directly: this is an inference about durability from
         # phrasing, not something the user explicitly asked to be remembered.
+        #
+        # ECHO Layer 1 (Phase 4/16): this is an opportunistic (non-explicit)
+        # capture path, so highly_sensitive/secret content is never even
+        # queued — rule 5 requires an explicit ask for highly sensitive
+        # content, and this path is definitionally not that.
+        sensitivity = memory_privacy.classify_sensitivity(preference.content)
+        allowed, block_reason = memory_privacy.can_store(sensitivity, explicit_request=False)
+        if not allowed:
+            _log_memory_diagnostic(
+                db, conversation_id=conversation_id, message_id=message_id, explicit_request=False,
+                memory_block_present=False, was_none=False, json_detected=False, parse_succeeded=False,
+                saved=False, rejection_reason=block_reason,
+            )
+            return None
+
         conflicts = memory_conflicts.find_conflicts(
             db, content=preference.content, memory_type="preference", tags=preference.tags
         )
@@ -319,6 +364,10 @@ def _extract_memory(
             source=preference.source,
             conversation_id=conversation_id,
             conflict_with=[c.id for c in conflicts],
+            category="preference",
+            sensitivity_level=sensitivity,
+            recommendation="ask_user",
+            capture_reason=f"Durable preference statement ({preference.source})",
         )
         db.add(candidate)
         db.commit()
@@ -363,6 +412,20 @@ def _extract_memory(
     # for human review (with any plausible conflicts flagged) rather than trusted
     # outright, per the memory-candidate workflow. Explicit requests above are the
     # only path that still saves directly.
+    #
+    # ECHO Layer 1 (Phase 4/16): same sensitivity gate as the preference path —
+    # an opportunistic MEMORY: block is never explicit_request, so
+    # highly_sensitive/secret content is dropped here rather than queued.
+    sensitivity = memory_privacy.classify_sensitivity(parsed["content"])
+    allowed, block_reason = memory_privacy.can_store(sensitivity, explicit_request=False)
+    if not allowed:
+        _log_memory_diagnostic(
+            db, conversation_id=conversation_id, message_id=message_id, explicit_request=False,
+            memory_block_present=True, was_none=False, json_detected=True, parse_succeeded=True,
+            saved=False, rejection_reason=block_reason,
+        )
+        return None
+
     conflicts = memory_conflicts.find_conflicts(
         db, content=parsed["content"], memory_type="fact", tags=parsed["tags"]
     )
@@ -375,6 +438,10 @@ def _extract_memory(
         source="auto-extracted from conversation",
         conversation_id=conversation_id,
         conflict_with=[c.id for c in conflicts],
+        category="semantic",
+        sensitivity_level=sensitivity,
+        recommendation="ask_user",
+        capture_reason="Opportunistic extraction from the model's own MEMORY: block",
     )
     db.add(candidate)
     db.commit()
@@ -415,7 +482,8 @@ def send_chat_message(
         db.refresh(conversation)
 
     persona_action = chat_actions.try_handle_persona_action(db, conversation, tester_id, payload.message)
-    action = persona_action or chat_actions.try_handle_action(db, payload.message, tester_id)
+    forget_action = chat_actions.try_handle_forget_action(db, payload.message)
+    action = persona_action or forget_action or chat_actions.try_handle_action(db, payload.message, tester_id)
     if action is not None:
         echo_msg = _save_action_turn(db, conversation, payload.message, action)
         return schemas.ChatResponse(
@@ -527,7 +595,8 @@ def send_chat_message_stream(
         db.refresh(conversation)
 
     persona_action = chat_actions.try_handle_persona_action(db, conversation, tester_id, payload.message)
-    action = persona_action or chat_actions.try_handle_action(db, payload.message, tester_id)
+    forget_action = chat_actions.try_handle_forget_action(db, payload.message)
+    action = persona_action or forget_action or chat_actions.try_handle_action(db, payload.message, tester_id)
     if action is not None:
         echo_msg = _save_action_turn(db, conversation, payload.message, action)
 

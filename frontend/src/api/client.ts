@@ -286,6 +286,25 @@ export interface SendWithFilesResponse {
   message: MessageOut;
 }
 
+// ECHO Layer 1: Memory Foundation v1 taxonomy — see backend/app/schemas.py.
+export type MemoryCategory =
+  | "profile"
+  | "preference"
+  | "project"
+  | "task"
+  | "episodic"
+  | "semantic"
+  | "skill"
+  | "relationship"
+  | "environment"
+  | "temporary";
+export const MEMORY_CATEGORIES: MemoryCategory[] = [
+  "profile", "preference", "project", "task", "episodic", "semantic", "skill", "relationship", "environment", "temporary",
+];
+export type VerificationStatus = "verified" | "partially_verified" | "unverified" | "disputed" | "outdated" | "not_applicable";
+export type MemoryLifecycleStatus = "active" | "pending_review" | "archived" | "superseded" | "rejected" | "deleted";
+export type MemoryImportance = "critical" | "high" | "medium" | "low";
+
 export interface AtlasEntryOut {
   id: string;
   content: string;
@@ -299,6 +318,20 @@ export interface AtlasEntryOut {
   outdated: boolean;
   created_at: string;
   updated_at: string;
+  // ECHO Layer 1
+  category: MemoryCategory;
+  verification_status: VerificationStatus;
+  importance: MemoryImportance;
+  status: MemoryLifecycleStatus;
+  review_state: "none" | "pending_review" | "reviewed";
+  capture_method: string;
+  project_id: string | null;
+  task_id: string | null;
+  source_type: string | null;
+  source_reference: string | null;
+  last_verified_at: string | null;
+  last_accessed_at: string | null;
+  access_count: number;
 }
 
 export interface AtlasSearchResult extends AtlasEntryOut {
@@ -335,6 +368,11 @@ export interface MemoryCandidateOut {
   review_note: string | null;
   created_at: string;
   updated_at: string;
+  // ECHO Layer 1
+  category: MemoryCategory | null;
+  sensitivity_level: "public" | "ordinary_personal" | "private" | "highly_sensitive" | "secret";
+  recommendation: string | null;
+  capture_reason: string | null;
 }
 
 export interface CoreValueOut {
@@ -671,6 +709,174 @@ export const rejectMemoryCandidate = (id: string, note?: string) =>
     method: "POST",
     body: JSON.stringify({ note }),
   });
+
+// ---- ECHO Layer 1: Memory Foundation — /api/memory/* (additive to /api/atlas
+// and /api/memory-candidates above, not a replacement for either) ----
+export interface MemorySearchResultOut {
+  memory_id: string;
+  content: string;
+  category: MemoryCategory;
+  relevance_score: number;
+  confidence: number;
+  verification_status: VerificationStatus;
+  provenance_summary: string;
+  freshness_status: string;
+  conflict_warning: string | null;
+  retrieval_reason: string;
+  epistemic_status: EpistemicStatus;
+  tags: string[];
+}
+
+export interface MemoryConflictOut {
+  id: string;
+  memory_ids_json: string[];
+  conflict_type: string;
+  description: string;
+  severity: "low" | "medium" | "high" | "critical";
+  status: "open" | "auto_resolved" | "user_review_required" | "resolved" | "ignored";
+  recommended_resolution: string | null;
+  resolution: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface MemoryStatsOut {
+  total_active: number;
+  by_category: Record<string, number>;
+  by_status: Record<string, number>;
+  pending_candidates: number;
+  accepted_candidates: number;
+  rejected_candidates: number;
+  open_conflicts: number;
+  resolved_conflicts: number;
+  consolidation_events: number;
+}
+
+export interface MemoryMetricsOut {
+  retrieval_counters: Record<string, number>;
+  provenance_coverage_pct: number;
+  verification_coverage_pct: number;
+  stale_memory_pct: number;
+  unresolved_conflict_pct: number;
+  duplicate_consolidation_events: number;
+  total_active: number;
+}
+
+export interface MemoryIndexStatusOut {
+  backend: string;
+  collection: string;
+  embedding_model: string;
+  persist_dir: string;
+  healthy: boolean;
+  error: string | null;
+  sql_row_count: number;
+  indexed_count: number;
+  in_sync: boolean;
+}
+
+export interface MemoryMaintenanceResultOut {
+  checked: number;
+  expired: number;
+  needs_review: number;
+  run_at: string;
+}
+
+export interface MemoryListFilters {
+  category?: MemoryCategory;
+  status?: MemoryLifecycleStatus;
+  project_id?: string;
+  needs_review?: boolean;
+}
+
+function _qs(params: object): string {
+  const parts = Object.entries(params as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined && v !== "")
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`);
+  return parts.length ? `?${parts.join("&")}` : "";
+}
+
+export const listMemories = (filters: MemoryListFilters = {}) =>
+  request<AtlasEntryOut[]>(`/api/memory${_qs(filters)}`);
+
+export const getMemory = (id: string) => request<AtlasEntryOut>(`/api/memory/${id}`);
+
+export const updateMemory = (id: string, payload: Partial<AtlasEntryOut>) =>
+  request<AtlasEntryOut>(`/api/memory/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+
+export const deleteMemory = (id: string) => request<void>(`/api/memory/${id}`, { method: "DELETE" });
+
+export const archiveMemory = (id: string) => request<AtlasEntryOut>(`/api/memory/${id}/archive`, { method: "POST" });
+
+export const restoreMemory = (id: string) => request<AtlasEntryOut>(`/api/memory/${id}/restore`, { method: "POST" });
+
+export const confirmMemory = (id: string) => request<AtlasEntryOut>(`/api/memory/${id}/confirm`, { method: "POST" });
+
+export const markMemoryOutdated = (id: string) =>
+  request<AtlasEntryOut>(`/api/memory/${id}/mark-outdated`, { method: "POST" });
+
+export interface MemorySearchRequest {
+  query: string;
+  project_id?: string;
+  max_results?: number;
+  include_archived?: boolean;
+  minimum_confidence?: number;
+  purpose?: string;
+}
+
+export const searchMemories = (payload: MemorySearchRequest) =>
+  request<MemorySearchResultOut[]>("/api/memory/search", { method: "POST", body: JSON.stringify(payload) });
+
+export const previewMemoryContext = (query: string) =>
+  request<{ brief_text: string; results: MemorySearchResultOut[] }>("/api/memory/context-preview", {
+    method: "POST",
+    body: JSON.stringify({ query }),
+  });
+
+export const listMemoryConflicts = (status?: string) =>
+  request<MemoryConflictOut[]>(`/api/memory/conflicts${_qs({ status })}`);
+
+export const resolveMemoryConflict = (id: string, resolution: string) =>
+  request<MemoryConflictOut>(`/api/memory/conflicts/${id}/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ resolution }),
+  });
+
+export const runMemoryMaintenance = () =>
+  request<MemoryMaintenanceResultOut>("/api/memory/maintenance/run", { method: "POST" });
+
+export const getMemoryIndexStatus = () => request<MemoryIndexStatusOut>("/api/memory/index/status");
+
+export const rebuildMemoryIndex = () => request<{ rebuilt: number; failed: number }>("/api/memory/index/rebuild", { method: "POST" });
+
+export const repairMemoryIndex = () => request<{ repaired: number; removed: number }>("/api/memory/index/repair", { method: "POST" });
+
+export const getMemoryStats = () => request<MemoryStatsOut>("/api/memory/stats");
+
+export const getMemoryMetrics = () => request<MemoryMetricsOut>("/api/memory/metrics");
+
+export const submitMemoryFeedback = (id: string, feedbackType: string, reason?: string) =>
+  request<unknown>(`/api/memory/${id}/feedback`, {
+    method: "POST",
+    body: JSON.stringify({ feedback_type: feedbackType, reason }),
+  });
+
+export const exportMemories = (includeArchived = false) =>
+  request<{ schema_version: number; memory_count: number; memories: unknown[] }>(
+    `/api/memory/export${_qs({ include_archived: includeArchived })}`
+  );
+
+export const previewMemoryImport = (payload: { schema_version: number; memories: unknown[] }) =>
+  request<{ valid: boolean; error: string | null; total: number; new: number; duplicates: string[]; secrets_rejected: number }>(
+    "/api/memory/import/preview",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
+
+export const commitMemoryImport = (payload: { schema_version: number; memories: unknown[] }) =>
+  request<{ valid: boolean; staged: number; skipped_duplicates: number; skipped_secrets: number }>(
+    "/api/memory/import/commit",
+    { method: "POST", body: JSON.stringify(payload) }
+  );
 
 // ---- Constitution ----
 export const getConstitution = () => request<ConstitutionOut>("/api/constitution");
@@ -1439,6 +1645,17 @@ export interface GraphNodeOut {
   relationships: CognitiveRelationshipOut[];
 }
 
+// ECHO Layer 2A: Cognitive Core v2 taxonomy — see backend/app/schemas.py.
+export type TaskCategory =
+  | "question" | "explanation" | "research" | "coding" | "debugging" | "planning" | "decision"
+  | "document" | "action" | "reminder" | "learning" | "emotional_support" | "creative" | "mixed";
+export type TaskUrgency = "low" | "normal" | "high" | "urgent";
+export type TaskComplexity = "trivial" | "simple" | "moderate" | "complex";
+export type TaskRiskLevel = "low" | "medium" | "high" | "critical";
+export type TaskReversibility = "reversible" | "hard_to_reverse" | "irreversible";
+export type CognitiveTaskStatus = "draft" | "analyzing" | "ready" | "needs_clarification" | "stale" | "superseded";
+export type TaskScope = "current_turn" | "conversation" | "project" | "recurring_workflow" | "long_term_goal";
+
 export interface TaskUnderstandingOut {
   id: string;
   conversation_id: string | null;
@@ -1456,6 +1673,36 @@ export interface TaskUnderstandingOut {
   recommended_next_step: string | null;
   confidence: TaskConfidence;
   created_at: string;
+  // ECHO Layer 2A
+  project_id: string | null;
+  parent_task_id: string | null;
+  normalized_request: string | null;
+  task_category: TaskCategory;
+  urgency: TaskUrgency;
+  complexity: TaskComplexity;
+  primary_goal: string | null;
+  secondary_goals_json: string[];
+  user_intent: string | null;
+  expected_output: string | null;
+  inferred_constraints_json: string[];
+  preferences_json: string[];
+  forbidden_actions_json: string[];
+  uncertainties_json: string[];
+  missing_information_json: { item: string; tier: string }[];
+  failure_conditions_json: string[];
+  acceptance_tests_json: string[];
+  required_capabilities_json: string[];
+  candidate_skills_json: string[];
+  candidate_tools_json: string[];
+  required_sources_json: string[];
+  risk_level: TaskRiskLevel;
+  consequence_level: TaskRiskLevel;
+  reversibility: TaskReversibility;
+  confirmation_requirement: boolean;
+  status: CognitiveTaskStatus;
+  scope: TaskScope;
+  clarification_questions_json: string[];
+  updated_at: string | null;
 }
 
 export interface SkillPatternOut {
@@ -1501,6 +1748,43 @@ export interface CognitiveBriefOut {
   selected_skills_json: string[];
   selected_context_sources_json: string[];
   created_at: string;
+  // ECHO Layer 2A
+  candidate_tools_json: string[];
+  risk_and_confirmation_summary: string | null;
+  confidence: TaskConfidence;
+  next_reasoning_stage: string | null;
+}
+
+export interface ClarificationViewOut {
+  needs_clarification: boolean;
+  questions: string[];
+  blocking_items: string[];
+  safe_assumptions_made: string[];
+}
+
+export interface ContextPreviewOut {
+  task_understanding: TaskUnderstandingOut | null;
+  brief_text: string | null;
+  clarification: ClarificationViewOut;
+}
+
+export interface TaskUnderstandingCorrection {
+  primary_goal?: string;
+  expected_output?: string;
+  explicit_constraints?: string[];
+  forbidden_actions?: string[];
+  scope?: TaskScope;
+}
+
+export interface TaskTypeInfo {
+  value: string;
+  label: string;
+  description: string;
+}
+
+export interface TaskTypesOut {
+  task_types: TaskTypeInfo[];
+  task_categories: TaskTypeInfo[];
 }
 
 export interface CognitiveSettingsOut {
@@ -1515,6 +1799,23 @@ export const understandTask = (user_message: string, conversation_id?: string) =
   request<TaskUnderstandingOut | null>("/api/cognitive/understand", { method: "POST", body: JSON.stringify({ user_message, conversation_id }) });
 export const listTaskUnderstandings = () => request<TaskUnderstandingOut[]>("/api/cognitive/task-understandings");
 export const listCognitiveBriefs = () => request<CognitiveBriefOut[]>("/api/cognitive/briefs");
+
+// ---- ECHO Layer 2A: /api/intelligence/* (additive to /api/cognitive/* above) ----
+export const getTaskUnderstanding = (id: string) => request<TaskUnderstandingOut>(`/api/intelligence/tasks/${id}`);
+
+export const correctTaskUnderstanding = (id: string, correction: TaskUnderstandingCorrection) =>
+  request<TaskUnderstandingOut>(`/api/intelligence/tasks/${id}`, { method: "PATCH", body: JSON.stringify(correction) });
+
+export const reanalyseTaskUnderstanding = (id: string) =>
+  request<TaskUnderstandingOut>(`/api/intelligence/tasks/${id}/reanalyse`, { method: "POST" });
+
+export const previewIntelligenceContext = (user_message: string, conversation_id?: string, project_id?: string) =>
+  request<ContextPreviewOut>("/api/intelligence/context-preview", {
+    method: "POST",
+    body: JSON.stringify({ user_message, conversation_id, project_id }),
+  });
+
+export const listTaskTypes = () => request<TaskTypesOut>("/api/intelligence/task-types");
 
 // ---- Concepts (World Model) ----
 export const listConcepts = (params?: { concept_type?: string; q?: string }) => {
