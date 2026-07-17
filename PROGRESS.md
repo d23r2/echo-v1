@@ -1,6 +1,57 @@
 # ECHO (formerly God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-17
+Last check-in: 2026-07-18
+
+## New since 2026-07-18 — ECHO Layer 2C: Decision Engine and Planning Engine
+
+1176 backend tests passing (61 new), frontend build/typecheck clean, live-verified in a real
+browser against an isolated temporary backend (created and analysed a decision — correctly
+reported an honest "no clear winner" for two undifferentiated options — selected an option, created
+a plan, validated it, approved it, materialised it into three genuine Task rows confirmed
+independently on the real Tasks page, and replanned it into a new proposed-status revision with the
+original marked superseded). The Decision Engine recommends but never chooses for the user; the
+Planning Engine never executes anything — materialisation reuses the existing permission-gated
+Action System rather than a second execution path. See
+[ECHO_LAYER_2C_DECISION_PLANNING_ARCHITECTURE.md](../ECHO_LAYER_2C_DECISION_PLANNING_ARCHITECTURE.md),
+[ECHO_LAYER_2C_DECISION_PLANNING_REPORT.md](../ECHO_LAYER_2C_DECISION_PLANNING_REPORT.md), and
+[ECHO_LAYER_2C_DECISION_PLANNING_SMOKE_TEST.md](../ECHO_LAYER_2C_DECISION_PLANNING_SMOKE_TEST.md).
+
+- **New: DecisionCase / DecisionOption / DecisionCriterion** — hard-constraint elimination is
+  driven by an explicit `violates_criteria_json` signal set at option-creation time, never a
+  keyword-matching guess; weighted scoring only activates when a criterion has an explicit
+  user-approved weight AND an option has an explicit per-criterion rating — nothing is inferred
+  from free text or presented as fabricated precision.
+- **New: Pareto detection and no-clear-winner outcomes** — a purely structural multi-objective
+  comparison (benefits/risks/reversibility/evidence quality); `no_clear_winner` is a tested,
+  first-class outcome for the all-eliminated, tied-score, and multi-non-dominated-option cases —
+  never silently forces a recommendation the evidence doesn't support.
+- **New: DecisionReport** — decision summary, recommendation rationale, key trade-offs, hard
+  constraints checked, assumptions/uncertainties, alternatives, evidence quality, and a
+  `confidence_band` that's honestly derived from evidence quality (low evidence → wide confidence,
+  verified by a dedicated test).
+- **New: Plan / PlanStep / Milestone / PlanDependency / PlanResourceRequirement / PlanRisk /
+  PlanRevision** — plans distinguish exactly the 7 required states (proposed/approved/active/
+  blocked/completed/failed/cancelled); plan steps map to real Tasks only after explicit approval,
+  deliberately not duplicating the existing Tasks system.
+- **New: dependency/critical-path/parallel-step validation** — same graph-algorithm family as
+  Layer 2B's `systems_thinking.py` (cycle detection, longest-path critical path, depth-based
+  parallel grouping), plus blocked-step-propagation and resource-conflict warnings.
+- **New: adaptive replanning** — creates a new `Plan` revision rather than mutating history in
+  place; completed steps carry forward unchanged, failed steps are dropped and recorded in a
+  `PlanRevision`, the old plan is only ever annotated (`superseded_by_plan_id`) — "do not rewrite
+  completed history" is true by construction, not convention.
+- **New: execution handoff** — `materialise_plan()` reuses `action_system.run_action()` verbatim
+  (the same permission-gated funnel every other real action in this app uses) rather than building
+  a second execution path; verified with a real flipped `requires_confirmation` flag that an
+  action needing confirmation stays a pending, honest proposal instead of silently executing.
+- **New: `/api/intelligence/decisions/*` and `/plans/*`** — additive alongside the untouched Layer
+  2A/2B `/api/intelligence/*` endpoints.
+- **Upgraded: Cognitive Core page** — new Decisions tab (create, rate options per criterion, set
+  weights, analyse, select) and Plans tab (create, validate, approve, materialise into real tasks,
+  replan, flag risks) — both live-verified end-to-end.
+- Database schema bumped to v5 (ten new tables, purely additive — no existing table gained a
+  column). **Per the milestone's own sequencing instruction, Layer 2D (Multi-Model Orchestrator and
+  Tool Strategy Engine) has not been started** — it begins only after this report is reviewed.
 
 ## New since 2026-07-17 (later still) — ECHO Layer 2B: Systems Thinking and Simulation Engine
 
@@ -693,6 +744,17 @@ recall, chat UI overhaul — all tested, 255 backend tests passing, frontend bui
   pass's envelope-integrity test suite.
 
 ## Blockers
+- **2026-07-18 check-in (new)**: this sandbox's git index is corrupt again
+  (`bad index file sha1 signature` / `improper chunk offset`) with a stale
+  `.git/index.lock` dated today that can't be removed from here (permission
+  denied) — same class of issue as the earlier "resolved" sandbox lock note
+  below, but it's back. `git log` still reads fine (last real commit
+  `43d8b6f3`, Layer 2B, today), but `git status`/`git fsck` fail and report
+  fabricated "deleted" files for ~40 frontend paths that are still on disk —
+  don't trust `git status` from this environment until the lock/index is
+  cleared locally. Also still uncommitted: all of Layer 2C (Decision Engine +
+  Planning Engine — `decision_engine.py`, `plan_engine.py`, 3 test files, 3 doc
+  files) plus the backlog of modified files accumulated since `43d8b6f3`.
 - **2026-07-17 check-in**: `.gitattributes` still doesn't exist — the CRLF-noise blocker
   flagged 2026-07-16 is still unresolved, and now real content changes (Operational
   Self-Model, Interface Simplification, Honest Inner State work) are mixed into the same

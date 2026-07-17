@@ -1993,6 +1993,292 @@ export const listSimulations = (params?: { task_id?: string; system_model_id?: s
 export const getSimulation = (id: string) => request<SimulationOut>(`/api/intelligence/simulations/${id}`);
 export const getDecisionHandoff = (id: string) => request<DecisionHandoffOut>(`/api/intelligence/simulations/${id}/decision-handoff`);
 
+// ============================================================================
+// ECHO Layer 2C — Decision Engine and Planning Engine
+// ============================================================================
+
+export type DecisionCaseStatus = "draft" | "analysed" | "selected" | "cancelled";
+export type DecisionReversibility = "reversible" | "hard_to_reverse" | "irreversible";
+export type DecisionConsequenceLevel = "low" | "medium" | "high" | "critical";
+export type CriterionSource = "user_stated" | "inferred" | "from_simulation";
+export type CriterionImportance = "low" | "medium" | "high";
+export type HardOrSoft = "hard" | "soft";
+export type PlanStatus = "proposed" | "approved" | "active" | "blocked" | "completed" | "failed" | "cancelled";
+export type PlanStepStatus = "pending" | "in_progress" | "blocked" | "completed" | "failed" | "cancelled";
+export type MilestoneStatus = "pending" | "reached" | "missed";
+export type ResourceType = "time" | "tool" | "skill" | "external" | "other";
+export type ResourceAvailability = "available" | "unavailable" | "unknown";
+export type RiskLikelihood = "low" | "medium" | "high" | "unknown";
+export type RiskImpact = "low" | "medium" | "high";
+export type PlanRiskStatus = "open" | "mitigated" | "accepted" | "occurred";
+export type ReplanTrigger = "failure" | "new_evidence" | "changed_constraint" | "missed_deadline" | "user_correction";
+
+export interface DecisionOptionOut {
+  id: string;
+  decision_case_id: string;
+  label: string;
+  description: string | null;
+  benefits_json: string[];
+  drawbacks_json: string[];
+  direct_cost: string | null;
+  opportunity_cost: string | null;
+  time_estimate: string | null;
+  dependencies_json: string[];
+  risks_json: string[];
+  failure_modes_json: string[];
+  reversibility: DecisionReversibility;
+  evidence_quality: EvidenceQuality;
+  confidence: CognitiveConfidence;
+  violates_criteria_json: string[];
+  criterion_ratings_json: Record<string, number>;
+  eliminated: boolean;
+  eliminated_reason: string | null;
+  score: number | null;
+  pareto_dominated: boolean;
+  source_scenario_id: string | null;
+  created_at: string;
+}
+
+export interface DecisionCriterionOut {
+  id: string;
+  decision_case_id: string;
+  name: string;
+  description: string | null;
+  source: CriterionSource;
+  importance: CriterionImportance;
+  hard_or_soft: HardOrSoft;
+  weight: number | null;
+  created_at: string;
+}
+
+export interface DecisionReportOut {
+  decision_summary: string;
+  recommended_option_label: string | null;
+  no_clear_winner: boolean;
+  why_this_option: string | null;
+  key_tradeoffs: string[];
+  hard_constraints_checked: string[];
+  major_assumptions: string[];
+  major_uncertainties: string[];
+  risks_and_mitigations: string[];
+  alternatives: string[];
+  reversibility: DecisionReversibility;
+  evidence_quality: EvidenceQuality;
+  confidence_band: ConfidenceBand;
+  next_information_to_collect: string[];
+  user_confirmation_needed: boolean;
+}
+
+export interface DecisionCaseOut {
+  id: string;
+  question: string;
+  objective: string;
+  constraints_json: string[];
+  stakeholders_json: string[];
+  evidence_json: string[];
+  assumptions_json: string[];
+  uncertainty: string | null;
+  time_horizon: string | null;
+  reversibility: DecisionReversibility;
+  consequence_level: DecisionConsequenceLevel;
+  status: DecisionCaseStatus;
+  simulation_id: string | null;
+  task_id: string | null;
+  project_id: string | null;
+  recommended_option_id: string | null;
+  no_clear_winner: boolean;
+  report: DecisionReportOut | null;
+  created_at: string;
+  updated_at: string;
+  options: DecisionOptionOut[];
+  criteria: DecisionCriterionOut[];
+}
+
+export interface PlanStepOut {
+  id: string;
+  plan_id: string;
+  order_index: number;
+  title: string;
+  description: string | null;
+  estimated_effort: string | null;
+  owner: string;
+  status: PlanStepStatus;
+  verification_criteria_json: string[];
+  parallel_group: string | null;
+  materialised_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MilestoneOut {
+  id: string;
+  plan_id: string;
+  name: string;
+  description: string | null;
+  target_step_ids_json: string[];
+  verification_criteria_json: string[];
+  status: MilestoneStatus;
+  due_at: string | null;
+  created_at: string;
+}
+
+export interface PlanDependencyOut {
+  id: string;
+  plan_id: string;
+  from_step_id: string;
+  to_step_id: string;
+  dependency_type: "blocks" | "informs";
+}
+
+export interface PlanResourceRequirementOut {
+  id: string;
+  plan_id: string;
+  step_id: string | null;
+  resource_name: string;
+  resource_type: ResourceType;
+  amount: string | null;
+  availability_status: ResourceAvailability;
+  created_at: string;
+}
+
+export interface PlanRiskOut {
+  id: string;
+  plan_id: string;
+  step_id: string | null;
+  description: string;
+  likelihood: RiskLikelihood;
+  impact: RiskImpact;
+  mitigation: string | null;
+  status: PlanRiskStatus;
+  created_at: string;
+}
+
+export interface PlanRevisionOut {
+  id: string;
+  plan_id: string;
+  revision_number: number;
+  reason: string;
+  trigger: ReplanTrigger;
+  changed_step_ids_json: string[];
+  previous_status: string | null;
+  new_status: string | null;
+  created_at: string;
+}
+
+export interface PlanOut {
+  id: string;
+  objective: string;
+  scope: string | null;
+  assumptions_json: string[];
+  constraints_json: string[];
+  success_criteria_json: string[];
+  estimated_effort: string | null;
+  owner: string;
+  status: PlanStatus;
+  evidence_json: string[];
+  approved_at: string | null;
+  decision_case_id: string | null;
+  system_model_id: string | null;
+  task_id: string | null;
+  project_id: string | null;
+  revision_number: number;
+  superseded_by_plan_id: string | null;
+  created_at: string;
+  updated_at: string;
+  steps: PlanStepOut[];
+  milestones: MilestoneOut[];
+  dependencies: PlanDependencyOut[];
+  resource_requirements: PlanResourceRequirementOut[];
+  risks: PlanRiskOut[];
+  revisions: PlanRevisionOut[];
+}
+
+export interface PlanValidationIssue {
+  step_id: string | null;
+  severity: "blocking" | "warning";
+  message: string;
+}
+
+export interface PlanValidationOut {
+  plan_id: string;
+  valid: boolean;
+  issues: PlanValidationIssue[];
+  critical_path_step_ids: string[];
+  parallel_groups: Record<string, string[]>;
+}
+
+export interface MaterialiseTasksOut {
+  plan_id: string;
+  created_task_ids: string[];
+  created_reminder_action_run_ids: string[];
+  skipped_step_ids: string[];
+}
+
+// ---- Decisions ----
+export const createDecision = (payload: {
+  question: string;
+  objective: string;
+  constraints?: string[];
+  stakeholders?: string[];
+  evidence?: string[];
+  assumptions?: string[];
+  uncertainty?: string;
+  time_horizon?: string;
+  reversibility?: DecisionReversibility;
+  consequence_level?: DecisionConsequenceLevel;
+  simulation_id?: string;
+  task_id?: string;
+  project_id?: string;
+  options?: Array<{ label: string; description?: string; benefits?: string[]; drawbacks?: string[]; violates_criteria?: string[] }>;
+  criteria?: Array<{ name: string; description?: string; hard_or_soft?: HardOrSoft; importance?: CriterionImportance }>;
+}) => request<DecisionCaseOut>("/api/intelligence/decisions", { method: "POST", body: JSON.stringify(payload) });
+export const listDecisions = (projectId?: string) => request<DecisionCaseOut[]>(`/api/intelligence/decisions${projectId ? `?project_id=${projectId}` : ""}`);
+export const getDecision = (id: string) => request<DecisionCaseOut>(`/api/intelligence/decisions/${id}`);
+export const analyseDecision = (id: string) => request<DecisionCaseOut>(`/api/intelligence/decisions/${id}/analyse`, { method: "POST" });
+export const selectDecisionOption = (id: string, optionId: string) =>
+  request<DecisionCaseOut>(`/api/intelligence/decisions/${id}/select`, { method: "POST", body: JSON.stringify({ option_id: optionId }) });
+export const updateCriterionWeight = (decisionId: string, criterionId: string, weight: number | null) =>
+  request<DecisionCriterionOut>(`/api/intelligence/decisions/${decisionId}/criteria/${criterionId}/weight`, { method: "PATCH", body: JSON.stringify({ weight }) });
+export const updateOptionRatings = (decisionId: string, optionId: string, ratings: Record<string, number>) =>
+  request<DecisionOptionOut>(`/api/intelligence/decisions/${decisionId}/options/${optionId}/ratings`, { method: "PATCH", body: JSON.stringify({ ratings }) });
+
+// ---- Plans ----
+export const createPlan = (payload: {
+  objective: string;
+  scope?: string;
+  assumptions?: string[];
+  constraints?: string[];
+  success_criteria?: string[];
+  decision_case_id?: string;
+  system_model_id?: string;
+  task_id?: string;
+  project_id?: string;
+  steps?: Array<{ title: string; description?: string; estimated_effort?: string; owner?: string; verification_criteria?: string[]; depends_on_titles?: string[] }>;
+}) => request<PlanOut>("/api/intelligence/plans", { method: "POST", body: JSON.stringify(payload) });
+export const listPlans = (params?: { project_id?: string; status?: string }) => {
+  const search = new URLSearchParams();
+  if (params?.project_id) search.set("project_id", params.project_id);
+  if (params?.status) search.set("status", params.status);
+  const qs = search.toString();
+  return request<PlanOut[]>(`/api/intelligence/plans${qs ? `?${qs}` : ""}`);
+};
+export const getPlan = (id: string) => request<PlanOut>(`/api/intelligence/plans/${id}`);
+export const updatePlan = (id: string, payload: { scope?: string; assumptions?: string[]; constraints?: string[]; success_criteria?: string[] }) =>
+  request<PlanOut>(`/api/intelligence/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const validatePlan = (id: string) => request<PlanValidationOut>(`/api/intelligence/plans/${id}/validate`, { method: "POST" });
+export const approvePlan = (id: string) => request<PlanOut>(`/api/intelligence/plans/${id}/approve`, { method: "POST" });
+export const replanPlan = (id: string, reason: string, trigger: ReplanTrigger = "user_correction") =>
+  request<PlanOut>(`/api/intelligence/plans/${id}/replan`, { method: "POST", body: JSON.stringify({ reason, trigger }) });
+export const materialisePlanTasks = (id: string) => request<MaterialiseTasksOut>(`/api/intelligence/plans/${id}/materialise-tasks`, { method: "POST" });
+export const addPlanMilestone = (id: string, payload: { name: string; description?: string; target_step_ids?: string[]; verification_criteria?: string[]; due_at?: string }) =>
+  request<MilestoneOut>(`/api/intelligence/plans/${id}/milestones`, { method: "POST", body: JSON.stringify(payload) });
+export const addPlanRisk = (id: string, payload: { description: string; likelihood?: RiskLikelihood; impact?: RiskImpact; mitigation?: string; step_id?: string }) =>
+  request<PlanRiskOut>(`/api/intelligence/plans/${id}/risks`, { method: "POST", body: JSON.stringify(payload) });
+export const addPlanResource = (
+  id: string,
+  payload: { resource_name: string; resource_type?: ResourceType; amount?: string; availability_status?: ResourceAvailability; step_id?: string },
+) => request<PlanResourceRequirementOut>(`/api/intelligence/plans/${id}/resources`, { method: "POST", body: JSON.stringify(payload) });
+
 // ---- Concepts (World Model) ----
 export const listConcepts = (params?: { concept_type?: string; q?: string }) => {
   const search = new URLSearchParams();

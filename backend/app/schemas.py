@@ -1819,6 +1819,321 @@ class DecisionHandoffOut(BaseModel):
 
 
 # ============================================================================
+# ECHO Layer 2C — Decision Engine and Planning Engine
+# ============================================================================
+
+DecisionCaseStatus = Literal["draft", "analysed", "selected", "cancelled"]
+DecisionReversibility = Literal["reversible", "hard_to_reverse", "irreversible"]
+DecisionConsequenceLevel = Literal["low", "medium", "high", "critical"]
+CriterionSource = Literal["user_stated", "inferred", "from_simulation"]
+CriterionImportance = Literal["low", "medium", "high"]
+HardOrSoft = Literal["hard", "soft"]
+PlanStatus = Literal["proposed", "approved", "active", "blocked", "completed", "failed", "cancelled"]
+PlanStepStatus = Literal["pending", "in_progress", "blocked", "completed", "failed", "cancelled"]
+MilestoneStatus = Literal["pending", "reached", "missed"]
+PlanDependencyType = Literal["blocks", "informs"]
+ResourceType = Literal["time", "tool", "skill", "external", "other"]
+ResourceAvailability = Literal["available", "unavailable", "unknown"]
+RiskLikelihood = Literal["low", "medium", "high", "unknown"]
+RiskImpact = Literal["low", "medium", "high"]
+PlanRiskStatus = Literal["open", "mitigated", "accepted", "occurred"]
+ReplanTrigger = Literal["failure", "new_evidence", "changed_constraint", "missed_deadline", "user_correction"]
+
+
+class DecisionOptionCreate(BaseModel):
+    label: str
+    description: str | None = None
+    benefits: list[str] = Field(default_factory=list)
+    drawbacks: list[str] = Field(default_factory=list)
+    direct_cost: str | None = None
+    opportunity_cost: str | None = None
+    time_estimate: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
+    failure_modes: list[str] = Field(default_factory=list)
+    reversibility: DecisionReversibility = "reversible"
+    evidence_quality: EvidenceQuality = "medium"
+    confidence: CognitiveConfidence = "medium"
+    violates_criteria: list[str] = Field(default_factory=list)
+
+
+class DecisionOptionOut(_UtcAssumingModel):
+    id: str
+    decision_case_id: str
+    label: str
+    description: str | None
+    benefits_json: list[str]
+    drawbacks_json: list[str]
+    direct_cost: str | None
+    opportunity_cost: str | None
+    time_estimate: str | None
+    dependencies_json: list[str]
+    risks_json: list[str]
+    failure_modes_json: list[str]
+    reversibility: DecisionReversibility
+    evidence_quality: EvidenceQuality
+    confidence: CognitiveConfidence
+    violates_criteria_json: list[str]
+    criterion_ratings_json: dict[str, float]
+    eliminated: bool
+    eliminated_reason: str | None
+    score: float | None
+    pareto_dominated: bool
+    source_scenario_id: str | None
+    created_at: datetime
+
+
+class DecisionCriterionCreate(BaseModel):
+    name: str
+    description: str | None = None
+    source: CriterionSource = "user_stated"
+    importance: CriterionImportance = "medium"
+    hard_or_soft: HardOrSoft = "soft"
+
+
+class DecisionCriterionOut(_UtcAssumingModel):
+    id: str
+    decision_case_id: str
+    name: str
+    description: str | None
+    source: CriterionSource
+    importance: CriterionImportance
+    hard_or_soft: HardOrSoft
+    weight: float | None
+    created_at: datetime
+
+
+class DecisionCriterionWeightUpdate(BaseModel):
+    weight: float | None = Field(default=None, ge=0.0, le=1.0)
+
+
+class DecisionOptionRatingsUpdate(BaseModel):
+    """Explicit per-criterion ratings for one option — never inferred.
+    Values are 0.0-1.0, keyed by DecisionCriterion.id."""
+
+    ratings: dict[str, float]
+
+
+class DecisionCaseCreate(BaseModel):
+    question: str
+    objective: str
+    constraints: list[str] = Field(default_factory=list)
+    stakeholders: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    uncertainty: str | None = None
+    time_horizon: str | None = None
+    reversibility: DecisionReversibility = "reversible"
+    consequence_level: DecisionConsequenceLevel = "low"
+    simulation_id: str | None = None
+    task_id: str | None = None
+    project_id: str | None = None
+    options: list[DecisionOptionCreate] = Field(default_factory=list)
+    criteria: list[DecisionCriterionCreate] = Field(default_factory=list)
+
+
+class DecisionReportOut(BaseModel):
+    decision_summary: str
+    recommended_option_label: str | None
+    no_clear_winner: bool
+    why_this_option: str | None
+    key_tradeoffs: list[str] = Field(default_factory=list)
+    hard_constraints_checked: list[str] = Field(default_factory=list)
+    major_assumptions: list[str] = Field(default_factory=list)
+    major_uncertainties: list[str] = Field(default_factory=list)
+    risks_and_mitigations: list[str] = Field(default_factory=list)
+    alternatives: list[str] = Field(default_factory=list)
+    reversibility: DecisionReversibility
+    evidence_quality: EvidenceQuality
+    confidence_band: ConfidenceBand
+    next_information_to_collect: list[str] = Field(default_factory=list)
+    user_confirmation_needed: bool
+
+
+class DecisionCaseOut(_UtcAssumingModel):
+    id: str
+    question: str
+    objective: str
+    constraints_json: list[str]
+    stakeholders_json: list[str]
+    evidence_json: list[str]
+    assumptions_json: list[str]
+    uncertainty: str | None
+    time_horizon: str | None
+    reversibility: DecisionReversibility
+    consequence_level: DecisionConsequenceLevel
+    status: DecisionCaseStatus
+    simulation_id: str | None
+    task_id: str | None
+    project_id: str | None
+    recommended_option_id: str | None
+    no_clear_winner: bool
+    report: DecisionReportOut | None = None
+    created_at: datetime
+    updated_at: datetime
+    options: list[DecisionOptionOut] = Field(default_factory=list)
+    criteria: list[DecisionCriterionOut] = Field(default_factory=list)
+
+
+class DecisionSelectRequest(BaseModel):
+    option_id: str
+
+
+class PlanStepCreate(BaseModel):
+    title: str
+    description: str | None = None
+    estimated_effort: str | None = None
+    owner: str = "user"
+    verification_criteria: list[str] = Field(default_factory=list)
+    depends_on_titles: list[str] = Field(default_factory=list)  # references other steps by title within the same request
+
+
+class PlanStepOut(_UtcAssumingModel):
+    id: str
+    plan_id: str
+    order_index: int
+    title: str
+    description: str | None
+    estimated_effort: str | None
+    owner: str
+    status: PlanStepStatus
+    verification_criteria_json: list[str]
+    parallel_group: str | None
+    materialised_task_id: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MilestoneOut(_UtcAssumingModel):
+    id: str
+    plan_id: str
+    name: str
+    description: str | None
+    target_step_ids_json: list[str]
+    verification_criteria_json: list[str]
+    status: MilestoneStatus
+    due_at: datetime | None
+    created_at: datetime
+
+
+class PlanDependencyOut(_UtcAssumingModel):
+    id: str
+    plan_id: str
+    from_step_id: str
+    to_step_id: str
+    dependency_type: PlanDependencyType
+
+
+class PlanResourceRequirementOut(_UtcAssumingModel):
+    id: str
+    plan_id: str
+    step_id: str | None
+    resource_name: str
+    resource_type: ResourceType
+    amount: str | None
+    availability_status: ResourceAvailability
+    created_at: datetime
+
+
+class PlanRiskOut(_UtcAssumingModel):
+    id: str
+    plan_id: str
+    step_id: str | None
+    description: str
+    likelihood: RiskLikelihood
+    impact: RiskImpact
+    mitigation: str | None
+    status: PlanRiskStatus
+    created_at: datetime
+
+
+class PlanRevisionOut(_UtcAssumingModel):
+    id: str
+    plan_id: str
+    revision_number: int
+    reason: str
+    trigger: ReplanTrigger
+    changed_step_ids_json: list[str]
+    previous_status: str | None
+    new_status: str | None
+    created_at: datetime
+
+
+class PlanCreate(BaseModel):
+    objective: str
+    scope: str | None = None
+    assumptions: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    success_criteria: list[str] = Field(default_factory=list)
+    decision_case_id: str | None = None
+    system_model_id: str | None = None
+    task_id: str | None = None
+    project_id: str | None = None
+    steps: list[PlanStepCreate] = Field(default_factory=list)  # empty -> auto-generate a minimum viable plan
+
+
+class PlanUpdate(BaseModel):
+    scope: str | None = None
+    assumptions: list[str] | None = None
+    constraints: list[str] | None = None
+    success_criteria: list[str] | None = None
+
+
+class PlanValidationIssue(BaseModel):
+    step_id: str | None
+    severity: Literal["blocking", "warning"]
+    message: str
+
+
+class PlanValidationOut(BaseModel):
+    plan_id: str
+    valid: bool
+    issues: list[PlanValidationIssue] = Field(default_factory=list)
+    critical_path_step_ids: list[str] = Field(default_factory=list)
+    parallel_groups: dict[str, list[str]] = Field(default_factory=dict)
+
+
+class ReplanRequest(BaseModel):
+    reason: str
+    trigger: ReplanTrigger = "user_correction"
+
+
+class MaterialiseTasksOut(BaseModel):
+    plan_id: str
+    created_task_ids: list[str] = Field(default_factory=list)
+    created_reminder_action_run_ids: list[str] = Field(default_factory=list)
+    skipped_step_ids: list[str] = Field(default_factory=list)
+
+
+class PlanOut(_UtcAssumingModel):
+    id: str
+    objective: str
+    scope: str | None
+    assumptions_json: list[str]
+    constraints_json: list[str]
+    success_criteria_json: list[str]
+    estimated_effort: str | None
+    owner: str
+    status: PlanStatus
+    evidence_json: list[str]
+    approved_at: datetime | None
+    decision_case_id: str | None
+    system_model_id: str | None
+    task_id: str | None
+    project_id: str | None
+    revision_number: int
+    superseded_by_plan_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    steps: list[PlanStepOut] = Field(default_factory=list)
+    milestones: list[MilestoneOut] = Field(default_factory=list)
+    dependencies: list[PlanDependencyOut] = Field(default_factory=list)
+    resource_requirements: list[PlanResourceRequirementOut] = Field(default_factory=list)
+    risks: list[PlanRiskOut] = Field(default_factory=list)
+    revisions: list[PlanRevisionOut] = Field(default_factory=list)
+
+
+# ============================================================================
 # ECHO Operational Self-Model v1
 # ============================================================================
 

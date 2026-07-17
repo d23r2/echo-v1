@@ -187,7 +187,12 @@ def _ensure_layer1_memory_columns() -> None:
 # (system_models, system_model_nodes, simulations, simulation_scenarios),
 # created by Base.metadata.create_all() above with no _ensure_column() calls
 # needed since nothing existing gained a column.
-CURRENT_SCHEMA_VERSION = 4
+# v5 (ECHO Layer 2C): Decision Engine and Planning Engine — new tables only
+# (decision_cases, decision_options, decision_criteria, plans, plan_steps,
+# plan_milestones, plan_dependencies, plan_resource_requirements, plan_risks,
+# plan_revisions), created by Base.metadata.create_all() above with no
+# _ensure_column() calls needed since nothing existing gained a column.
+CURRENT_SCHEMA_VERSION = 5
 
 
 def _ensure_schema_version() -> None:

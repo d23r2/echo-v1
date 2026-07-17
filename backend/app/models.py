@@ -1215,6 +1215,290 @@ class SimulationScenario(Base):
 
 
 # ============================================================================
+# ECHO Layer 2C — Decision Engine and Planning Engine.
+#
+# The Decision Engine recommends; it never makes an irreversible choice for
+# the user (rule from the milestone spec). DecisionOption rows can be
+# user-typed from scratch, OR seeded from a Layer 2B SimulationScenario via
+# source_scenario_id — the two systems interoperate without either
+# duplicating the other's storage. The Planning Engine deliberately does NOT
+# duplicate Task/Project: a PlanStep only becomes a real Task row after
+# explicit plan approval and an explicit "materialise" call (see
+# services/plan_engine.py's materialise_plan(), which reuses
+# action_system.run_action() rather than writing to the tasks table
+# directly).
+# ============================================================================
+
+
+class DecisionCase(Base):
+    """One structured decision under analysis. Recommendation rationale is
+    stored as a concise evidence summary (report_json) — never a raw
+    chain-of-thought dump."""
+
+    __tablename__ = "decision_cases"
+    __table_args__ = (Index("ix_decision_cases_status", "status"), Index("ix_decision_cases_project_id", "project_id"))
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    question: Mapped[str] = mapped_column(Text)
+    objective: Mapped[str] = mapped_column(Text)
+    constraints_json: Mapped[list] = mapped_column(JSON, default=list)
+    stakeholders_json: Mapped[list] = mapped_column(JSON, default=list)
+    evidence_json: Mapped[list] = mapped_column(JSON, default=list)
+    assumptions_json: Mapped[list] = mapped_column(JSON, default=list)
+    uncertainty: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_horizon: Mapped[str | None] = mapped_column(String, nullable=True)
+    reversibility: Mapped[str] = mapped_column(String, default="reversible")  # reversible|hard_to_reverse|irreversible
+    consequence_level: Mapped[str] = mapped_column(String, default="low")  # low|medium|high|critical
+    status: Mapped[str] = mapped_column(String, default="draft")  # draft|analysed|selected|cancelled
+    # Optional interop with Layer 2B — a decision can be seeded from a
+    # completed simulation's scenarios, but works fully standalone too.
+    simulation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    recommended_option_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    no_clear_winner: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The DecisionReport (Phase 3) — decision_summary, why_this_option,
+    # key_tradeoffs, hard_constraints_checked, major_assumptions,
+    # major_uncertainties, risks_and_mitigations, alternatives,
+    # reversibility, evidence_quality, confidence_band,
+    # next_information_to_collect, user_confirmation_needed.
+    report_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    options: Mapped[list["DecisionOption"]] = relationship(back_populates="decision_case", cascade="all, delete-orphan")
+    criteria: Mapped[list["DecisionCriterion"]] = relationship(back_populates="decision_case", cascade="all, delete-orphan")
+
+
+class DecisionOption(Base):
+    """One candidate choice within a DecisionCase."""
+
+    __tablename__ = "decision_options"
+    __table_args__ = (Index("ix_decision_options_decision_case_id", "decision_case_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    decision_case_id: Mapped[str] = mapped_column(ForeignKey("decision_cases.id"))
+    label: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    benefits_json: Mapped[list] = mapped_column(JSON, default=list)
+    drawbacks_json: Mapped[list] = mapped_column(JSON, default=list)
+    direct_cost: Mapped[str | None] = mapped_column(Text, nullable=True)
+    opportunity_cost: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_estimate: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dependencies_json: Mapped[list] = mapped_column(JSON, default=list)
+    risks_json: Mapped[list] = mapped_column(JSON, default=list)
+    failure_modes_json: Mapped[list] = mapped_column(JSON, default=list)
+    reversibility: Mapped[str] = mapped_column(String, default="reversible")  # reversible|hard_to_reverse|irreversible
+    evidence_quality: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high
+    confidence: Mapped[str] = mapped_column(String, default="medium")  # high|medium|low|inferred
+    # Explicit signal (set by whoever creates the option — a caller, not a
+    # keyword guess) naming which hard DecisionCriterion.name values this
+    # option is known to violate. Hard-constraint elimination is then a
+    # simple, honest rule ("eliminate if a hard criterion is in this list"),
+    # never a fragile text-matching inference.
+    violates_criteria_json: Mapped[list] = mapped_column(JSON, default=list)
+    # Explicit per-criterion rating (0.0-1.0), keyed by DecisionCriterion.id —
+    # set by the caller/user, never inferred from free text. Weighted scoring
+    # is then a plain weighted average of these, so "score" is never a
+    # fabricated number beyond what was explicitly rated.
+    criterion_ratings_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Set by hard-constraint elimination (Phase 2) — eliminated options are
+    # kept (never deleted) so the report can honestly say why they were cut.
+    eliminated: Mapped[bool] = mapped_column(Boolean, default=False)
+    eliminated_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set by weighted scoring when the user has approved criterion weights;
+    # null whenever weighted scoring wasn't used (e.g. hard-elimination-only
+    # or trade-off-matrix-only analysis) — never a fabricated number.
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pareto_dominated: Mapped[bool] = mapped_column(Boolean, default=False)
+    source_scenario_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    decision_case: Mapped["DecisionCase"] = relationship(back_populates="options")
+
+
+class DecisionCriterion(Base):
+    """One evaluation criterion for a DecisionCase — weight is only ever set
+    by explicit user approval (Phase 2's non-negotiable rule: preferences
+    must be user-controlled, never a silently-inferred optimisation
+    target)."""
+
+    __tablename__ = "decision_criteria"
+    __table_args__ = (Index("ix_decision_criteria_decision_case_id", "decision_case_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    decision_case_id: Mapped[str] = mapped_column(ForeignKey("decision_cases.id"))
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String, default="user_stated")  # user_stated|inferred|from_simulation
+    importance: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high
+    hard_or_soft: Mapped[str] = mapped_column(String, default="soft")  # hard|soft
+    weight: Mapped[float | None] = mapped_column(Float, nullable=True)  # only set via explicit user approval
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    decision_case: Mapped["DecisionCase"] = relationship(back_populates="criteria")
+
+
+class Plan(Base):
+    """A concrete, approvable plan of steps toward an objective — never
+    auto-derived into real Tasks; see materialise_plan()."""
+
+    __tablename__ = "plans"
+    __table_args__ = (Index("ix_plans_status", "status"), Index("ix_plans_project_id", "project_id"))
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    objective: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assumptions_json: Mapped[list] = mapped_column(JSON, default=list)
+    constraints_json: Mapped[list] = mapped_column(JSON, default=list)
+    success_criteria_json: Mapped[list] = mapped_column(JSON, default=list)
+    estimated_effort: Mapped[str | None] = mapped_column(String, nullable=True)  # a range/description, never a fake precise number
+    owner: Mapped[str] = mapped_column(String, default="user")
+    # proposed|approved|active|blocked|completed|failed|cancelled — exactly
+    # the 7 states the milestone spec requires plans to distinguish.
+    status: Mapped[str] = mapped_column(String, default="proposed")
+    evidence_json: Mapped[list] = mapped_column(JSON, default=list)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_case_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    system_model_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    revision_number: Mapped[int] = mapped_column(Integer, default=1)
+    superseded_by_plan_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    steps: Mapped[list["PlanStep"]] = relationship(back_populates="plan", cascade="all, delete-orphan", order_by="PlanStep.order_index")
+    milestones: Mapped[list["Milestone"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    dependencies: Mapped[list["PlanDependency"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    resource_requirements: Mapped[list["PlanResourceRequirement"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    risks: Mapped[list["PlanRisk"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+    revisions: Mapped[list["PlanRevision"]] = relationship(back_populates="plan", cascade="all, delete-orphan")
+
+
+class PlanStep(Base):
+    """One ordered step in a Plan. materialised_task_id stays null until the
+    plan is approved and materialise_plan() is explicitly called."""
+
+    __tablename__ = "plan_steps"
+    __table_args__ = (Index("ix_plan_steps_plan_id", "plan_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    estimated_effort: Mapped[str | None] = mapped_column(String, nullable=True)
+    owner: Mapped[str] = mapped_column(String, default="user")
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending|in_progress|blocked|completed|failed|cancelled
+    verification_criteria_json: Mapped[list] = mapped_column(JSON, default=list)
+    # Set by _detect_parallel_groups() — steps sharing a non-null group id
+    # have no dependency ordering between them and can run in parallel.
+    parallel_group: Mapped[str | None] = mapped_column(String, nullable=True)
+    materialised_task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    plan: Mapped["Plan"] = relationship(back_populates="steps")
+
+
+class Milestone(Base):
+    """A checkpoint within a Plan — reached only once its target steps are
+    all completed and its verification criteria are met."""
+
+    __tablename__ = "plan_milestones"
+    __table_args__ = (Index("ix_plan_milestones_plan_id", "plan_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    name: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_step_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    verification_criteria_json: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String, default="pending")  # pending|reached|missed
+    due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    plan: Mapped["Plan"] = relationship(back_populates="milestones")
+
+
+class PlanDependency(Base):
+    """A directed 'from_step must complete before to_step can start' edge —
+    the basis for prerequisite/critical-path/parallel-step detection."""
+
+    __tablename__ = "plan_dependencies"
+    __table_args__ = (Index("ix_plan_dependencies_plan_id", "plan_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    from_step_id: Mapped[str] = mapped_column(String)
+    to_step_id: Mapped[str] = mapped_column(String)
+    dependency_type: Mapped[str] = mapped_column(String, default="blocks")  # blocks|informs
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    plan: Mapped["Plan"] = relationship(back_populates="dependencies")
+
+
+class PlanResourceRequirement(Base):
+    """A named resource need for a plan or one of its steps. amount is a
+    descriptive string, never a fabricated precise quantity — this app has
+    no real budget/personnel data to draw a number from."""
+
+    __tablename__ = "plan_resource_requirements"
+    __table_args__ = (Index("ix_plan_resource_requirements_plan_id", "plan_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    step_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    resource_name: Mapped[str] = mapped_column(String)
+    resource_type: Mapped[str] = mapped_column(String, default="other")  # time|tool|skill|external|other
+    amount: Mapped[str | None] = mapped_column(String, nullable=True)
+    availability_status: Mapped[str] = mapped_column(String, default="unknown")  # available|unavailable|unknown
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    plan: Mapped["Plan"] = relationship(back_populates="resource_requirements")
+
+
+class PlanRisk(Base):
+    """A risk identified for a plan or one of its steps."""
+
+    __tablename__ = "plan_risks"
+    __table_args__ = (Index("ix_plan_risks_plan_id", "plan_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    step_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    description: Mapped[str] = mapped_column(Text)
+    likelihood: Mapped[str] = mapped_column(String, default="unknown")  # low|medium|high|unknown
+    impact: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high
+    mitigation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="open")  # open|mitigated|accepted|occurred
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    plan: Mapped["Plan"] = relationship(back_populates="risks")
+
+
+class PlanRevision(Base):
+    """An immutable history record of a replanning event — completed history
+    is never rewritten (Phase 6's non-negotiable rule)."""
+
+    __tablename__ = "plan_revisions"
+    __table_args__ = (Index("ix_plan_revisions_plan_id", "plan_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("plans.id"))
+    revision_number: Mapped[int] = mapped_column(Integer, default=1)
+    reason: Mapped[str] = mapped_column(Text)
+    trigger: Mapped[str] = mapped_column(String, default="user_correction")  # failure|new_evidence|changed_constraint|missed_deadline|user_correction
+    changed_step_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    previous_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    new_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    plan: Mapped["Plan"] = relationship(back_populates="revisions")
+
+
+# ============================================================================
 # ECHO Operational Self-Model v1 — an honest, explicitly non-conscious record
 # of ECHO's own operating state for one turn (goal/mode/confidence/risks/
 # limits/next action), distinct from Atlas (facts about the user) and

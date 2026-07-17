@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
-from app.models import CognitiveConcept, Simulation, TaskUnderstanding
-from app.services import cognitive_core
+from app.models import CognitiveConcept, DecisionCase, Simulation, TaskUnderstanding
+from app.services import cognitive_core, plan_engine
+from app.services import decision_engine as dec_engine
 from app.services import simulation_engine as sim_engine
 from app.services import systems_thinking as st
 from app.services import task_understanding_v2 as tuv2
@@ -286,3 +287,216 @@ def get_decision_handoff(simulation_id: str, db: Session = Depends(get_db)):
     if sim is None:
         raise HTTPException(status_code=404, detail="Simulation not found")
     return sim_engine.build_decision_handoff(sim)
+
+
+# ============================================================================
+# ECHO Layer 2C — Decision Engine and Planning Engine
+# ============================================================================
+
+
+def _decision_case_out(case: DecisionCase) -> schemas.DecisionCaseOut:
+    report = schemas.DecisionReportOut(**case.report_json) if case.report_json else None
+    return schemas.DecisionCaseOut(
+        id=case.id,
+        question=case.question,
+        objective=case.objective,
+        constraints_json=case.constraints_json,
+        stakeholders_json=case.stakeholders_json,
+        evidence_json=case.evidence_json,
+        assumptions_json=case.assumptions_json,
+        uncertainty=case.uncertainty,
+        time_horizon=case.time_horizon,
+        reversibility=case.reversibility,
+        consequence_level=case.consequence_level,
+        status=case.status,
+        simulation_id=case.simulation_id,
+        task_id=case.task_id,
+        project_id=case.project_id,
+        recommended_option_id=case.recommended_option_id,
+        no_clear_winner=case.no_clear_winner,
+        report=report,
+        created_at=case.created_at,
+        updated_at=case.updated_at,
+        options=case.options,
+        criteria=case.criteria,
+    )
+
+
+@router.post("/decisions", response_model=schemas.DecisionCaseOut)
+def create_decision(payload: schemas.DecisionCaseCreate, db: Session = Depends(get_db)):
+    if payload.simulation_id and db.get(Simulation, payload.simulation_id) is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    case = dec_engine.create_decision_case(db, payload)
+    return _decision_case_out(case)
+
+
+@router.get("/decisions", response_model=list[schemas.DecisionCaseOut])
+def list_decisions(project_id: str | None = None, db: Session = Depends(get_db)):
+    return [_decision_case_out(c) for c in dec_engine.list_decision_cases(db, project_id=project_id)]
+
+
+@router.get("/decisions/{decision_case_id}", response_model=schemas.DecisionCaseOut)
+def get_decision(decision_case_id: str, db: Session = Depends(get_db)):
+    case = dec_engine.get_decision_case(db, decision_case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Decision case not found")
+    return _decision_case_out(case)
+
+
+@router.post("/decisions/{decision_case_id}/analyse", response_model=schemas.DecisionCaseOut)
+def analyse_decision(decision_case_id: str, db: Session = Depends(get_db)):
+    case = dec_engine.analyse(db, decision_case_id)
+    if case is None:
+        raise HTTPException(status_code=404, detail="Decision case not found")
+    return _decision_case_out(case)
+
+
+@router.post("/decisions/{decision_case_id}/select", response_model=schemas.DecisionCaseOut)
+def select_decision_option(decision_case_id: str, payload: schemas.DecisionSelectRequest, db: Session = Depends(get_db)):
+    """The user's own explicit, final choice — the Decision Engine only
+    ever recommends via /analyse; this is the one call that actually
+    commits to an option."""
+    try:
+        case = dec_engine.select_option(db, decision_case_id, payload.option_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if case is None:
+        raise HTTPException(status_code=404, detail="Decision case not found")
+    return _decision_case_out(case)
+
+
+@router.patch("/decisions/{decision_case_id}/criteria/{criterion_id}/weight", response_model=schemas.DecisionCriterionOut)
+def update_criterion_weight(decision_case_id: str, criterion_id: str, payload: schemas.DecisionCriterionWeightUpdate, db: Session = Depends(get_db)):
+    criterion = dec_engine.set_criterion_weight(db, criterion_id, payload.weight)
+    if criterion is None or criterion.decision_case_id != decision_case_id:
+        raise HTTPException(status_code=404, detail="Criterion not found")
+    return criterion
+
+
+@router.patch("/decisions/{decision_case_id}/options/{option_id}/ratings", response_model=schemas.DecisionOptionOut)
+def update_option_ratings(decision_case_id: str, option_id: str, payload: schemas.DecisionOptionRatingsUpdate, db: Session = Depends(get_db)):
+    option = dec_engine.set_option_ratings(db, option_id, payload.ratings)
+    if option is None or option.decision_case_id != decision_case_id:
+        raise HTTPException(status_code=404, detail="Option not found")
+    return option
+
+
+@router.post("/plans", response_model=schemas.PlanOut)
+def create_plan(payload: schemas.PlanCreate, db: Session = Depends(get_db)):
+    if payload.decision_case_id and db.get(DecisionCase, payload.decision_case_id) is None:
+        raise HTTPException(status_code=404, detail="Decision case not found")
+    return plan_engine.create_plan(db, payload)
+
+
+@router.get("/plans", response_model=list[schemas.PlanOut])
+def list_plans(project_id: str | None = None, status: str | None = None, db: Session = Depends(get_db)):
+    return plan_engine.list_plans(db, project_id=project_id, status=status)
+
+
+@router.get("/plans/{plan_id}", response_model=schemas.PlanOut)
+def get_plan(plan_id: str, db: Session = Depends(get_db)):
+    plan = plan_engine.get_plan(db, plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+@router.patch("/plans/{plan_id}", response_model=schemas.PlanOut)
+def update_plan(plan_id: str, payload: schemas.PlanUpdate, db: Session = Depends(get_db)):
+    plan = plan_engine.update_plan(db, plan_id, payload)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+@router.post("/plans/{plan_id}/validate", response_model=schemas.PlanValidationOut)
+def validate_plan(plan_id: str, db: Session = Depends(get_db)):
+    result = plan_engine.validate_plan(db, plan_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return result
+
+
+@router.post("/plans/{plan_id}/approve", response_model=schemas.PlanOut)
+def approve_plan(plan_id: str, db: Session = Depends(get_db)):
+    try:
+        plan = plan_engine.approve_plan(db, plan_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+@router.post("/plans/{plan_id}/replan", response_model=schemas.PlanOut)
+def replan_plan(plan_id: str, payload: schemas.ReplanRequest, db: Session = Depends(get_db)):
+    try:
+        plan = plan_engine.replan(db, plan_id, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if plan is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return plan
+
+
+@router.post("/plans/{plan_id}/materialise-tasks", response_model=schemas.MaterialiseTasksOut)
+def materialise_tasks(plan_id: str, db: Session = Depends(get_db)):
+    """Never called automatically — only this explicit user-triggered call
+    ever converts plan steps into real Task rows, and even then only
+    through the same permission-gated action_system.run_action() funnel
+    every other real action uses."""
+    try:
+        result = plan_engine.materialise_plan(db, plan_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if result is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return result
+
+
+@router.post("/plans/{plan_id}/milestones", response_model=schemas.MilestoneOut)
+def add_plan_milestone(plan_id: str, payload: dict, db: Session = Depends(get_db)):
+    milestone = plan_engine.add_milestone(
+        db,
+        plan_id,
+        name=payload.get("name", ""),
+        description=payload.get("description"),
+        target_step_ids=payload.get("target_step_ids", []),
+        verification_criteria=payload.get("verification_criteria", []),
+        due_at=payload.get("due_at"),
+    )
+    if milestone is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return milestone
+
+
+@router.post("/plans/{plan_id}/risks", response_model=schemas.PlanRiskOut)
+def add_plan_risk(plan_id: str, payload: dict, db: Session = Depends(get_db)):
+    risk = plan_engine.add_risk(
+        db,
+        plan_id,
+        description=payload.get("description", ""),
+        likelihood=payload.get("likelihood", "unknown"),
+        impact=payload.get("impact", "medium"),
+        mitigation=payload.get("mitigation"),
+        step_id=payload.get("step_id"),
+    )
+    if risk is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return risk
+
+
+@router.post("/plans/{plan_id}/resources", response_model=schemas.PlanResourceRequirementOut)
+def add_plan_resource(plan_id: str, payload: dict, db: Session = Depends(get_db)):
+    req = plan_engine.add_resource_requirement(
+        db,
+        plan_id,
+        resource_name=payload.get("resource_name", ""),
+        resource_type=payload.get("resource_type", "other"),
+        amount=payload.get("amount"),
+        availability_status=payload.get("availability_status", "unknown"),
+        step_id=payload.get("step_id"),
+    )
+    if req is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    return req

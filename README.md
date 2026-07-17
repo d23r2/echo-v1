@@ -327,6 +327,21 @@ Systems / Simulations. See
 [ECHO_LAYER_2B_SYSTEMS_SIMULATION_ARCHITECTURE.md](ECHO_LAYER_2B_SYSTEMS_SIMULATION_ARCHITECTURE.md)
 and [ECHO_LAYER_2B_SYSTEMS_SIMULATION_REPORT.md](ECHO_LAYER_2B_SYSTEMS_SIMULATION_REPORT.md).
 
+## Decision Engine and Planning Engine (Layer 2C)
+
+A structured Decision Engine (hard-constraint elimination, trade-off matrices, optional weighted
+scoring against explicit user-approved weights and ratings, Pareto detection, and a compact
+DecisionReport) recommends but never chooses for you — only an explicit "Select" commits. A
+Planning Engine turns a decision or objective into an approvable plan of ordered steps with
+dependency/critical-path/parallel-step validation; adaptive replanning preserves completed-step
+history by creating a new plan revision rather than rewriting the old one; execution handoff into
+real Tasks reuses the existing permission-gated Action System (`action_system.run_action()`) rather
+than a second execution path, and only ever runs after explicit plan approval and an explicit
+"materialise" call. Explore it under Advanced → Knowledge & Memory → Cognitive Core →
+Decisions / Plans. See
+[ECHO_LAYER_2C_DECISION_PLANNING_ARCHITECTURE.md](ECHO_LAYER_2C_DECISION_PLANNING_ARCHITECTURE.md)
+and [ECHO_LAYER_2C_DECISION_PLANNING_REPORT.md](ECHO_LAYER_2C_DECISION_PLANNING_REPORT.md).
+
 ## Multi-device
 
 The frontend is a fully responsive web app — the same build works on desktop and mobile

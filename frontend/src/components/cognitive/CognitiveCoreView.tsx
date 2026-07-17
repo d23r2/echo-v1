@@ -6,8 +6,12 @@ import {
   CognitiveBriefOut,
   CognitiveConceptOut,
   CognitiveSettingsOut,
+  DecisionCaseOut,
   DecisionHandoffOut,
   GraphNodeOut,
+  MaterialiseTasksOut,
+  PlanOut,
+  PlanValidationOut,
   SimulationOut,
   SimulationScenarioOut,
   SkillPatternOut,
@@ -16,11 +20,16 @@ import {
   SystemModelOut,
   TaskUnderstandingCorrection,
   TaskUnderstandingOut,
+  addPlanRisk,
   addSystemNode,
+  analyseDecision,
+  approvePlan,
   archiveSystemModel,
   correctTaskUnderstanding,
   createCausalNote,
   createConcept,
+  createDecision,
+  createPlan,
   createSimulation,
   createSystemModel,
   getCognitiveSettings,
@@ -31,17 +40,25 @@ import {
   listCausalNotes,
   listCognitiveBriefs,
   listConcepts,
+  listDecisions,
+  listPlans,
   listSimulations,
   listSkills,
   listSystemModels,
   listSystemNodes,
   listTaskUnderstandings,
+  materialisePlanTasks,
   reanalyseTaskUnderstanding,
   removeSystemNode,
+  replanPlan,
+  selectDecisionOption,
   updateCognitiveSettings,
+  updateCriterionWeight,
+  updateOptionRatings,
+  validatePlan,
 } from "../../api/client";
 
-type Tab = "world" | "skills" | "causal" | "tasks" | "briefs" | "systems" | "simulations" | "settings";
+type Tab = "world" | "skills" | "causal" | "tasks" | "briefs" | "systems" | "simulations" | "decisions" | "plans" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "world", label: "World Model" },
@@ -51,6 +68,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "briefs", label: "Cognitive Briefs" },
   { id: "systems", label: "Systems" },
   { id: "simulations", label: "Simulations" },
+  { id: "decisions", label: "Decisions" },
+  { id: "plans", label: "Plans" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -97,6 +116,8 @@ export default function CognitiveCoreView() {
       {tab === "briefs" && <BriefsTab />}
       {tab === "systems" && <SystemsTab />}
       {tab === "simulations" && <SimulationsTab />}
+      {tab === "decisions" && <DecisionsTab />}
+      {tab === "plans" && <PlansTab />}
       {tab === "settings" && <SettingsTab />}
     </div>
   );
@@ -873,6 +894,495 @@ function ScenarioCard({ scenario }: { scenario: SimulationScenarioOut }) {
       <ListSection label="Costs" items={scenario.costs_json} tone="text-zinc-500" />
       {scenario.uncertainty_notes && <p className="mt-2 text-[11px] text-zinc-500">Uncertainty: {scenario.uncertainty_notes}</p>}
       <p className="mt-1 text-[11px] text-zinc-500">Sensitivity: {scenario.sensitivity_note}</p>
+    </div>
+  );
+}
+
+const DECISION_STATUS_COLOR: Record<string, string> = {
+  draft: "text-zinc-400 border-zinc-700",
+  analysed: "text-amber-400 border-amber-900",
+  selected: "text-emerald-400 border-emerald-900",
+  cancelled: "text-zinc-500 border-zinc-700",
+};
+
+function DecisionsTab() {
+  const [decisions, setDecisions] = useState<DecisionCaseOut[]>([]);
+  const [question, setQuestion] = useState("");
+  const [objective, setObjective] = useState("");
+  const [optionLabels, setOptionLabels] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    try {
+      setDecisions(await listDecisions());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load decisions.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!question.trim() || !objective.trim()) return;
+    setBusy(true);
+    try {
+      const options = optionLabels
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((label) => ({ label }));
+      await createDecision({ question: question.trim(), objective: objective.trim(), options });
+      setQuestion("");
+      setObjective("");
+      setOptionLabels("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create decision.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        The Decision Engine recommends — it never makes an irreversible choice for you. Add options and (optionally) criteria,
+        then Analyse for a recommendation; only "Select" actually commits.
+      </p>
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">{error}</div>}
+
+      <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Question (e.g. 'Which database should we use?')" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm" />
+        <input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Objective" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm" />
+        <textarea
+          value={optionLabels}
+          onChange={(e) => setOptionLabels(e.target.value)}
+          placeholder="One option per line (e.g. 'Postgres', 'SQLite')"
+          rows={3}
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm"
+        />
+        <button disabled={!question.trim() || !objective.trim() || busy} className="w-fit rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">
+          Create decision
+        </button>
+      </form>
+
+      <div className="space-y-2">
+        {decisions.length === 0 && !error && <p className="text-sm text-zinc-500">No decisions yet.</p>}
+        {decisions.map((d) => (
+          <div key={d.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
+              <span className="text-sm font-medium text-zinc-100">{d.question}</span>
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${DECISION_STATUS_COLOR[d.status] || "text-zinc-400 border-zinc-700"}`}>{d.status}</span>
+                <span className="text-xs text-zinc-500">{expandedId === d.id ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {expandedId === d.id && <DecisionDetail decision={d} onChanged={refresh} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DecisionDetail({ decision, onChanged }: { decision: DecisionCaseOut; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [weightDrafts, setWeightDrafts] = useState<Record<string, string>>({});
+
+  async function handleAnalyse() {
+    setBusy(true);
+    try {
+      await analyseDecision(decision.id);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analysis failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSelect(optionId: string) {
+    setBusy(true);
+    try {
+      await selectDecisionOption(decision.id, optionId);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Selection failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveWeight(criterionId: string) {
+    const raw = weightDrafts[criterionId];
+    const weight = raw === undefined || raw === "" ? null : Number(raw);
+    setBusy(true);
+    try {
+      await updateCriterionWeight(decision.id, criterionId, weight);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save weight.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSaveRating(optionId: string, criterionId: string, value: string) {
+    if (value === "") return;
+    setBusy(true);
+    try {
+      await updateOptionRatings(decision.id, optionId, { [criterionId]: Number(value) });
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save rating.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const report = decision.report;
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-zinc-800/60 pt-3">
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-2 py-1 text-xs text-red-300">{error}</div>}
+
+      {decision.criteria.length > 0 && (
+        <div>
+          <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Criteria (set a weight to enable weighted scoring)</div>
+          <div className="mt-1 space-y-1">
+            {decision.criteria.map((c) => (
+              <div key={c.id} className="flex items-center gap-2 text-xs">
+                <span className="flex-1 text-zinc-300">
+                  {c.name} <span className="text-zinc-600">({c.hard_or_soft})</span>
+                </span>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="1"
+                  value={weightDrafts[c.id] ?? (c.weight ?? "")}
+                  onChange={(e) => setWeightDrafts((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                  className="w-16 rounded border border-zinc-700 bg-zinc-950 px-1.5 py-0.5 text-xs"
+                />
+                <button onClick={() => void handleSaveWeight(c.id)} className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-400 hover:border-zinc-500">
+                  Save
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {decision.options.map((o) => (
+          <div key={o.id} className={`rounded-lg border p-2 text-xs ${o.eliminated ? "border-zinc-800 opacity-50" : "border-zinc-700"}`}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium text-zinc-200">
+                {o.label}
+                {decision.recommended_option_id === o.id && <span className="ml-2 rounded-full border border-emerald-900 px-1.5 py-0.5 text-[10px] uppercase text-emerald-400">recommended</span>}
+              </span>
+              {o.score !== null && <span className="text-zinc-500">score {o.score.toFixed(2)}</span>}
+              {!o.eliminated && decision.status !== "selected" && (
+                <button disabled={busy} onClick={() => void handleSelect(o.id)} className="rounded border border-zinc-700 px-2 py-0.5 text-[10px] text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+                  Select
+                </button>
+              )}
+            </div>
+            {o.eliminated && <p className="mt-1 text-red-400">{o.eliminated_reason}</p>}
+            <ListSection label="Benefits" items={o.benefits_json} />
+            <ListSection label="Drawbacks" items={o.drawbacks_json} tone="text-zinc-500" />
+            {!o.eliminated && decision.criteria.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {decision.criteria.map((c) => (
+                  <label key={c.id} className="flex items-center gap-1 text-[10px] text-zinc-500">
+                    {c.name}
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      max="1"
+                      defaultValue={o.criterion_ratings_json[c.id] ?? ""}
+                      onBlur={(e) => void handleSaveRating(o.id, c.id, e.target.value)}
+                      className="w-14 rounded border border-zinc-700 bg-zinc-950 px-1 py-0.5 text-[10px] text-zinc-200"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <button disabled={busy} onClick={() => void handleAnalyse()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+        Analyse
+      </button>
+
+      {report && (
+        <div className="rounded-lg border border-zinc-700 bg-zinc-950/60 p-3 text-xs">
+          <p className="text-zinc-200">{report.decision_summary}</p>
+          {report.no_clear_winner ? (
+            <p className="mt-2 text-amber-400">No clear winner — {report.next_information_to_collect.join(" ")}</p>
+          ) : (
+            <p className="mt-2 text-zinc-300">{report.why_this_option}</p>
+          )}
+          <ListSection label="Key trade-offs" items={report.key_tradeoffs} />
+          <ListSection label="Alternatives" items={report.alternatives} tone="text-zinc-500" />
+          <ListSection label="Uncertainties" items={report.major_uncertainties} tone="text-amber-300" />
+          <div className="mt-2 flex gap-2 text-[10px] text-zinc-500">
+            <span>evidence: {report.evidence_quality}</span>
+            <span>confidence: {report.confidence_band}</span>
+            {report.user_confirmation_needed && <span className="text-red-400">confirmation needed before acting</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const PLAN_STATUS_COLOR: Record<string, string> = {
+  proposed: "text-zinc-400 border-zinc-700",
+  approved: "text-amber-400 border-amber-900",
+  active: "text-emerald-400 border-emerald-900",
+  blocked: "text-orange-400 border-orange-900",
+  completed: "text-emerald-400 border-emerald-900",
+  failed: "text-red-400 border-red-900",
+  cancelled: "text-zinc-500 border-zinc-700",
+};
+
+function PlansTab() {
+  const [plans, setPlans] = useState<PlanOut[]>([]);
+  const [objective, setObjective] = useState("");
+  const [stepTitles, setStepTitles] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    try {
+      setPlans(await listPlans());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load plans.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!objective.trim()) return;
+    setBusy(true);
+    try {
+      const steps = stepTitles
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+        .map((title) => ({ title }));
+      await createPlan({ objective: objective.trim(), steps: steps.length ? steps : undefined });
+      setObjective("");
+      setStepTitles("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create plan.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        Approvable plans of steps — nothing here ever creates a real task until you explicitly approve the plan and
+        materialise it. Leave steps blank for a minimum-viable single-step plan.
+      </p>
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">{error}</div>}
+
+      <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Objective (e.g. 'Ship the release')" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm" />
+        <textarea
+          value={stepTitles}
+          onChange={(e) => setStepTitles(e.target.value)}
+          placeholder="One step per line (optional — leave blank for an auto-generated minimum viable plan)"
+          rows={3}
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm"
+        />
+        <button disabled={!objective.trim() || busy} className="w-fit rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">
+          Create plan
+        </button>
+      </form>
+
+      <div className="space-y-2">
+        {plans.length === 0 && !error && <p className="text-sm text-zinc-500">No plans yet.</p>}
+        {plans.map((p) => (
+          <div key={p.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}>
+              <span className="text-sm font-medium text-zinc-100">{p.objective}</span>
+              <div className="flex items-center gap-2">
+                <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${PLAN_STATUS_COLOR[p.status] || "text-zinc-400 border-zinc-700"}`}>{p.status}</span>
+                <span className="text-xs text-zinc-500">rev {p.revision_number}</span>
+                <span className="text-xs text-zinc-500">{expandedId === p.id ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {expandedId === p.id && <PlanDetail plan={p} onChanged={refresh} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PlanDetail({ plan, onChanged }: { plan: PlanOut; onChanged: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [validation, setValidation] = useState<PlanValidationOut | null>(null);
+  const [materialiseResult, setMateraliseResult] = useState<MaterialiseTasksOut | null>(null);
+  const [replanReason, setReplanReason] = useState("");
+  const [showReplan, setShowReplan] = useState(false);
+
+  async function handleValidate() {
+    setBusy(true);
+    try {
+      setValidation(await validatePlan(plan.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Validation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleApprove() {
+    setBusy(true);
+    try {
+      await approvePlan(plan.id);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approval failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleMaterialise() {
+    setBusy(true);
+    try {
+      setMateraliseResult(await materialisePlanTasks(plan.id));
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not create tasks.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleReplan() {
+    if (!replanReason.trim()) return;
+    setBusy(true);
+    try {
+      await replanPlan(plan.id, replanReason.trim());
+      setReplanReason("");
+      setShowReplan(false);
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Replan failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAddRisk() {
+    setBusy(true);
+    try {
+      await addPlanRisk(plan.id, { description: "Unreviewed risk — edit me", likelihood: "unknown", impact: "medium" });
+      await onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not add risk.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-zinc-800/60 pt-3">
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-2 py-1 text-xs text-red-300">{error}</div>}
+
+      <div>
+        <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Steps</div>
+        <ol className="mt-1 space-y-1">
+          {plan.steps.map((s) => (
+            <li key={s.id} className="flex flex-wrap items-center gap-2 text-xs text-zinc-300">
+              <span className={`rounded-full border px-1.5 py-0.5 text-[9px] uppercase ${PLAN_STATUS_COLOR[s.status] || "border-zinc-700 text-zinc-500"}`}>{s.status}</span>
+              <span>{s.title}</span>
+              {s.parallel_group && <span className="text-[9px] text-zinc-600">[{s.parallel_group}]</span>}
+              {s.materialised_task_id && <span className="text-[9px] text-emerald-500">→ task created</span>}
+            </li>
+          ))}
+        </ol>
+      </div>
+
+      {plan.risks.length > 0 && <ListSection label="Risks" items={plan.risks.map((r) => `${r.description} (${r.likelihood}/${r.impact})`)} tone="text-red-300" />}
+
+      <div className="flex flex-wrap gap-2">
+        <button disabled={busy} onClick={() => void handleValidate()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+          Validate
+        </button>
+        {plan.status === "proposed" && (
+          <button disabled={busy} onClick={() => void handleApprove()} className="rounded-lg border border-emerald-800 px-3 py-1.5 text-xs text-emerald-400 hover:border-emerald-600 disabled:opacity-50">
+            Approve
+          </button>
+        )}
+        {(plan.status === "approved" || plan.status === "active") && (
+          <button disabled={busy} onClick={() => void handleMaterialise()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+            Create tasks from plan
+          </button>
+        )}
+        {(plan.status === "approved" || plan.status === "active" || plan.status === "blocked") && !plan.superseded_by_plan_id && (
+          <button disabled={busy} onClick={() => setShowReplan((v) => !v)} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+            Replan
+          </button>
+        )}
+        <button disabled={busy} onClick={() => void handleAddRisk()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+          Flag a risk
+        </button>
+      </div>
+
+      {showReplan && (
+        <div className="flex gap-2">
+          <input value={replanReason} onChange={(e) => setReplanReason(e.target.value)} placeholder="Reason for replanning" className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs" />
+          <button disabled={!replanReason.trim() || busy} onClick={() => void handleReplan()} className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-zinc-950 disabled:opacity-50">
+            Submit
+          </button>
+        </div>
+      )}
+
+      {plan.superseded_by_plan_id && <p className="text-xs text-zinc-500">Superseded by a later revision (plan {plan.superseded_by_plan_id.slice(0, 8)}…).</p>}
+
+      {validation && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-xs">
+          <div className={validation.valid ? "text-emerald-400" : "text-red-400"}>{validation.valid ? "Valid" : "Invalid"}</div>
+          {validation.issues.map((issue, i) => (
+            <div key={i} className={issue.severity === "blocking" ? "mt-1 text-red-300" : "mt-1 text-amber-300"}>
+              {issue.message}
+            </div>
+          ))}
+          {validation.critical_path_step_ids.length > 0 && <div className="mt-1 text-zinc-400">Critical path: {validation.critical_path_step_ids.length} step(s).</div>}
+        </div>
+      )}
+
+      {materialiseResult && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-xs text-zinc-400">
+          Created {materialiseResult.created_task_ids.length} task(s).
+          {materialiseResult.skipped_step_ids.length > 0 && ` ${materialiseResult.skipped_step_ids.length} step(s) skipped (already materialised, cancelled, or pending confirmation).`}
+        </div>
+      )}
     </div>
   );
 }
