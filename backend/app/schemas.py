@@ -1366,7 +1366,9 @@ ConceptType = Literal[
 CognitiveConfidence = Literal["high", "medium", "low", "inferred"]
 ConceptSourceType = Literal["atlas_memory", "conversation", "knowledge_vault", "library", "project", "task", "manual", "system", "inferred"]
 RelationType = Literal[
-    "uses", "depends_on", "causes", "blocks", "enables", "part_of", "conflicts_with", "similar_to", "requires", "produces", "verifies", "belongs_to"
+    "uses", "depends_on", "causes", "blocks", "enables", "part_of", "conflicts_with", "similar_to", "requires", "produces", "verifies", "belongs_to",
+    # ---- ECHO Layer 2B: Systems Thinking edge types (additive, same free-text column) ----
+    "consumes", "communicates_with", "mitigates", "feedback_to",
 ]
 TaskType = Literal[
     "ask_question", "build_feature", "fix_bug", "run_test", "plan_project", "research_topic", "summarize_file",
@@ -1657,6 +1659,163 @@ class CognitiveSettingsUpdate(BaseModel):
     cognitive_concept_extraction_enabled: bool | None = None
     cognitive_skill_matching_enabled: bool | None = None
     cognitive_show_developer_diagnostics: bool | None = None
+
+
+# ============================================================================
+# ECHO Layer 2B — Systems Thinking and Simulation Engine
+# ============================================================================
+
+SystemModelScope = Literal[
+    "software_architecture", "project_plan", "physical_system", "organisational_workflow", "study_plan", "decision_context"
+]
+SystemNodeRole = Literal["component", "actor", "resource", "constraint", "interface", "external_factor"]
+SimulationStatus = Literal["running", "completed", "aborted", "failed"]
+SimulationRiskTolerance = Literal["low", "medium", "high"]
+ScenarioReversibility = Literal["reversible", "hard_to_reverse", "irreversible"]
+EvidenceQuality = Literal["low", "medium", "high"]
+ConfidenceBand = Literal["narrow", "moderate", "wide"]
+
+
+class SystemModelCreate(BaseModel):
+    name: str
+    scope: SystemModelScope = "software_architecture"
+    description: str | None = None
+    project_id: str | None = None
+
+
+class SystemModelUpdate(BaseModel):
+    name: str | None = None
+    scope: SystemModelScope | None = None
+    description: str | None = None
+
+
+class SystemModelOut(_UtcAssumingModel):
+    id: str
+    name: str
+    scope: SystemModelScope
+    description: str | None
+    project_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    archived_at: datetime | None
+
+
+class SystemModelNodeCreate(BaseModel):
+    concept_id: str
+    node_role: SystemNodeRole = "component"
+    state: str | None = None
+    owner: str | None = None
+    evidence: str | None = None
+    confidence: CognitiveConfidence = "medium"
+
+
+class SystemModelNodeOut(BaseModel):
+    id: str
+    system_model_id: str
+    concept_id: str
+    concept_name: str
+    node_role: SystemNodeRole
+    state: str | None
+    owner: str | None
+    evidence: str | None
+    confidence: CognitiveConfidence
+    created_at: datetime
+
+
+class DependencyEdgeOut(BaseModel):
+    from_concept_id: str
+    to_concept_id: str
+    relation_type: RelationType
+
+
+class BottleneckOut(BaseModel):
+    concept_id: str
+    concept_name: str
+    in_degree: int
+    out_degree: int
+    reason: str
+
+
+class CriticalPathOut(BaseModel):
+    node_ids: list[str] = Field(default_factory=list)
+    node_names: list[str] = Field(default_factory=list)
+    length: int
+
+
+class SystemAnalysisOut(BaseModel):
+    system_model: SystemModelOut
+    nodes: list[SystemModelNodeOut] = Field(default_factory=list)
+    edges: list[DependencyEdgeOut] = Field(default_factory=list)
+    bottlenecks: list[BottleneckOut] = Field(default_factory=list)
+    cycles: list[list[str]] = Field(default_factory=list)
+    critical_path: CriticalPathOut | None = None
+
+
+class SimulationCreate(BaseModel):
+    objective: str
+    task_id: str | None = None
+    system_model_id: str | None = None
+    baseline_state: str | None = None
+    constraints: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    max_scenarios: int = 4
+    max_steps: int = 12
+    time_horizon: str | None = None
+    evaluation_criteria: list[str] = Field(default_factory=list)
+    risk_tolerance: SimulationRiskTolerance = "medium"
+
+
+class SimulationScenarioOut(_UtcAssumingModel):
+    id: str
+    simulation_id: str
+    label: str
+    strategy: str
+    assumptions_json: list[str]
+    steps_json: list[dict]
+    predicted_outcomes_json: list[str]
+    dependencies_json: list[str]
+    costs_json: list[str]
+    risks_json: list[str]
+    failure_modes_json: list[str]
+    reversibility: ScenarioReversibility
+    evidence_quality: EvidenceQuality
+    confidence_band: ConfidenceBand
+    uncertainty_notes: str | None
+    sensitivity_label: Literal["low", "moderate", "high"]
+    sensitivity_note: str
+    steps_completed: int
+    steps_blocked: int
+    stopped_reason: str | None
+    rank: int | None
+    created_at: datetime
+
+
+class SimulationOut(_UtcAssumingModel):
+    id: str
+    task_id: str | None
+    system_model_id: str | None
+    objective: str
+    baseline_state: str | None
+    constraints_json: list[str]
+    assumptions_json: list[str]
+    max_scenarios: int
+    max_steps: int
+    time_horizon: str | None
+    evaluation_criteria_json: list[str]
+    risk_tolerance: SimulationRiskTolerance
+    status: SimulationStatus
+    too_uncertain_to_rank: bool
+    created_at: datetime
+    scenarios: list[SimulationScenarioOut] = Field(default_factory=list)
+
+
+class DecisionHandoffOut(BaseModel):
+    simulation_id: str
+    recommended_scenario_id: str | None
+    recommendation_summary: str
+    ranked_scenario_ids: list[str] = Field(default_factory=list)
+    too_uncertain_to_rank: bool
+    caveats: list[str] = Field(default_factory=list)
 
 
 # ============================================================================

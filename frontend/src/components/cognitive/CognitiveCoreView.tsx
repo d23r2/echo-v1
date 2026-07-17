@@ -1,28 +1,47 @@
 import { useEffect, useState } from "react";
 import {
+  BottleneckOut,
+  CausalCounterfactual,
   CausalNoteOut,
   CognitiveBriefOut,
   CognitiveConceptOut,
   CognitiveSettingsOut,
+  DecisionHandoffOut,
   GraphNodeOut,
+  SimulationOut,
+  SimulationScenarioOut,
   SkillPatternOut,
+  SystemAnalysisOut,
+  SystemModelNodeOut,
+  SystemModelOut,
   TaskUnderstandingCorrection,
   TaskUnderstandingOut,
+  addSystemNode,
+  archiveSystemModel,
   correctTaskUnderstanding,
   createCausalNote,
   createConcept,
+  createSimulation,
+  createSystemModel,
   getCognitiveSettings,
+  getDecisionHandoff,
+  getSystemAnalysis,
+  getSystemCounterfactuals,
   graphSearch,
   listCausalNotes,
   listCognitiveBriefs,
   listConcepts,
+  listSimulations,
   listSkills,
+  listSystemModels,
+  listSystemNodes,
   listTaskUnderstandings,
   reanalyseTaskUnderstanding,
+  removeSystemNode,
   updateCognitiveSettings,
 } from "../../api/client";
 
-type Tab = "world" | "skills" | "causal" | "tasks" | "briefs" | "settings";
+type Tab = "world" | "skills" | "causal" | "tasks" | "briefs" | "systems" | "simulations" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "world", label: "World Model" },
@@ -30,6 +49,8 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "causal", label: "Causal Notes" },
   { id: "tasks", label: "Task Understandings" },
   { id: "briefs", label: "Cognitive Briefs" },
+  { id: "systems", label: "Systems" },
+  { id: "simulations", label: "Simulations" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -74,6 +95,8 @@ export default function CognitiveCoreView() {
       {tab === "causal" && <CausalNotesTab />}
       {tab === "tasks" && <TaskUnderstandingsTab />}
       {tab === "briefs" && <BriefsTab />}
+      {tab === "systems" && <SystemsTab />}
+      {tab === "simulations" && <SimulationsTab />}
       {tab === "settings" && <SettingsTab />}
     </div>
   );
@@ -481,6 +504,375 @@ function TaskDetail({ task, onChanged }: { task: TaskUnderstandingOut; onChanged
           Re-analyse
         </button>
       </div>
+    </div>
+  );
+}
+
+const EVIDENCE_COLOR: Record<string, string> = {
+  high: "text-emerald-400 border-emerald-900",
+  medium: "text-amber-400 border-amber-900",
+  low: "text-orange-400 border-orange-900",
+};
+
+const SENSITIVITY_COLOR: Record<string, string> = {
+  low: "text-emerald-400 border-emerald-900",
+  moderate: "text-amber-400 border-amber-900",
+  high: "text-orange-400 border-orange-900",
+};
+
+function SystemsTab() {
+  const [systems, setSystems] = useState<SystemModelOut[]>([]);
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      setSystems(await listSystemModels());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load systems.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    try {
+      await createSystemModel({ name: name.trim() });
+      setName("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create system.");
+    }
+  }
+
+  async function handleArchive(id: string) {
+    await archiveSystemModel(id);
+    if (expandedId === id) setExpandedId(null);
+    await refresh();
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        A named, scoped view over the World Model graph above — group concepts into a system (a backend architecture, a
+        project plan, ...) to see dependency structure, bottlenecks, cycles, and the critical path.
+      </p>
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">{error}</div>}
+
+      <form onSubmit={handleCreate} className="flex gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="New system model (e.g. 'Backend Architecture')"
+          className="min-h-[40px] flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm"
+        />
+        <button disabled={!name.trim()} className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">
+          Add
+        </button>
+      </form>
+
+      <div className="space-y-2">
+        {systems.length === 0 && !error && <p className="text-sm text-zinc-500">No system models yet.</p>}
+        {systems.map((s) => (
+          <div key={s.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" onClick={() => setExpandedId(expandedId === s.id ? null : s.id)}>
+              <div className="min-w-0">
+                <span className="text-sm font-medium text-zinc-100">{s.name}</span>
+                <span className="ml-2 rounded border border-zinc-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-500">{s.scope.replace(/_/g, " ")}</span>
+              </div>
+              <span className="text-xs text-zinc-500">{expandedId === s.id ? "▲" : "▼"}</span>
+            </button>
+            {expandedId === s.id && <SystemDetail system={s} onArchive={() => void handleArchive(s.id)} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SystemDetail({ system, onArchive }: { system: SystemModelOut; onArchive: () => void }) {
+  const [nodes, setNodes] = useState<SystemModelNodeOut[]>([]);
+  const [concepts, setConcepts] = useState<CognitiveConceptOut[]>([]);
+  const [selectedConceptId, setSelectedConceptId] = useState("");
+  const [analysis, setAnalysis] = useState<SystemAnalysisOut | null>(null);
+  const [counterfactuals, setCounterfactuals] = useState<CausalCounterfactual[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refreshNodes() {
+    setNodes(await listSystemNodes(system.id));
+  }
+
+  useEffect(() => {
+    void refreshNodes();
+    listConcepts().then(setConcepts).catch(() => undefined);
+  }, [system.id]);
+
+  async function handleAddNode() {
+    if (!selectedConceptId) return;
+    setBusy(true);
+    try {
+      await addSystemNode(system.id, { concept_id: selectedConceptId });
+      setSelectedConceptId("");
+      await refreshNodes();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add node.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemoveNode(nodeId: string) {
+    await removeSystemNode(system.id, nodeId);
+    await refreshNodes();
+  }
+
+  async function handleAnalyze() {
+    setBusy(true);
+    try {
+      setAnalysis(await getSystemAnalysis(system.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Analysis failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCounterfactuals() {
+    const res = await getSystemCounterfactuals(system.id);
+    setCounterfactuals(res.counterfactuals);
+  }
+
+  async function handleRunSimulation() {
+    setBusy(true);
+    try {
+      await createSimulation({ objective: `Improve ${system.name}`, system_model_id: system.id });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Simulation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-zinc-800/60 pt-3">
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-2 py-1 text-xs text-red-300">{error}</div>}
+
+      <div>
+        <div className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Nodes</div>
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {nodes.length === 0 && <span className="text-xs text-zinc-500">No nodes yet — add a concept below.</span>}
+          {nodes.map((n) => (
+            <span key={n.id} className="flex items-center gap-1 rounded-full border border-zinc-700 px-2 py-0.5 text-xs text-zinc-300">
+              {n.concept_name}
+              <button onClick={() => void handleRemoveNode(n.id)} className="text-zinc-500 hover:text-red-400" aria-label={`Remove ${n.concept_name}`}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+        <div className="mt-2 flex gap-2">
+          <select value={selectedConceptId} onChange={(e) => setSelectedConceptId(e.target.value)} className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-xs">
+            <option value="">Select a concept to add…</option>
+            {concepts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <button disabled={!selectedConceptId || busy} onClick={() => void handleAddNode()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+            Add node
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button disabled={busy} onClick={() => void handleAnalyze()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+          Analyze dependencies
+        </button>
+        <button disabled={busy} onClick={() => void handleCounterfactuals()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+          Show causal counterfactuals
+        </button>
+        <button disabled={busy} onClick={() => void handleRunSimulation()} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:border-zinc-500 disabled:opacity-50">
+          Run simulation on this system
+        </button>
+        <button onClick={onArchive} className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs text-zinc-500 hover:border-red-800 hover:text-red-400">
+          Archive
+        </button>
+      </div>
+
+      {analysis && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-xs">
+          <div className="font-medium text-zinc-300">
+            {analysis.bottlenecks.length} bottleneck(s), {analysis.cycles.length} cycle(s)
+            {analysis.critical_path ? `, critical path length ${analysis.critical_path.length}` : ""}
+          </div>
+          {analysis.bottlenecks.map((b: BottleneckOut) => (
+            <div key={b.concept_id} className="mt-1 text-zinc-400">
+              <span className="text-zinc-200">{b.concept_name}</span>: {b.reason}
+            </div>
+          ))}
+          {analysis.cycles.length > 0 && <div className="mt-1 text-amber-400">Circular dependency detected among {analysis.cycles[0].length} node(s).</div>}
+          {analysis.critical_path && <div className="mt-1 text-zinc-400">Longest chain: {analysis.critical_path.node_names.join(" → ")}</div>}
+        </div>
+      )}
+
+      {counterfactuals && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-2 text-xs">
+          {counterfactuals.length === 0 && <span className="text-zinc-500">No matching causal notes for this system's concepts.</span>}
+          {counterfactuals.map((c, i) => (
+            <div key={i} className="mt-1 text-zinc-400">
+              {c.statement}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SimulationsTab() {
+  const [simulations, setSimulations] = useState<SimulationOut[]>([]);
+  const [systems, setSystems] = useState<SystemModelOut[]>([]);
+  const [objective, setObjective] = useState("");
+  const [systemModelId, setSystemModelId] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function refresh() {
+    try {
+      setSimulations(await listSimulations());
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load simulations.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    listSystemModels().then(setSystems).catch(() => undefined);
+  }, []);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!objective.trim()) return;
+    setBusy(true);
+    try {
+      await createSimulation({ objective: objective.trim(), system_model_id: systemModelId || undefined });
+      setObjective("");
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to run simulation.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        Bounded, non-executing "what if" exploration — every scenario here is a forecast, never a fact, and nothing here
+        ever performs a real action. Ground a simulation in a Systems-tab model for dependency-aware scenarios, or run it
+        standalone for a generic (lower-confidence) exploration.
+      </p>
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">{error}</div>}
+
+      <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <input
+          value={objective}
+          onChange={(e) => setObjective(e.target.value)}
+          placeholder="Objective (e.g. 'Reduce risk in the release pipeline')"
+          className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm"
+        />
+        <select value={systemModelId} onChange={(e) => setSystemModelId(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm">
+          <option value="">No system model (generic exploration)</option>
+          {systems.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <button disabled={!objective.trim() || busy} className="w-fit rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50">
+          Run simulation
+        </button>
+      </form>
+
+      <div className="space-y-2">
+        {simulations.length === 0 && !error && <p className="text-sm text-zinc-500">No simulations run yet.</p>}
+        {simulations.map((sim) => (
+          <div key={sim.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" onClick={() => setExpandedId(expandedId === sim.id ? null : sim.id)}>
+              <span className="text-sm font-medium text-zinc-100">{sim.objective}</span>
+              <div className="flex items-center gap-2">
+                {sim.too_uncertain_to_rank && <span className="rounded-full border border-amber-900 px-2 py-0.5 text-[10px] uppercase tracking-wide text-amber-400">too uncertain to rank</span>}
+                <span className="text-xs text-zinc-500">{sim.scenarios.length} scenario(s)</span>
+                <span className="text-xs text-zinc-500">{expandedId === sim.id ? "▲" : "▼"}</span>
+              </div>
+            </button>
+            {expandedId === sim.id && <SimulationDetail simulation={sim} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SimulationDetail({ simulation }: { simulation: SimulationOut }) {
+  const [handoff, setHandoff] = useState<DecisionHandoffOut | null>(null);
+
+  useEffect(() => {
+    getDecisionHandoff(simulation.id)
+      .then(setHandoff)
+      .catch(() => undefined);
+  }, [simulation.id]);
+
+  const sorted = [...simulation.scenarios].sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+
+  return (
+    <div className="mt-3 space-y-3 border-t border-zinc-800/60 pt-3">
+      {handoff && (
+        <div className="rounded-lg border border-zinc-700 bg-zinc-950/60 p-2 text-xs">
+          <div className="text-zinc-300">{handoff.recommendation_summary}</div>
+          {handoff.caveats.map((c, i) => (
+            <div key={i} className="mt-1 text-zinc-500">
+              ⚠ {c}
+            </div>
+          ))}
+        </div>
+      )}
+      {sorted.map((s) => (
+        <ScenarioCard key={s.id} scenario={s} />
+      ))}
+    </div>
+  );
+}
+
+function ScenarioCard({ scenario }: { scenario: SimulationScenarioOut }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium text-zinc-100">
+          {scenario.rank && <span className="mr-1 text-zinc-500">#{scenario.rank}</span>}
+          {scenario.label.replace(/_/g, " ")}
+        </span>
+        <div className="flex gap-1.5">
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${EVIDENCE_COLOR[scenario.evidence_quality]}`}>{scenario.evidence_quality} evidence</span>
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${SENSITIVITY_COLOR[scenario.sensitivity_label]}`}>{scenario.sensitivity_label} sensitivity</span>
+        </div>
+      </div>
+      <p className="mt-1 text-xs text-zinc-400">{scenario.strategy}</p>
+      <ListSection label="Predicted outcomes" items={scenario.predicted_outcomes_json} />
+      <ListSection label="Risks" items={scenario.risks_json} tone="text-red-300" />
+      <ListSection label="Costs" items={scenario.costs_json} tone="text-zinc-500" />
+      {scenario.uncertainty_notes && <p className="mt-2 text-[11px] text-zinc-500">Uncertainty: {scenario.uncertainty_notes}</p>}
+      <p className="mt-1 text-[11px] text-zinc-500">Sensitivity: {scenario.sensitivity_note}</p>
     </div>
   );
 }

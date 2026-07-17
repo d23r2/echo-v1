@@ -2,6 +2,51 @@
 
 Last check-in: 2026-07-17
 
+## New since 2026-07-17 (later still) — ECHO Layer 2B: Systems Thinking and Simulation Engine
+
+1115 backend tests passing (59 new), frontend build/typecheck clean, live-verified in a real
+browser against an isolated temporary backend (created a system model, added nodes, added a real
+dependency relationship, confirmed correct bottleneck/cycle/critical-path analysis and a matched
+causal counterfactual, ran both a grounded and an ungrounded simulation, confirmed honest
+evidence/sensitivity labelling and the decision-handoff summary). Extends Cognitive Core's existing
+world-model graph in place — `SystemModel` is a scoped view over `CognitiveConcept`/
+`CognitiveRelationship`, not a second graph database. See
+[ECHO_LAYER_2B_SYSTEMS_SIMULATION_ARCHITECTURE.md](../ECHO_LAYER_2B_SYSTEMS_SIMULATION_ARCHITECTURE.md),
+[ECHO_LAYER_2B_SYSTEMS_SIMULATION_REPORT.md](../ECHO_LAYER_2B_SYSTEMS_SIMULATION_REPORT.md), and
+[ECHO_LAYER_2B_SYSTEMS_SIMULATION_SMOKE_TEST.md](../ECHO_LAYER_2B_SYSTEMS_SIMULATION_SMOKE_TEST.md).
+
+- **New: SystemModel / SystemModelNode** — a named, scoped view over the existing world-model
+  graph; edges are the existing `CognitiveRelationship` rows, scoped by node membership, with
+  `relation_type` additively extended (`consumes`/`communicates_with`/`mitigates`/`feedback_to`).
+- **New: dependency analysis** (`systems_thinking.py`) — bottleneck detection (in/out-degree over a
+  threshold, with a plain-language reason), three-color-DFS cycle detection, and a structural
+  (edge-count) critical path that correctly returns `None` on a cyclic graph.
+- **New: causal counterfactuals** — matches a system's member concepts against the existing
+  `CausalNote` table and produces "if X didn't hold, Y likely wouldn't follow" statements
+  explicitly grounded in a named recorded note.
+- **New: bounded simulation engine** (`simulation_engine.py`) — always generates a baseline
+  (no-action) scenario, grounds additional scenarios in a system's own bottlenecks/cycles/critical
+  path when attached (higher evidence quality), falls back to honestly-labelled low-evidence
+  generic scenarios otherwise. `max_scenarios`/`max_steps` are clamped, never unbounded.
+- **New: no fabricated certainty** — ranking uses an explicit tie-break chain (fewer risks → better
+  reversibility → fewer blocked steps → higher evidence) rather than any composite score; a
+  simulation is marked `too_uncertain_to_rank` (no single scenario recommended) when every
+  non-baseline scenario is low-evidence — verified this never happens silently.
+- **New: sensitivity analysis** — a distinct axis from evidence quality: how much a scenario's
+  forecast rests on unverified assumptions specifically.
+- **New: decision handoff** — a plain summary (`recommended_scenario_id`, caveats,
+  `too_uncertain_to_rank`) for a future Layer 2C decision/planning step to consume; never executes
+  anything — real execution stays behind the separate, permission-gated Action System (verified via
+  a dedicated test that `simulation_engine.py` has zero import coupling to `action_system.py`).
+- **New: `/api/intelligence/systems/*` and `/simulations/*`** — additive alongside the untouched
+  Layer 2A `/api/intelligence/tasks/*` endpoints.
+- **Upgraded: Cognitive Core page** — new Systems tab (create/archive, node management, inline
+  dependency analysis, counterfactuals) and Simulations tab (create, ranked scenario cards with
+  evidence/sensitivity badges, decision-handoff summary) — both live-verified.
+- Database schema bumped to v4 (four new tables, purely additive — no existing table gained a
+  column). **Per the milestone's own sequencing instruction, Layer 2C (Decision Engine and Planning
+  Engine) has not been started** — it begins only after this report is reviewed.
+
 ## New since 2026-07-17 (later still) — ECHO Layer 2A: Cognitive Core v2 and Task Understanding
 
 1056 backend tests passing (61 new), frontend build/typecheck clean, live-verified in a real

@@ -1817,6 +1817,182 @@ export const previewIntelligenceContext = (user_message: string, conversation_id
 
 export const listTaskTypes = () => request<TaskTypesOut>("/api/intelligence/task-types");
 
+// ============================================================================
+// ECHO Layer 2B — Systems Thinking and Simulation Engine
+// ============================================================================
+
+export type SystemModelScope = "software_architecture" | "project_plan" | "physical_system" | "organisational_workflow" | "study_plan" | "decision_context";
+export type SystemNodeRole = "component" | "actor" | "resource" | "constraint" | "interface" | "external_factor";
+export type SimulationStatus = "running" | "completed" | "aborted" | "failed";
+export type SimulationRiskTolerance = "low" | "medium" | "high";
+export type ScenarioReversibility = "reversible" | "hard_to_reverse" | "irreversible";
+export type EvidenceQuality = "low" | "medium" | "high";
+export type ConfidenceBand = "narrow" | "moderate" | "wide";
+export type SensitivityLabel = "low" | "moderate" | "high";
+
+export interface SystemModelOut {
+  id: string;
+  name: string;
+  scope: SystemModelScope;
+  description: string | null;
+  project_id: string | null;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+}
+
+export interface SystemModelNodeOut {
+  id: string;
+  system_model_id: string;
+  concept_id: string;
+  concept_name: string;
+  node_role: SystemNodeRole;
+  state: string | null;
+  owner: string | null;
+  evidence: string | null;
+  confidence: CognitiveConfidence;
+  created_at: string;
+}
+
+export interface DependencyEdgeOut {
+  from_concept_id: string;
+  to_concept_id: string;
+  relation_type: string;
+}
+
+export interface BottleneckOut {
+  concept_id: string;
+  concept_name: string;
+  in_degree: number;
+  out_degree: number;
+  reason: string;
+}
+
+export interface CriticalPathOut {
+  node_ids: string[];
+  node_names: string[];
+  length: number;
+}
+
+export interface SystemAnalysisOut {
+  system_model: SystemModelOut;
+  nodes: SystemModelNodeOut[];
+  edges: DependencyEdgeOut[];
+  bottlenecks: BottleneckOut[];
+  cycles: string[][];
+  critical_path: CriticalPathOut | null;
+}
+
+export interface CausalCounterfactual {
+  based_on_note: string;
+  statement: string;
+  confidence: CognitiveConfidence;
+}
+
+export interface SimulationScenarioStep {
+  step: number;
+  description: string;
+}
+
+export interface SimulationScenarioOut {
+  id: string;
+  simulation_id: string;
+  label: string;
+  strategy: string;
+  assumptions_json: string[];
+  steps_json: SimulationScenarioStep[];
+  predicted_outcomes_json: string[];
+  dependencies_json: string[];
+  costs_json: string[];
+  risks_json: string[];
+  failure_modes_json: string[];
+  reversibility: ScenarioReversibility;
+  evidence_quality: EvidenceQuality;
+  confidence_band: ConfidenceBand;
+  uncertainty_notes: string | null;
+  sensitivity_label: SensitivityLabel;
+  sensitivity_note: string;
+  steps_completed: number;
+  steps_blocked: number;
+  stopped_reason: string | null;
+  rank: number | null;
+  created_at: string;
+}
+
+export interface SimulationOut {
+  id: string;
+  task_id: string | null;
+  system_model_id: string | null;
+  objective: string;
+  baseline_state: string | null;
+  constraints_json: string[];
+  assumptions_json: string[];
+  max_scenarios: number;
+  max_steps: number;
+  time_horizon: string | null;
+  evaluation_criteria_json: string[];
+  risk_tolerance: SimulationRiskTolerance;
+  status: SimulationStatus;
+  too_uncertain_to_rank: boolean;
+  created_at: string;
+  scenarios: SimulationScenarioOut[];
+}
+
+export interface DecisionHandoffOut {
+  simulation_id: string;
+  recommended_scenario_id: string | null;
+  recommendation_summary: string;
+  ranked_scenario_ids: string[];
+  too_uncertain_to_rank: boolean;
+  caveats: string[];
+}
+
+// ---- Systems ----
+export const listSystemModels = (projectId?: string) =>
+  request<SystemModelOut[]>(`/api/intelligence/systems${projectId ? `?project_id=${projectId}` : ""}`);
+export const createSystemModel = (payload: { name: string; scope?: SystemModelScope; description?: string; project_id?: string }) =>
+  request<SystemModelOut>("/api/intelligence/systems", { method: "POST", body: JSON.stringify(payload) });
+export const getSystemModel = (id: string) => request<SystemModelOut>(`/api/intelligence/systems/${id}`);
+export const updateSystemModel = (id: string, payload: { name?: string; scope?: SystemModelScope; description?: string }) =>
+  request<SystemModelOut>(`/api/intelligence/systems/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const archiveSystemModel = (id: string) => request<SystemModelOut>(`/api/intelligence/systems/${id}`, { method: "DELETE" });
+
+export const listSystemNodes = (systemModelId: string) => request<SystemModelNodeOut[]>(`/api/intelligence/systems/${systemModelId}/nodes`);
+export const addSystemNode = (
+  systemModelId: string,
+  payload: { concept_id: string; node_role?: SystemNodeRole; state?: string; owner?: string; evidence?: string; confidence?: CognitiveConfidence },
+) => request<SystemModelNodeOut>(`/api/intelligence/systems/${systemModelId}/nodes`, { method: "POST", body: JSON.stringify(payload) });
+export const removeSystemNode = (systemModelId: string, nodeId: string) =>
+  request<{ ok: boolean }>(`/api/intelligence/systems/${systemModelId}/nodes/${nodeId}`, { method: "DELETE" });
+
+export const getSystemAnalysis = (systemModelId: string) => request<SystemAnalysisOut>(`/api/intelligence/systems/${systemModelId}/analysis`);
+export const getSystemCounterfactuals = (systemModelId: string) =>
+  request<{ counterfactuals: CausalCounterfactual[] }>(`/api/intelligence/systems/${systemModelId}/counterfactuals`);
+
+// ---- Simulations ----
+export const createSimulation = (payload: {
+  objective: string;
+  task_id?: string;
+  system_model_id?: string;
+  baseline_state?: string;
+  constraints?: string[];
+  assumptions?: string[];
+  max_scenarios?: number;
+  max_steps?: number;
+  time_horizon?: string;
+  evaluation_criteria?: string[];
+  risk_tolerance?: SimulationRiskTolerance;
+}) => request<SimulationOut>("/api/intelligence/simulations", { method: "POST", body: JSON.stringify(payload) });
+export const listSimulations = (params?: { task_id?: string; system_model_id?: string }) => {
+  const search = new URLSearchParams();
+  if (params?.task_id) search.set("task_id", params.task_id);
+  if (params?.system_model_id) search.set("system_model_id", params.system_model_id);
+  const qs = search.toString();
+  return request<SimulationOut[]>(`/api/intelligence/simulations${qs ? `?${qs}` : ""}`);
+};
+export const getSimulation = (id: string) => request<SimulationOut>(`/api/intelligence/simulations/${id}`);
+export const getDecisionHandoff = (id: string) => request<DecisionHandoffOut>(`/api/intelligence/simulations/${id}/decision-handoff`);
+
 // ---- Concepts (World Model) ----
 export const listConcepts = (params?: { concept_type?: string; q?: string }) => {
   const search = new URLSearchParams();

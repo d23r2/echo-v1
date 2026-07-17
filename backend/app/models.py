@@ -1090,6 +1090,131 @@ class CognitiveSettings(Base):
 
 
 # ============================================================================
+# ECHO Layer 2B — Systems Thinking and Simulation Engine.
+#
+# SystemModel is deliberately NOT a second graph database — per the
+# milestone's own rule ("integrate with the existing knowledge graph
+# instead of creating an unrelated graph database"), it's a named, scoped
+# *view* over the CognitiveConcept/CognitiveRelationship graph Cognitive
+# Core v1 already built: SystemModelNode tags which existing concepts
+# belong to a given system (plus system-specific attributes — role/state/
+# owner/evidence that a bare CognitiveConcept doesn't carry), and the edges
+# between those nodes are just the existing CognitiveRelationship rows,
+# with the relation_type vocabulary extended (it's a free-text column, not
+# a DB enum, so this is additive) to cover consumes/communicates_with/
+# mitigates/feedback_to alongside the pre-existing set.
+# ============================================================================
+
+
+class SystemModel(Base):
+    """A named, scoped system view — 'this project's backend architecture,'
+    'this study plan,' etc. Soft-archived, matching this app's convention."""
+
+    __tablename__ = "system_models"
+    __table_args__ = (Index("ix_system_models_project_id", "project_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String)
+    # software_architecture|project_plan|physical_system|organisational_workflow|
+    # study_plan|decision_context
+    scope: Mapped[str] = mapped_column(String, default="software_architecture")
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SystemModelNode(Base):
+    """Tags one CognitiveConcept as a member of one SystemModel, with the
+    system-specific attributes a bare world-model concept doesn't carry.
+    A concept can belong to more than one system model."""
+
+    __tablename__ = "system_model_nodes"
+    __table_args__ = (
+        Index("ix_system_model_nodes_system_model_id", "system_model_id"),
+        UniqueConstraint("system_model_id", "concept_id", name="uq_system_model_node"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    system_model_id: Mapped[str] = mapped_column(String)
+    concept_id: Mapped[str] = mapped_column(String)
+    # component|actor|resource|constraint|interface|external_factor
+    node_role: Mapped[str] = mapped_column(String, default="component")
+    state: Mapped[str | None] = mapped_column(String, nullable=True)
+    owner: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    confidence: Mapped[str] = mapped_column(String, default="medium")  # high|medium|low|inferred
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Simulation(Base):
+    """One bounded, non-executing simulation run — forecasts and estimates,
+    never facts (rule: never claim calibrated certainty). References a
+    SystemModel for dependency-aware scenario generation when one exists;
+    works without one for a pure decision-context simulation."""
+
+    __tablename__ = "simulations"
+    __table_args__ = (Index("ix_simulations_task_id", "task_id"), Index("ix_simulations_system_model_id", "system_model_id"))
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)  # TaskUnderstanding.id
+    system_model_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    objective: Mapped[str] = mapped_column(Text)
+    baseline_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    constraints_json: Mapped[list] = mapped_column(JSON, default=list)
+    assumptions_json: Mapped[list] = mapped_column(JSON, default=list)
+    max_scenarios: Mapped[int] = mapped_column(Integer, default=4)
+    max_steps: Mapped[int] = mapped_column(Integer, default=12)
+    time_horizon: Mapped[str | None] = mapped_column(String, nullable=True)
+    evaluation_criteria_json: Mapped[list] = mapped_column(JSON, default=list)
+    risk_tolerance: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high
+    status: Mapped[str] = mapped_column(String, default="completed")  # running|completed|aborted|failed
+    too_uncertain_to_rank: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    scenarios: Mapped[list["SimulationScenario"]] = relationship(back_populates="simulation", cascade="all, delete-orphan")
+
+
+class SimulationScenario(Base):
+    """One candidate strategy within a simulation — including the
+    deterministic baseline/no-action scenario. Never executed — see
+    action_system.py for the separate, permission-gated real-execution path."""
+
+    __tablename__ = "simulation_scenarios"
+    __table_args__ = (Index("ix_simulation_scenarios_simulation_id", "simulation_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    simulation_id: Mapped[str] = mapped_column(ForeignKey("simulations.id"))
+    label: Mapped[str] = mapped_column(String)  # "baseline" | "address_bottleneck" | ...
+    strategy: Mapped[str] = mapped_column(Text)
+    assumptions_json: Mapped[list] = mapped_column(JSON, default=list)
+    steps_json: Mapped[list] = mapped_column(JSON, default=list)
+    predicted_outcomes_json: Mapped[list] = mapped_column(JSON, default=list)
+    dependencies_json: Mapped[list] = mapped_column(JSON, default=list)
+    costs_json: Mapped[list] = mapped_column(JSON, default=list)
+    risks_json: Mapped[list] = mapped_column(JSON, default=list)
+    failure_modes_json: Mapped[list] = mapped_column(JSON, default=list)
+    reversibility: Mapped[str] = mapped_column(String, default="reversible")  # reversible|hard_to_reverse|irreversible
+    evidence_quality: Mapped[str] = mapped_column(String, default="low")  # low|medium|high
+    confidence_band: Mapped[str] = mapped_column(String, default="wide")  # narrow|moderate|wide
+    uncertainty_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # How much this scenario's forecast rests on unverified assumptions
+    # rather than graph-derived evidence — separate from evidence_quality/
+    # confidence_band, which describe the forecast itself, not what it's
+    # sensitive to changing.
+    sensitivity_label: Mapped[str] = mapped_column(String, default="low")  # low|moderate|high
+    sensitivity_note: Mapped[str] = mapped_column(Text, default="")
+    steps_completed: Mapped[int] = mapped_column(Integer, default=0)
+    steps_blocked: Mapped[int] = mapped_column(Integer, default=0)
+    stopped_reason: Mapped[str | None] = mapped_column(String, nullable=True)  # None if completed cleanly
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)  # set by compare_scenarios(); null until ranked
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    simulation: Mapped["Simulation"] = relationship(back_populates="scenarios")
+
+
+# ============================================================================
 # ECHO Operational Self-Model v1 — an honest, explicitly non-conscious record
 # of ECHO's own operating state for one turn (goal/mode/confidence/risks/
 # limits/next action), distinct from Atlas (facts about the user) and

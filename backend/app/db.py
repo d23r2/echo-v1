@@ -183,7 +183,11 @@ def _ensure_layer1_memory_columns() -> None:
 # _ensure_layer1_memory_columns() above and ECHO_LAYER_1_MEMORY_FOUNDATION.md.
 # v3 (ECHO Layer 2A): Cognitive Core v2 / Task Understanding columns — see
 # _ensure_layer2a_cognitive_columns() above.
-CURRENT_SCHEMA_VERSION = 3
+# v4 (ECHO Layer 2B): Systems Thinking and Simulation Engine — new tables only
+# (system_models, system_model_nodes, simulations, simulation_scenarios),
+# created by Base.metadata.create_all() above with no _ensure_column() calls
+# needed since nothing existing gained a column.
+CURRENT_SCHEMA_VERSION = 4
 
 
 def _ensure_schema_version() -> None:

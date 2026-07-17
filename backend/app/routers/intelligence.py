@@ -12,8 +12,10 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
-from app.models import TaskUnderstanding
+from app.models import CognitiveConcept, Simulation, TaskUnderstanding
 from app.services import cognitive_core
+from app.services import simulation_engine as sim_engine
+from app.services import systems_thinking as st
 from app.services import task_understanding_v2 as tuv2
 
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
@@ -127,3 +129,160 @@ def list_task_types():
             for k, v in _TASK_CATEGORY_DESCRIPTIONS.items()
         ],
     )
+
+
+# ============================================================================
+# ECHO Layer 2B — Systems Thinking and Simulation Engine
+# ============================================================================
+
+
+def _node_out(db: Session, node) -> schemas.SystemModelNodeOut:
+    concept = db.get(CognitiveConcept, node.concept_id)
+    return schemas.SystemModelNodeOut(
+        id=node.id,
+        system_model_id=node.system_model_id,
+        concept_id=node.concept_id,
+        concept_name=concept.name if concept else node.concept_id,
+        node_role=node.node_role,
+        state=node.state,
+        owner=node.owner,
+        evidence=node.evidence,
+        confidence=node.confidence,
+        created_at=node.created_at,
+    )
+
+
+@router.post("/systems", response_model=schemas.SystemModelOut)
+def create_system(payload: schemas.SystemModelCreate, db: Session = Depends(get_db)):
+    return st.create_system_model(db, name=payload.name, scope=payload.scope, description=payload.description, project_id=payload.project_id)
+
+
+@router.get("/systems", response_model=list[schemas.SystemModelOut])
+def list_systems(project_id: str | None = None, db: Session = Depends(get_db)):
+    return st.list_system_models(db, project_id=project_id)
+
+
+@router.get("/systems/{system_model_id}", response_model=schemas.SystemModelOut)
+def get_system(system_model_id: str, db: Session = Depends(get_db)):
+    model = st.get_system_model(db, system_model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return model
+
+
+@router.patch("/systems/{system_model_id}", response_model=schemas.SystemModelOut)
+def update_system(system_model_id: str, payload: schemas.SystemModelUpdate, db: Session = Depends(get_db)):
+    updated = st.update_system_model(db, system_model_id, name=payload.name, scope=payload.scope, description=payload.description)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return updated
+
+
+@router.delete("/systems/{system_model_id}", response_model=schemas.SystemModelOut)
+def archive_system(system_model_id: str, db: Session = Depends(get_db)):
+    archived = st.archive_system_model(db, system_model_id)
+    if archived is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return archived
+
+
+@router.get("/systems/{system_model_id}/nodes", response_model=list[schemas.SystemModelNodeOut])
+def list_system_nodes(system_model_id: str, db: Session = Depends(get_db)):
+    if st.get_system_model(db, system_model_id) is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return [_node_out(db, n) for n in st.list_nodes(db, system_model_id)]
+
+
+@router.post("/systems/{system_model_id}/nodes", response_model=schemas.SystemModelNodeOut)
+def add_system_node(system_model_id: str, payload: schemas.SystemModelNodeCreate, db: Session = Depends(get_db)):
+    if st.get_system_model(db, system_model_id) is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    if db.get(CognitiveConcept, payload.concept_id) is None:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    node = st.add_node(
+        db,
+        system_model_id,
+        concept_id=payload.concept_id,
+        node_role=payload.node_role,
+        state=payload.state,
+        owner=payload.owner,
+        evidence=payload.evidence,
+        confidence=payload.confidence,
+    )
+    return _node_out(db, node)
+
+
+@router.delete("/systems/{system_model_id}/nodes/{node_id}")
+def delete_system_node(system_model_id: str, node_id: str, db: Session = Depends(get_db)):
+    if not st.remove_node(db, node_id):
+        raise HTTPException(status_code=404, detail="Node not found")
+    return {"ok": True}
+
+
+@router.get("/systems/{system_model_id}/analysis", response_model=schemas.SystemAnalysisOut)
+def get_system_analysis(system_model_id: str, db: Session = Depends(get_db)):
+    analysis = st.build_system_analysis(db, system_model_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return schemas.SystemAnalysisOut(
+        system_model=analysis["system_model"],
+        nodes=[_node_out(db, n) for n in analysis["nodes"]],
+        edges=[
+            schemas.DependencyEdgeOut(from_concept_id=e.from_concept_id, to_concept_id=e.to_concept_id, relation_type=e.relation_type)
+            for e in analysis["edges"]
+        ],
+        bottlenecks=[schemas.BottleneckOut(**b) for b in analysis["bottlenecks"]],
+        cycles=analysis["cycles"],
+        critical_path=schemas.CriticalPathOut(**analysis["critical_path"]) if analysis["critical_path"] else None,
+    )
+
+
+@router.get("/systems/{system_model_id}/counterfactuals")
+def get_system_counterfactuals(system_model_id: str, db: Session = Depends(get_db)):
+    if st.get_system_model(db, system_model_id) is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return {"counterfactuals": st.build_counterfactuals(db, system_model_id)}
+
+
+@router.post("/simulations", response_model=schemas.SimulationOut)
+def create_simulation(payload: schemas.SimulationCreate, db: Session = Depends(get_db)):
+    """Bounded, non-executing simulation — every scenario here is a
+    forecast, never a fact, and nothing here ever performs a real action
+    (see action_system.py for the separate, permission-gated real path)."""
+    if payload.system_model_id and st.get_system_model(db, payload.system_model_id) is None:
+        raise HTTPException(status_code=404, detail="System model not found")
+    return sim_engine.run_simulation(
+        db,
+        objective=payload.objective,
+        task_id=payload.task_id,
+        system_model_id=payload.system_model_id,
+        baseline_state=payload.baseline_state,
+        constraints=payload.constraints,
+        assumptions=payload.assumptions,
+        max_scenarios=payload.max_scenarios,
+        max_steps=payload.max_steps,
+        time_horizon=payload.time_horizon,
+        evaluation_criteria=payload.evaluation_criteria,
+        risk_tolerance=payload.risk_tolerance,
+    )
+
+
+@router.get("/simulations", response_model=list[schemas.SimulationOut])
+def list_simulations(task_id: str | None = None, system_model_id: str | None = None, db: Session = Depends(get_db)):
+    return sim_engine.list_simulations(db, task_id=task_id, system_model_id=system_model_id)
+
+
+@router.get("/simulations/{simulation_id}", response_model=schemas.SimulationOut)
+def get_simulation(simulation_id: str, db: Session = Depends(get_db)):
+    sim = db.get(Simulation, simulation_id)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return sim
+
+
+@router.get("/simulations/{simulation_id}/decision-handoff", response_model=schemas.DecisionHandoffOut)
+def get_decision_handoff(simulation_id: str, db: Session = Depends(get_db)):
+    sim = db.get(Simulation, simulation_id)
+    if sim is None:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    return sim_engine.build_decision_handoff(sim)

@@ -313,6 +313,20 @@ Advanced → Knowledge & Memory → Cognitive Core → Task Understandings. See
 [ECHO_LAYER_2A_COGNITIVE_CORE_V2_ARCHITECTURE.md](ECHO_LAYER_2A_COGNITIVE_CORE_V2_ARCHITECTURE.md)
 and [ECHO_LAYER_2A_COGNITIVE_CORE_V2_REPORT.md](ECHO_LAYER_2A_COGNITIVE_CORE_V2_REPORT.md).
 
+## Systems Thinking and Simulation Engine (Layer 2B)
+
+A named, scoped view over the existing world-model graph (`SystemModel`/`SystemModelNode` tag
+which concepts belong to a system; edges are the existing relationships, scoped by membership) adds
+dependency analysis — bottleneck detection, cycle detection, a structural critical path — and
+causal counterfactuals drawn from existing cause/effect notes. A bounded, non-executing simulation
+engine generates a mandatory baseline scenario plus system-grounded or (honestly lower-confidence)
+generic alternative scenarios, ranks them by an explicit tie-break chain (never a fabricated
+probability), and produces a plain decision-handoff summary for a future planning step — nothing
+here ever performs a real action. Explore it under Advanced → Knowledge & Memory → Cognitive Core →
+Systems / Simulations. See
+[ECHO_LAYER_2B_SYSTEMS_SIMULATION_ARCHITECTURE.md](ECHO_LAYER_2B_SYSTEMS_SIMULATION_ARCHITECTURE.md)
+and [ECHO_LAYER_2B_SYSTEMS_SIMULATION_REPORT.md](ECHO_LAYER_2B_SYSTEMS_SIMULATION_REPORT.md).
+
 ## Multi-device
 
 The frontend is a fully responsive web app — the same build works on desktop and mobile
