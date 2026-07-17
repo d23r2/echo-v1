@@ -24,3 +24,34 @@ frontend/src-tauri/target/
 searxng-config/
 
 .DS_Store
+
+# ECHO Layer 0 — defense-in-depth additions. Nothing above this line
+# changed; these are additive safety nets for artifacts that shouldn't ever
+# be tracked, even though most already aren't (see
+# ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md's security section).
+.env
+*.env.local
+*.pem
+*.key
+!frontend/src-tauri/**/*.key.example
+
+# Build/installer artifacts — Android APK, Windows MSI/EXE installers
+*.apk
+*.aab
+*.msi
+frontend/src-tauri/target/release/bundle/
+
+# Logs and caches
+*.log
+.pytest_cache/
+.ruff_cache/
+frontend/.vite/
+backend/data/backups/
+
+# Review/export bundles — never meant to be committed
+*.zip
+
+# Editor/OS noise
+.vscode/
+.idea/
+Thumbs.db

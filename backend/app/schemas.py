@@ -647,6 +647,17 @@ OperationalMode = Literal[
     "release_testing",
     "troubleshooting",
     "quick_answer",
+    # ECHO Operational Self-Model v1 additions — extends rather than
+    # duplicates the existing mode enum above (see human_persona.py's
+    # _MODE_STYLE_TEXT / operational_self_model.py's mode detection).
+    "focused",
+    "reflective",
+    "cautious",
+    "action_ready",
+    "uncertain",
+    "blocked",
+    "creative",
+    "calm_support",
 ]
 MoodMode = Literal[
     "neutral",
@@ -1332,3 +1343,53 @@ class CognitiveSettingsUpdate(BaseModel):
     cognitive_concept_extraction_enabled: bool | None = None
     cognitive_skill_matching_enabled: bool | None = None
     cognitive_show_developer_diagnostics: bool | None = None
+
+
+# ============================================================================
+# ECHO Operational Self-Model v1
+# ============================================================================
+
+SelfModelConfidence = Literal["high", "medium", "low", "unverified"]
+ShowInnerState = Literal["never", "only_when_helpful", "developer_mode_only"]
+
+
+class OperationalStateSnapshotOut(_UtcAssumingModel):
+    id: str
+    conversation_id: str | None
+    current_goal: str
+    current_mode: OperationalMode
+    confidence: SelfModelConfidence
+    known_limits_json: list[str]
+    active_risks_json: list[str]
+    relevant_memory_summary: str | None
+    relationship_summary: str | None
+    permissions_summary: str | None
+    next_best_action: str | None
+    should_ask_confirmation: bool
+    should_use_tools_json: list[str]
+    should_not_do_json: list[str]
+    intensity: int
+    expires_at: datetime | None
+    created_at: datetime
+
+
+class InterfaceSettingsOut(BaseModel):
+    show_advanced_nav: bool
+    compact_sidebar: bool
+    show_developer_controls: bool
+    show_usage_in_topbar: bool
+    show_model_selector: bool
+    poetic_language_enabled: bool
+    operational_self_model_enabled: bool
+    show_inner_state: ShowInnerState
+
+
+class InterfaceSettingsUpdate(BaseModel):
+    show_advanced_nav: bool | None = None
+    compact_sidebar: bool | None = None
+    show_developer_controls: bool | None = None
+    show_usage_in_topbar: bool | None = None
+    show_model_selector: bool | None = None
+    poetic_language_enabled: bool | None = None
+    operational_self_model_enabled: bool | None = None
+    show_inner_state: ShowInnerState | None = None

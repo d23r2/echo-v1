@@ -8,12 +8,14 @@ to pull five separate Ollama models for this to work.
 """
 
 import logging
+import threading
 from dataclasses import dataclass
 from typing import Literal
 
 import httpx
 
 from app.config import get_settings
+from app.core import metrics
 from app.providers.base import ChatMessage, ChatResult
 from app.providers.ollama_provider import OllamaProvider
 
@@ -21,6 +23,25 @@ logger = logging.getLogger(__name__)
 
 ModelRole = Literal["fast", "reasoning", "coding", "critic", "writing"]
 ALL_ROLES: list[ModelRole] = ["fast", "reasoning", "coding", "critic", "writing"]
+
+# ECHO Layer 0 — bounds how many Ollama calls run at once across the whole
+# process (a single local model instance chokes badly on concurrent
+# requests). Sized from Settings.max_concurrent_model_requests at first use
+# rather than import time, so tests that override the setting take effect.
+_semaphore_lock = threading.Lock()
+_semaphore: threading.Semaphore | None = None
+_semaphore_size: int | None = None
+_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS = 30
+
+
+def _get_semaphore() -> threading.Semaphore:
+    global _semaphore, _semaphore_size
+    size = get_settings().max_concurrent_model_requests
+    with _semaphore_lock:
+        if _semaphore is None or _semaphore_size != size:
+            _semaphore = threading.Semaphore(max(1, size))
+            _semaphore_size = size
+        return _semaphore
 
 
 @dataclass
@@ -71,33 +92,53 @@ class LocalModelRouter:
                 fallback_used=False, error=reason or "Ollama is not reachable.",
             )
 
-        try:
-            result = self.provider.chat(system_prompt, messages, model=model)
+        # ECHO Layer 0 — bounded concurrency: a single local Ollama instance
+        # degrades badly under many simultaneous requests, so this caps how
+        # many are in flight at once rather than letting them all queue
+        # inside Ollama itself with no visibility. A timed-out acquire
+        # returns a clean "busy" result instead of hanging indefinitely.
+        semaphore = _get_semaphore()
+        acquired = semaphore.acquire(timeout=_SEMAPHORE_ACQUIRE_TIMEOUT_SECONDS)
+        if not acquired:
+            metrics.increment("model_calls_total", provider="ollama", outcome="busy")
             return LocalModelCallResult(
-                ok=True, text=result.text, role=role, model_requested=model, model_used=model,
-                fallback_used=False, error=None, chat_result=result,
+                ok=False, text="", role=role, model_requested=model, model_used=None,
+                fallback_used=False, error="Local models are busy right now — please try again in a moment.",
             )
-        except Exception as exc:
-            logger.warning("local model role '%s' (model=%s) failed: %s", role, model, exc)
-            default_model = settings.ollama_model
-            if settings.local_model_max_retries < 1 or model == default_model:
-                return LocalModelCallResult(
-                    ok=False, text="", role=role, model_requested=model, model_used=None,
-                    fallback_used=False, error="Local model call failed.",
-                )
+        try:
             try:
-                result = self.provider.chat(system_prompt, messages, model=default_model)
+                result = self.provider.chat(system_prompt, messages, model=model)
+                metrics.increment("model_calls_total", provider="ollama", outcome="success")
                 return LocalModelCallResult(
-                    ok=True, text=result.text, role=role, model_requested=model, model_used=default_model,
-                    fallback_used=True, error=f"Model for role '{role}' unavailable — used the default model instead.",
-                    chat_result=result,
+                    ok=True, text=result.text, role=role, model_requested=model, model_used=model,
+                    fallback_used=False, error=None, chat_result=result,
                 )
-            except Exception as exc2:
-                logger.warning("local model default-model fallback also failed: %s", exc2)
-                return LocalModelCallResult(
-                    ok=False, text="", role=role, model_requested=model, model_used=None,
-                    fallback_used=False, error="Local model call failed.",
-                )
+            except Exception as exc:
+                metrics.increment("model_calls_total", provider="ollama", outcome="failure")
+                logger.warning("local model role '%s' (model=%s) failed: %s", role, model, exc)
+                default_model = settings.ollama_model
+                if settings.local_model_max_retries < 1 or model == default_model:
+                    return LocalModelCallResult(
+                        ok=False, text="", role=role, model_requested=model, model_used=None,
+                        fallback_used=False, error="Local model call failed.",
+                    )
+                try:
+                    result = self.provider.chat(system_prompt, messages, model=default_model)
+                    metrics.increment("model_calls_total", provider="ollama", outcome="success_fallback")
+                    return LocalModelCallResult(
+                        ok=True, text=result.text, role=role, model_requested=model, model_used=default_model,
+                        fallback_used=True, error=f"Model for role '{role}' unavailable — used the default model instead.",
+                        chat_result=result,
+                    )
+                except Exception as exc2:
+                    metrics.increment("model_calls_total", provider="ollama", outcome="failure")
+                    logger.warning("local model default-model fallback also failed: %s", exc2)
+                    return LocalModelCallResult(
+                        ok=False, text="", role=role, model_requested=model, model_used=None,
+                        fallback_used=False, error="Local model call failed.",
+                    )
+        finally:
+            semaphore.release()
 
 
 def list_installed_models() -> tuple[list[str], str | None]:

@@ -10,6 +10,7 @@ import {
   getConversation,
   getFeatureAvailability,
   ConversationSummaryOut,
+  getInterfaceSettings,
   getLocalIntelligenceSettings,
   getPersonaSettings,
   getWelcomeGreeting,
@@ -119,6 +120,8 @@ export default function ChatView() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [features, setFeatures] = useState<FeatureAvailability | null>(null);
   const [localIntelligenceEnabled, setLocalIntelligenceEnabled] = useState(false);
+  const [showUsage, setShowUsage] = useState(true);
+  const [showModelSelector, setShowModelSelector] = useState(true);
   const [voiceMode, setVoiceMode] = useState<"off" | "push_to_talk" | "hands_free_placeholder">("push_to_talk");
   const [listening, setListening] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
@@ -194,6 +197,17 @@ export default function ChatView() {
     getFeatureAvailability()
       .then(setFeatures)
       .catch(() => setFeatures(null));
+  }, []);
+
+  // Interface Simplification v1 — top-bar clutter controls. Default to
+  // visible (current behavior) until the settings fetch resolves.
+  useEffect(() => {
+    getInterfaceSettings()
+      .then((s) => {
+        setShowUsage(s.show_usage_in_topbar);
+        setShowModelSelector(s.show_model_selector);
+      })
+      .catch(() => {});
   }, []);
 
   // Local Intelligence Engine only hooks into the non-streaming POST /api/chat —
@@ -682,8 +696,8 @@ export default function ChatView() {
                 📝
               </button>
             )}
-            <ModelPicker />
-            <UsageStatus />
+            {showModelSelector && <ModelPicker />}
+            {showUsage && <UsageStatus />}
           </div>
         </header>
 

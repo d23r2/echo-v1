@@ -1,8 +1,15 @@
 # Development
 
 Quick reference for running quality checks locally. Everything here is free and local —
-no paid services, no CI required. See [DAILY_SMOKE_TEST.md](DAILY_SMOKE_TEST.md) for a
-manual click-through checklist to run alongside these automated checks.
+no paid services, no CI required (a GitHub Actions workflow exists at
+`.github/workflows/ci.yml` but has not been pushed — see
+[ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md](ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md#19-continuous-integration)).
+See [DAILY_SMOKE_TEST.md](DAILY_SMOKE_TEST.md) and
+[ECHO_LAYER_0_SMOKE_TEST.md](ECHO_LAYER_0_SMOKE_TEST.md) for manual
+click-through checklists to run alongside these automated checks, and
+`scripts/` (`check_echo_ports.ps1`, `start_echo_dev.ps1`, `stop_echo_dev.ps1`,
+`check_database.ps1`, `backup_echo_data.ps1`, `restore_echo_data.ps1`,
+`check_secrets.ps1`) for local dev/ops helpers.
 
 ## Backend (Python)
 
@@ -33,7 +40,7 @@ separate `available()` call — not visible to mypy — already guarantees the v
 before `chat()` runs) but is **not wired into CI or a required gate** — treat it as an
 optional second opinion, not a blocker.
 
-**pytest**: 757 tests as of 2026-07-16, all passing, no real external API calls anywhere
+**pytest**: 785 tests as of 2026-07-16, all passing, no real external API calls anywhere
 (every provider is a fake/mock — see `tests/fake_providers.py` and `tests/README.md`).
 The no-billing web/wiki/RSS search system (`app/search_intent.py`, `app/web_search.py`)
 is covered the same way — `tests/fake_http.py` fakes `httpx.get()` with real (but
@@ -96,6 +103,18 @@ two tests that touch the Local Intelligence Engine path use the same `ScriptedPr
 `FakeProvider` pattern as the rest of this suite. See
 [ECHO_COGNITIVE_CORE_V1.md](ECHO_COGNITIVE_CORE_V1.md) for what it does, the data model, and
 known limitations.
+
+**ECHO Operational Self-Model v1** (goal/mode/confidence/risk tracking, prompt overlay,
+consciousness/emotion honesty, Interface Simplification sidebar/settings) adds
+`test_operational_self_model.py` — run it with:
+```bash
+pytest tests/test_operational_self_model.py -v
+```
+All mode/risk/confidence detection is deterministic (regex/keyword), no model call of its own.
+See [ECHO_OPERATIONAL_SELF_MODEL_V1.md](ECHO_OPERATIONAL_SELF_MODEL_V1.md),
+[ECHO_INTERFACE_SIMPLIFICATION_V1.md](ECHO_INTERFACE_SIMPLIFICATION_V1.md), and
+[ECHO_HONEST_INNER_STATE_V1.md](ECHO_HONEST_INNER_STATE_V1.md) for what it does and known
+limitations.
 
 ## Frontend (TypeScript)
 

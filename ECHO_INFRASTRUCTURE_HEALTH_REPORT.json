@@ -1,0 +1,73 @@
+{
+  "milestone": "ECHO Layer 0 - Infrastructure Foundation v1",
+  "generated_at": "2026-07-17T00:00:00Z",
+  "overall_status": "green",
+  "pushed_to_remote": false,
+  "backend": {
+    "tests_passed": 866,
+    "tests_failed": 0,
+    "tests_new_this_milestone": 81,
+    "new_test_files": [
+      "test_infrastructure_config.py",
+      "test_infrastructure_logging.py",
+      "test_infrastructure_errors.py",
+      "test_infrastructure_feature_flags.py",
+      "test_infrastructure_provider_registry.py",
+      "test_infrastructure_system_router.py",
+      "test_infrastructure_metrics.py",
+      "test_infrastructure_cache_concurrency.py",
+      "test_infrastructure_database.py"
+    ],
+    "ruff_check": "pass",
+    "schema_version": 1
+  },
+  "frontend": {
+    "typecheck": "pass",
+    "build": "pass",
+    "build_modules": 325
+  },
+  "security": {
+    "secret_scan_files_scanned": 389,
+    "secret_scan_findings": 0,
+    "env_files_gitignored": ["backend/.env", "frontend/.env"],
+    "known_incident": "A real GEMINI_API_KEY value was displayed once in tool output via an un-quieted 'docker compose config' call during this milestone's own work. It was not reproduced in any file, document, or commit; all subsequent validation used 'docker compose config --quiet'."
+  },
+  "database": {
+    "integrity_check": "ok",
+    "foreign_key_violations": 0,
+    "required_tables_present": "3/3",
+    "conversations": 30,
+    "messages": 162,
+    "foreign_keys_enforced": true
+  },
+  "docker": {
+    "compose_config_validated": true,
+    "compose_config_quiet_only": true,
+    "live_stack_rebuilt": false,
+    "healthchecks_added": true,
+    "non_root_backend_user": true,
+    "frontend_npm_ci": true
+  },
+  "ci": {
+    "workflow_file_created": true,
+    "workflow_path": ".github/workflows/ci.yml",
+    "pushed": false,
+    "jobs": ["backend", "frontend", "config-validation"]
+  },
+  "feature_flags_tracked": 28,
+  "known_limitations": [
+    "Metrics are in-process only, reset on restart, no external export",
+    "No Alembic - schema changes use additive create_all/_ensure_column plus a SchemaVersion marker",
+    "CI workflow has never run on GitHub (not pushed)",
+    "Docker images not rebuilt/restarted against the live stack this session",
+    "Full 25-step manual smoke test not re-run as one continuous end-to-end pass this session"
+  ],
+  "commit_guidance": {
+    "suggested_commit_message": "chore: establish ECHO layer 0 infrastructure foundation",
+    "suggested_tag": "echo-layer-0-infrastructure-v1-rc",
+    "push_requires_explicit_confirmation": true,
+    "target_remote_if_approved": "origin",
+    "target_branch_if_approved": "master",
+    "repository_visibility": "public"
+  }
+}

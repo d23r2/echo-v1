@@ -254,9 +254,36 @@ cause-effect notes — and, for genuinely complex requests only, builds an inter
 understanding (goal, known facts, unknowns, constraints, success criteria) that's folded into
 the prompt as a compact `CognitiveBrief`. It's deterministic bookkeeping, not a claim of
 consciousness, and it's never shown in a normal chat reply. Browse it under
-Intelligence → Cognitive Core. See
+Advanced → Knowledge & Memory → Cognitive Core. See
 [ECHO_COGNITIVE_CORE_V1.md](ECHO_COGNITIVE_CORE_V1.md) for the full model, config, and manual
 test checklist.
+
+## Operational Self-Model + Interface Simplification
+
+ECHO tracks an honest, explicitly non-conscious operational state each turn — current goal,
+mode, confidence, known limits, and active risks — folded into the prompt as a compact overlay,
+never shown raw in a normal chat reply. Risky-sounding requests (a public repo push, deleting
+memories, calling a cloud API) get flagged and ECHO asks for confirmation before proceeding;
+release-status or current-info questions without real evidence/a real source are honestly capped
+at "unverified" confidence. The sidebar now shows only the 6 everyday pages (Mission Control,
+Chats, Projects, Tasks, Schedule, Library) plus Settings and a collapsed-by-default Advanced
+section — every internal system (Atlas, Cognitive Core, Actions, Tools, Evaluation Lab, Release
+Manager, Permissions, Constitution, Amendments, Self-Improvement, Knowledge Vault) is still there,
+just one click away under Advanced. See
+[ECHO_OPERATIONAL_SELF_MODEL_V1.md](ECHO_OPERATIONAL_SELF_MODEL_V1.md),
+[ECHO_INTERFACE_SIMPLIFICATION_V1.md](ECHO_INTERFACE_SIMPLIFICATION_V1.md), and
+[ECHO_HONEST_INNER_STATE_V1.md](ECHO_HONEST_INNER_STATE_V1.md) for the full detail.
+
+## Infrastructure foundation (Layer 0)
+
+Configuration validation, structured logging + redaction, standard error
+schema, health/readiness/diagnostics endpoints (`/health`, `/ready`,
+`/api/system/*`), feature-flag and provider registries, in-process metrics,
+SQLite foreign-key enforcement, schema-version tracking, backup/restore
+scripts, and Docker hardening (healthchecks, non-root user). No user-facing
+behavior changed. See
+[ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md](ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md)
+and [ECHO_LAYER_0_INFRASTRUCTURE_REPORT.md](ECHO_LAYER_0_INFRASTRUCTURE_REPORT.md).
 
 ## Multi-device
 

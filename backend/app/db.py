@@ -1,6 +1,7 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -10,6 +11,26 @@ settings = get_settings()
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@event.listens_for(Engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    # ECHO Layer 0 — SQLite defaults foreign_keys OFF per connection; this
+    # app already declares real ForeignKey columns (Message -> Conversation,
+    # Attachment -> Message, ...) that were previously unenforced. Listens
+    # on the generic Engine class (not just the module-level `engine`
+    # instance above) so every SQLite connection this process opens gets
+    # the same behavior, including tests/conftest.py's isolated per-test
+    # engines — deliberately, so the full test suite actually exercises
+    # this rather than only the shared app engine. Silently no-ops for a
+    # non-SQLite DBAPI connection (defensive — this app is SQLite-only
+    # today, but this must never break a future non-SQLite backend).
+    module_name = type(dbapi_connection).__module__
+    if "sqlite3" not in module_name:
+        return
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -50,6 +71,31 @@ def init_db() -> None:
     _ensure_column("persona_settings", "tts_enabled", "BOOLEAN DEFAULT 0")
     _seed_action_reliability_core()
     _seed_cognitive_core()
+    _ensure_schema_version()
+
+
+# ECHO Layer 0 — bump this by hand whenever a schema change genuinely
+# warrants marking the database as having moved forward (not on every new
+# table — this is a coarse marker, not a migration counter). See
+# models.SchemaVersion's own docstring for why this app doesn't use Alembic
+# in v1.
+CURRENT_SCHEMA_VERSION = 1
+
+
+def _ensure_schema_version() -> None:
+    """Idempotent, never destructive — creates the singleton row on first
+    run, bumps `version` in place if the stored value is behind
+    CURRENT_SCHEMA_VERSION, never touches any other table."""
+    from app.models import SchemaVersion
+
+    with SessionLocal() as db:
+        row = db.get(SchemaVersion, "singleton")
+        if row is None:
+            db.add(SchemaVersion(id="singleton", version=CURRENT_SCHEMA_VERSION))
+            db.commit()
+        elif row.version < CURRENT_SCHEMA_VERSION:
+            row.version = CURRENT_SCHEMA_VERSION
+            db.commit()
 
 
 def _seed_action_reliability_core() -> None:

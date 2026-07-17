@@ -1,0 +1,15 @@
+# ECHO Layer 0 — keeps the frontend image build context small. The
+# Dockerfile's own `npm install` + `npm run build` regenerate node_modules/
+# and dist/ inside the container, so the host's copies (and any local
+# native-app build output that has no place in a web image) are excluded.
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+android/
+src-tauri/target/
+.git/
+.gitignore
+*.md
+.vscode/

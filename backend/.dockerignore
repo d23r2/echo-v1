@@ -1,0 +1,19 @@
+# ECHO Layer 0 — keeps the backend image build context small and makes sure
+# nothing local/secret ever gets baked into the image (the Dockerfile only
+# COPYs requirements.txt and app/ explicitly anyway — this is defense in
+# depth, and keeps `docker build` fast by not sending the rest as context).
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+data/
+.env
+.env.*
+!.env.example
+tests/
+.git/
+.gitignore
+*.md

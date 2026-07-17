@@ -1,9 +1,12 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.core.errors import RequestIDMiddleware, register_exception_handlers
+from app.core.logging import configure_logging
 from app.db import init_db
 from app.routers import (
     actions,
@@ -22,23 +25,37 @@ from app.routers import (
     memory_candidates,
     mission_control,
     models,
+    operational_self_model,
     permissions,
     projects,
     releases,
     schedule,
     self_improvement,
+    system,
     tasks,
     tools,
     usage,
 )
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging(level=settings.log_level, structured=settings.app_env == "production")
+    problems = settings.validate_startup()
+    for problem in problems:
+        logger.warning("startup config problem: %s", problem)
     init_db()
+    logger.info(
+        "ECHO backend started — app_env=%s version=%s ollama_enabled=%s",
+        settings.app_env,
+        settings.app_version,
+        settings.ollama_enabled,
+    )
     yield
+    logger.info("ECHO backend shutting down")
 
 
 app = FastAPI(title="ECHO — Adaptive Personal AI", version="1.0.0", lifespan=lifespan)
@@ -50,6 +67,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(RequestIDMiddleware)
+register_exception_handlers(app)
 
 app.include_router(chat.router)
 app.include_router(atlas.router)
@@ -75,6 +94,8 @@ app.include_router(conversation_summary.router)
 app.include_router(releases.router)
 app.include_router(tools.router)
 app.include_router(cognitive.router)
+app.include_router(operational_self_model.router)
+app.include_router(system.router)
 
 
 @app.get("/api/health")

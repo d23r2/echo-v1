@@ -1,6 +1,97 @@
 # ECHO (formerly God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-16
+Last check-in: 2026-07-17
+
+## New since 2026-07-17 — ECHO Layer 0: Infrastructure Foundation v1
+
+866 backend tests passing (81 new), `ruff check .` clean, frontend build/typecheck clean,
+secret scan clean (389 tracked files, 0 findings). No user-facing feature added or changed —
+this is the config/logging/error/health/metrics/database/CI scaffolding everything else sits
+on. See [ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md](../ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md),
+[ECHO_LAYER_0_INFRASTRUCTURE_REPORT.md](../ECHO_LAYER_0_INFRASTRUCTURE_REPORT.md),
+[ECHO_LAYER_0_SMOKE_TEST.md](../ECHO_LAYER_0_SMOKE_TEST.md), and
+[ECHO_INFRASTRUCTURE_HEALTH_REPORT.json](../ECHO_INFRASTRUCTURE_HEALTH_REPORT.json).
+
+- **New: configuration validation + secret-safe diagnostics** — `Settings.validate_startup()`
+  (logs problems, never crashes) and `Settings.public_dict()` (excludes any `*_api_key`/
+  `*_secret`/`*_token`/`*_password` field by suffix, not a hand-maintained list).
+- **New: structured logging + redaction** — `core/logging.py`'s `RedactingFilter` scrubs
+  API-key/Bearer-token/secret-shaped strings from every log line, existing calls included.
+- **New: standard error schema + request IDs** — `core/errors.py`'s `RequestIDMiddleware` +
+  `register_exception_handlers` give every unhandled exception a clean, sanitized response
+  while leaving all ~30 existing routers' plain `HTTPException` responses byte-for-byte
+  unchanged (verified by a dedicated test).
+- **New: health/readiness/diagnostics** — `/health`, `/ready`, `/api/system/status`,
+  `/api/system/diagnostics`, `/api/system/features`, `/api/system/providers`,
+  `/api/system/models`, `/api/system/metrics`, `/api/system/version` — additive alongside the
+  pre-existing `/api/health`/`/api/features`.
+- **New: feature-flag registry (28 keys) and provider/model registry** — read-only summary
+  layers wrapping existing systems (`ModelRouter.statuses()`, `local_model_router`'s role
+  mapping), not new provider logic.
+- **New: in-process metrics, generic TTL cache, Ollama concurrency semaphore** — the semaphore
+  (default cap 2) prevents concurrent chat requests from overwhelming a local Ollama instance;
+  load-tested with 5 concurrent threads confirmed never exceeding the cap.
+- **New: SQLite foreign-key enforcement** (process-wide, including test fixtures) and a
+  `SchemaVersion` marker table — deliberately no Alembic; the existing additive `create_all`/
+  `_ensure_column` pattern was judged sufficient and safer than introducing a migration engine
+  now. Verified via two full-suite regression runs (859/859 both times) before generalizing.
+- **New: backup/restore/integrity scripts** — `scripts/backup_echo_data.ps1`,
+  `restore_echo_data.ps1`, `check_database.ps1` — live-run against the real dev database
+  (clean: 30 conversations, 162 messages, 0 integrity/FK issues).
+- **New: dev launch scripts** — `start_echo_dev.ps1` correctly reuses a healthy Docker backend
+  on port 8000 instead of starting a duplicate; `stop_echo_dev.ps1` explicitly never touches
+  Docker/WSL processes.
+- **New: Docker hardening** — healthchecks on both images, non-root backend user, `npm ci`
+  instead of `npm install`, `docker-compose.yml`'s frontend now waits on
+  `backend: condition: service_healthy`. Validated via `docker compose config --quiet` only —
+  the live stack was not rebuilt/restarted this session (shared system, out of scope without
+  explicit permission).
+- **New: frontend `ErrorBoundary`** — a global React error boundary with a calm "Reload ECHO"
+  recovery screen, directly motivated by a real blank-screen crash witnessed during earlier
+  Cognitive Core verification.
+- **New: CI workflow** — `.github/workflows/ci.yml` (backend tests+lint, frontend
+  typecheck+build, compose+secret-scan validation) written and committed locally; **not pushed**
+  — this repo is public and no push happens without your fresh, explicit confirmation.
+- **Caution (not a code bug)**: `docker compose config` (without `--quiet`) prints every
+  resolved environment variable, including real API keys sourced from `backend/.env`. A real
+  Gemini key was inadvertently displayed in tool output once during this work; it was not
+  reproduced anywhere afterward, and all further Compose validation used `--quiet`.
+
+## New since 2026-07-16 (later than all of the above) — ECHO Operational Self-Model + Interface Simplification v1
+
+785 backend tests passing (28 new), frontend build/typecheck clean. See
+[ECHO_OPERATIONAL_SELF_MODEL_V1.md](../ECHO_OPERATIONAL_SELF_MODEL_V1.md),
+[ECHO_INTERFACE_SIMPLIFICATION_V1.md](../ECHO_INTERFACE_SIMPLIFICATION_V1.md),
+[ECHO_HONEST_INNER_STATE_V1.md](../ECHO_HONEST_INNER_STATE_V1.md), and
+[ECHO_UI_AND_INNER_STATE_V1_REPORT.md](../ECHO_UI_AND_INNER_STATE_V1_REPORT.md).
+
+- **New: Operational Self-Model** — `operational_self_model.py` builds a compact, honest,
+  explicitly non-conscious per-turn state (goal/mode/confidence/known limits/active risks/next
+  best action) folded into the prompt right after the Human Persona overlay; extends the
+  existing `OperationalMode` enum (8 new modes) rather than duplicating it.
+- **New: risky-action detection** — public repo push, destructive data deletion, cloud API use,
+  code execution, schema change, secret exposure all set `should_ask_confirmation` and add an
+  explicit "ask before proceeding" instruction to the prompt.
+- **New: honest confidence capping** — a release-status question without recorded test/build
+  evidence, or a current-info question without a real retrieved source, is forced to
+  `confidence: unverified`.
+- **New: consciousness/emotion honesty** — three independent layers (Character Code, new Style
+  Directives, and explicit per-turn detection) all steer toward the same honest answer when a
+  user asks whether ECHO is conscious or has feelings.
+- **New: response style correction** — `STYLE_DIRECTIVES` in `persona.py` steers ECHO away from
+  mystical/fantasy-narrator language toward a "competent personal AI companion" voice, always
+  applied (not a toggle); a `poetic_language_enabled` setting (off by default) relaxes it when
+  the user wants more creative language.
+- **New: sidebar simplification** — the sidebar now shows only 6 everyday pages (Mission
+  Control, Chats, Projects, Tasks, Schedule, Library) plus Settings and a collapsed-by-default
+  Advanced section grouping all 11 internal systems (Knowledge & Memory / Assistant Behaviour /
+  Developer & Testing / Governance) — no route deleted, nothing removed.
+- **New: Settings page** — Interface toggles (Advanced/compact sidebar/developer controls/usage/
+  model selector visibility) and Behaviour toggles (poetic language, Operational Self-Model
+  enabled, when to mention inner state in chat).
+- **New: top-bar cleanup** — the "acting as (simulated role)" Guardian Council switcher and chat
+  usage/model-selector are now conditionally shown based on Settings, defaulting to a calmer
+  normal-user view.
 
 ## New since 2026-07-16 (yet even later still) — ECHO Cognitive Core v1
 
@@ -475,16 +566,26 @@ recall, chat UI overhaul — all tested, 255 backend tests passing, frontend bui
   pass's envelope-integrity test suite.
 
 ## Blockers
-- **2026-07-16 check-in — new**: working tree has 33 modified files (`git diff --stat`
-  shows 5866/5866 insertions/deletions, exactly equal) that are **100% CRLF line-ending
-  noise, zero real content changes** (verified via per-file add/del comparison — none
-  differ). No `.gitattributes` exists to pin line-ending behavior, so this will keep
-  recurring on Windows checkouts. Fix: add `.gitattributes` (`* text=auto`), renormalize,
-  commit once to clear it, so `git status`/diffs stay meaningful. Also untracked:
-  `.claude/settings.local.json` (add to `.gitignore`) and a stale `Echo_Code_Review.zip`
-  (07-13 export sitting in repo root — move out or delete).
-- No commits landed in the last 2 days (last commit `dc56cf75`, 2026-07-14) — worth
-  checking in on whether that's intentional or blocked on something.
+- **2026-07-17 check-in**: `.gitattributes` still doesn't exist — the CRLF-noise blocker
+  flagged 2026-07-16 is still unresolved, and now real content changes (Operational
+  Self-Model, Interface Simplification, Honest Inner State work) are mixed into the same
+  34 modified files, so the diff is no longer pure noise and harder to review at a
+  glance (`git diff --stat` HEAD: 8233 insertions / 7726 deletions, not equal). Fix
+  `.gitattributes` (`* text=auto`) + renormalize before this compounds further. Still
+  untracked: `.claude/settings.local.json` (add to `.gitignore`) and stale
+  `Echo_Code_Review.zip` in repo root.
+- One commit landed since 07-14 (`59a7f2c5`, 2026-07-16 — a large squash covering
+  Personal OS, Human Persona Layer, Local Intelligence Engine, Action + Reliability Core,
+  and Cognitive Core). Since that commit, substantial new work (Operational Self-Model,
+  Interface Simplification v1, Honest Inner State, Settings page — 785 backend tests
+  passing per the top of this file) has accumulated uncommitted: 34 modified files +
+  5 new untracked files (`ECHO_HONEST_INNER_STATE_V1.md`,
+  `ECHO_OPERATIONAL_SELF_MODEL_V1.md`, `ECHO_OPERATIONAL_SELF_MODEL_V1_REPORT.md`,
+  `ECHO_INTERFACE_SIMPLIFICATION_V1.md`, `ECHO_UI_AND_INNER_STATE_V1_REPORT.md`,
+  `backend/app/routers/operational_self_model.py`,
+  `backend/app/services/operational_self_model.py`,
+  `backend/tests/test_operational_self_model.py`,
+  `frontend/src/components/settings/`). Worth committing soon rather than letting it grow.
 
 **Resolved since 2026-07-14**: both prior blockers here (uncommitted search-system work;
 stale `.git/index.lock` from a Cowork sandbox session) are gone — the search-system work

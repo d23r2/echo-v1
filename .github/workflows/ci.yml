@@ -1,0 +1,88 @@
+# ECHO Layer 0 — Continuous Integration Foundation v1
+#
+# IMPORTANT: this workflow file was created as part of the ECHO Layer 0
+# Infrastructure Foundation milestone but has NOT been pushed to GitHub.
+# d23r2/echo-v1 is a public repository — do not push this (or anything
+# else) without explicit user approval; see the milestone's rule 13 and the
+# repo's own commit-guidance convention. It's committed locally so it's
+# reviewable and diffable, exactly like every other file in this milestone.
+#
+# No real provider API keys anywhere in this workflow — every backend test
+# uses fake/mocked providers (see backend/tests/fake_providers.py) and an
+# isolated temp SQLite DB + Chroma path (see backend/tests/conftest.py).
+# No paid service is called at any point.
+
+name: ECHO CI
+
+on:
+  pull_request:
+    branches: [master, main]
+  push:
+    branches: [master, main]
+
+jobs:
+  backend:
+    name: Backend (pytest + ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Run backend tests
+        # No real provider keys, no cloud calls — see fake_providers.py and
+        # conftest.py's DATABASE_URL/CHROMA_DIR/ATTACHMENTS_DIR redirection
+        # to an isolated temp directory before any app module is imported.
+        run: pytest -q
+
+  frontend:
+    name: Frontend (typecheck + build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies (lockfile-exact)
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc -b --noEmit
+
+      - name: Build
+        run: npm run build
+
+  config-validation:
+    name: Config validation (Docker Compose + secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose.yml
+        run: docker compose config --quiet
+
+      - name: Secret scan (tracked files only)
+        shell: pwsh
+        run: ./scripts/check_secrets.ps1

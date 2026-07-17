@@ -1550,3 +1550,80 @@ export const archiveCausalNote = (id: string) => request<CausalNoteOut>(`/api/co
 export const getCognitiveSettings = () => request<CognitiveSettingsOut>("/api/cognitive/settings");
 export const updateCognitiveSettings = (payload: Partial<CognitiveSettingsOut>) =>
   request<CognitiveSettingsOut>("/api/cognitive/settings", { method: "PATCH", body: JSON.stringify(payload) });
+
+// ============================================================================
+// ECHO Operational Self-Model v1 + Interface Simplification v1
+// ============================================================================
+
+export type ShowInnerState = "never" | "only_when_helpful" | "developer_mode_only";
+
+export interface InterfaceSettingsOut {
+  show_advanced_nav: boolean;
+  compact_sidebar: boolean;
+  show_developer_controls: boolean;
+  show_usage_in_topbar: boolean;
+  show_model_selector: boolean;
+  poetic_language_enabled: boolean;
+  operational_self_model_enabled: boolean;
+  show_inner_state: ShowInnerState;
+}
+
+export interface OperationalStateSnapshotOut {
+  id: string;
+  conversation_id: string | null;
+  current_goal: string;
+  current_mode: string;
+  confidence: string;
+  known_limits_json: string[];
+  active_risks_json: string[];
+  relevant_memory_summary: string | null;
+  relationship_summary: string | null;
+  permissions_summary: string | null;
+  next_best_action: string | null;
+  should_ask_confirmation: boolean;
+  should_use_tools_json: string[];
+  should_not_do_json: string[];
+  intensity: number;
+  expires_at: string | null;
+  created_at: string;
+}
+
+export const getInterfaceSettings = () => request<InterfaceSettingsOut>("/api/interface-settings");
+export const updateInterfaceSettings = (payload: Partial<InterfaceSettingsOut>) =>
+  request<InterfaceSettingsOut>("/api/interface-settings", { method: "PATCH", body: JSON.stringify(payload) });
+export const listRecentSelfModelSnapshots = (conversationId?: string) =>
+  request<OperationalStateSnapshotOut[]>(`/api/self-model/recent${conversationId ? `?conversation_id=${conversationId}` : ""}`);
+
+// ============================================================================
+// ECHO Layer 0 — Infrastructure Foundation v1
+// ============================================================================
+
+// Named InfraSystemStatusOut (not SystemStatusOut) — that name is already
+// taken by Mission Control's own status type above; this is a different,
+// broader shape (GET /api/system/status) from Layer 0.
+export interface InfraSystemStatusOut {
+  status: "green" | "yellow" | "red";
+  backend: string;
+  database: string;
+  ollama: string;
+  frontend_expected_url: string;
+  backend_url: string;
+  wiki: string;
+  rss: string;
+  searxng: string;
+  atlas: string;
+  cognitive_core: string;
+  version: string;
+  warnings: string[];
+}
+
+export interface SystemVersionOut {
+  application_version: string;
+  backend_version: string;
+  frontend_expected_version: string;
+  schema_version: number;
+  api_version: string;
+}
+
+export const getInfraSystemStatus = () => request<InfraSystemStatusOut>("/api/system/status");
+export const getSystemVersion = () => request<SystemVersionOut>("/api/system/version");

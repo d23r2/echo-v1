@@ -206,6 +206,110 @@ class Settings(BaseSettings):
     # /cognitive-core, not for anything injected into a chat reply.
     cognitive_show_developer_diagnostics: bool = False
 
+    # ============================================================
+    # ECHO Layer 0 — Infrastructure Foundation v1
+    # ============================================================
+    # These fields are additive — every field already above this section
+    # remains unchanged (name, default, and semantics) so no existing test
+    # or call site needed to change. New fields fill genuine gaps (app
+    # identity, observability, safety defaults, performance knobs) rather
+    # than re-declaring what already exists (e.g. cors_origins,
+    # local_context_max_chars, cloud_fallback_enabled are already above).
+
+    # --- Application identity ---
+    app_name: str = "ECHO"
+    app_env: str = "development"  # development | production | test
+    app_version: str = "0.9.0"  # pre-1.0 — see ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md's versioning note
+    debug: bool = False
+    log_level: str = "INFO"  # DEBUG | INFO | WARNING | ERROR
+    host: str = "0.0.0.0"
+    port: int = 8000
+
+    # --- Frontend origin (distinct from cors_origins, which is the full
+    # comma-separated allowlist already used by CORSMiddleware above) ---
+    frontend_url: str = "http://localhost:5174"
+
+    # --- Database extras (database_url already exists above) ---
+    database_echo: bool = False  # SQLAlchemy engine echo (raw SQL logging) — off by default, verbose
+    database_backup_enabled: bool = True
+    database_backup_path: str = str(DATA_DIR / "backups")
+
+    # --- Ollama extras (ollama_base_url/ollama_model/ollama_model_* already exist above) ---
+    ollama_enabled: bool = True
+    ollama_timeout_seconds: int = 60
+
+    # --- Feature flags not already covered by an existing *_enabled field
+    # above (atlas/human_persona/operational_self_model/action_system/
+    # cognitive_core/local_intelligence_engine/conversation_auto_summary
+    # already exist — see their own sections above) ---
+    developer_mode: bool = False
+    voice_enabled: bool = True
+    camera_enabled: bool = True
+    image_generation_enabled: bool = True
+    evaluation_lab_enabled: bool = True
+
+    # --- Safety defaults (Permission Center's per-key PermissionSetting
+    # table is the actual runtime source of truth for these at the
+    # action/tool level — these are the install-level *initial* defaults it
+    # seeds from, same "config.py is the starting default, DB is the mutable
+    # source of truth" split used elsewhere in this app) ---
+    file_write_enabled: bool = False
+    code_execution_enabled: bool = False
+    destructive_actions_enabled: bool = False
+    public_push_enabled: bool = False
+
+    # --- Performance ---
+    request_timeout_seconds: int = 30
+    cache_enabled: bool = True
+    cache_ttl_seconds: int = 300
+    max_concurrent_model_requests: int = 2
+
+    # --- Observability ---
+    metrics_enabled: bool = True
+    request_logging_enabled: bool = True
+    diagnostics_enabled: bool = True
+    error_reporting_enabled: bool = False  # no external error-reporting service wired up — local-first
+
+    def validate_startup(self) -> list[str]:
+        """Deterministic, no-raise config sanity check — returns a list of
+        human-readable problems (empty if none). Called once at startup
+        (see main.py's lifespan) so a bad .env value fails with a clear
+        message instead of a confusing downstream error. Never raises
+        itself — the caller decides whether a given problem is fatal."""
+        problems: list[str] = []
+        if not (1 <= self.port <= 65535):
+            problems.append(f"port must be between 1 and 65535, got {self.port}")
+        if self.log_level.upper() not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            problems.append(f"log_level must be one of DEBUG/INFO/WARNING/ERROR/CRITICAL, got '{self.log_level}'")
+        if self.app_env not in ("development", "production", "test"):
+            problems.append(f"app_env must be one of development/production/test, got '{self.app_env}'")
+        if self.request_timeout_seconds <= 0:
+            problems.append(f"request_timeout_seconds must be positive, got {self.request_timeout_seconds}")
+        if self.max_concurrent_model_requests <= 0:
+            problems.append(f"max_concurrent_model_requests must be positive, got {self.max_concurrent_model_requests}")
+        if self.cache_ttl_seconds < 0:
+            problems.append(f"cache_ttl_seconds cannot be negative, got {self.cache_ttl_seconds}")
+        return problems
+
+    # Field names that must never appear in a diagnostics/status response —
+    # matched by suffix so a future *_api_key/*_secret/*_token field is
+    # excluded automatically without needing this list updated by hand.
+    _SECRET_FIELD_SUFFIXES = ("_api_key", "_secret", "_token", "_password")
+
+    def public_dict(self) -> dict:
+        """A diagnostics-safe projection of settings — every *_api_key/
+        *_secret/*_token/*_password field (present or future) is excluded by
+        suffix match, not by an easy-to-forget explicit allowlist. Used by
+        /api/system/diagnostics and nowhere else; never log full settings
+        objects directly (see core/logging.py's redaction filter for the
+        defense-in-depth backstop if something does)."""
+        result = {}
+        for key, value in self.model_dump().items():
+            if key.endswith(self._SECRET_FIELD_SUFFIXES):
+                continue
+            result[key] = value
+        return result
+
 
 @lru_cache
 def get_settings() -> Settings:

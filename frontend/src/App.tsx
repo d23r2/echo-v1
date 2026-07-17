@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { getInterfaceSettings, InterfaceSettingsOut } from "./api/client";
 import MobileDrawer from "./components/MobileDrawer";
 import RoleSwitcher from "./components/RoleSwitcher";
 import Sidebar, { View } from "./components/Sidebar";
@@ -18,12 +19,27 @@ import ProjectsView from "./components/projects/ProjectsView";
 import ReleaseManagerView from "./components/releases/ReleaseManagerView";
 import ScheduleView from "./components/schedule/ScheduleView";
 import SelfImprovementView from "./components/SelfImprovementView";
+import SettingsView from "./components/settings/SettingsView";
 import TasksView from "./components/tasks/TasksView";
 import ToolCenterView from "./components/tools/ToolCenterView";
 
 export default function App() {
   const [view, setView] = useState<View>("mission-control");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [interfaceSettings, setInterfaceSettings] = useState<InterfaceSettingsOut | null>(null);
+
+  useEffect(() => {
+    getInterfaceSettings()
+      .then(setInterfaceSettings)
+      .catch(() => setInterfaceSettings(null));
+  }, []);
+
+  // Interface Simplification v1 — "acting as (simulated role)" is a
+  // developer/testing control (simulating Guardian Council members), not
+  // something a normal user needs to see every session. Hidden unless
+  // explicitly enabled in Settings > Interface. Defaults to hidden (fails
+  // safe) until the settings fetch resolves.
+  const showDeveloperControls = interfaceSettings?.show_developer_controls ?? false;
 
   return (
     <div className="flex h-screen flex-col md:flex-row bg-zinc-950">
@@ -45,7 +61,7 @@ export default function App() {
             ☰
           </button>
           <div className="flex-1" />
-          <RoleSwitcher />
+          {showDeveloperControls && <RoleSwitcher />}
         </div>
 
         <main className="flex-1 overflow-y-auto">
@@ -67,6 +83,7 @@ export default function App() {
           {view === "constitution" && <ConstitutionView />}
           {view === "amendments" && <AmendmentsView />}
           {view === "self-improvement" && <SelfImprovementView />}
+          {view === "settings" && <SettingsView />}
         </main>
       </div>
     </div>

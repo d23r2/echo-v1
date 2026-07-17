@@ -950,3 +950,96 @@ class CognitiveSettings(Base):
     cognitive_skill_matching_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     cognitive_show_developer_diagnostics: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+# ============================================================================
+# ECHO Operational Self-Model v1 — an honest, explicitly non-conscious record
+# of ECHO's own operating state for one turn (goal/mode/confidence/risks/
+# limits/next action), distinct from Atlas (facts about the user) and
+# Cognitive Core (facts about the task/world). Deterministic construction
+# only — see app/services/operational_self_model.py's module docstring.
+# Consolidates what would otherwise be two near-duplicate concepts ("Operational
+# Self-Model" and "Inner State" from the two source specs for this milestone)
+# into one table, reusing the existing PersonaSettings.default_operational_mode
+# / ConversationMoodState machinery for mode/mood rather than re-detecting it.
+# ============================================================================
+
+
+class OperationalStateSnapshot(Base):
+    """One row per meaningful (non-trivial) chat turn — never one per message,
+    see operational_self_model.py's same complexity gate Cognitive Core uses.
+    All *_json fields are short lists of plain strings, never raw chain-of-
+    thought or a dump of the full prompt. intensity/expires_at let a snapshot
+    read as a genuinely temporary operational state, not a permanent trait."""
+
+    __tablename__ = "operational_state_snapshots"
+    __table_args__ = (Index("ix_operational_state_snapshots_conversation_id", "conversation_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    current_goal: Mapped[str] = mapped_column(Text)
+    current_mode: Mapped[str] = mapped_column(String, default="normal")
+    confidence: Mapped[str] = mapped_column(String, default="medium")  # high|medium|low|unverified
+    known_limits_json: Mapped[list] = mapped_column(JSON, default=list)
+    active_risks_json: Mapped[list] = mapped_column(JSON, default=list)
+    relevant_memory_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    relationship_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    permissions_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_best_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    should_ask_confirmation: Mapped[bool] = mapped_column(Boolean, default=False)
+    should_use_tools_json: Mapped[list] = mapped_column(JSON, default=list)
+    should_not_do_json: Mapped[list] = mapped_column(JSON, default=list)
+    # Not emotion — an honest "how strongly does this operational state apply
+    # right now" scalar (e.g. a troubleshooting mode triggered by one mild
+    # keyword vs. three explicit failure reports), 0 (barely) - 5 (strongly).
+    intensity: Mapped[int] = mapped_column(Integer, default=3)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class InterfaceSettings(Base):
+    """A single mutable row (id="singleton") backing GET/PATCH
+    /api/interface-settings — same "DB is the mutable runtime source of
+    truth" pattern as CognitiveSettings above. Covers sidebar/top-bar
+    simplification (ECHO Interface Simplification v1) and the operational
+    self-model's own visibility controls, single-install/local-device, no
+    per-tester scoping (matching PermissionSetting's precedent)."""
+
+    __tablename__ = "interface_settings"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: "singleton")
+    show_advanced_nav: Mapped[bool] = mapped_column(Boolean, default=False)
+    compact_sidebar: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_developer_controls: Mapped[bool] = mapped_column(Boolean, default=False)
+    show_usage_in_topbar: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_model_selector: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Off by default — Part 4/8's "poetic/creative language only when
+    # requested" rule. When off, the persona style directive actively steers
+    # away from mystical/fantasy narration; when on, that steering relaxes.
+    poetic_language_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    operational_self_model_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # never | only_when_helpful | developer_mode_only
+    show_inner_state: Mapped[str] = mapped_column(String, default="only_when_helpful")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+# ============================================================================
+# ECHO Layer 0 — Infrastructure Foundation v1
+# ============================================================================
+
+
+class SchemaVersion(Base):
+    """A single row tracking which schema version this database is on —
+    not a migration engine (this app deliberately doesn't introduce Alembic
+    in v1, see ECHO_LAYER_0_INFRASTRUCTURE_FOUNDATION.md's rationale), just
+    a detectable marker so `/api/system/diagnostics` and
+    `scripts/check_database.ps1` can report something concrete instead of
+    "unknown." Bumped by hand in db.py's init_db() only when a schema change
+    genuinely warrants it — this table existing at all, plus its `version`
+    value, is the signal; nothing here runs a migration automatically."""
+
+    __tablename__ = "schema_version"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: "singleton")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

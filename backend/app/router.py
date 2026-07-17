@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import usage
 from app.config import get_settings
+from app.core import metrics
 from app.provider_errors import COOLDOWN_CATEGORIES, classify_provider_error
 from app.providers.anthropic_provider import AnthropicProvider
 from app.providers.azure_openai_provider import AzureOpenAIProvider
@@ -74,11 +75,13 @@ _OLLAMA_FALLBACK_NOTE = "Cloud providers were unavailable or quota-limited, so E
 
 
 def _track_success(db: Session | None, provider: ModelProvider) -> None:
+    metrics.increment("model_calls_total", provider=provider.name, outcome="success")
     if db is not None and provider.name in _USAGE_TRACKED_PROVIDERS:
         usage.record_request(db, provider.name)
 
 
 def _track_failure(db: Session | None, provider: ModelProvider, exc: Exception) -> None:
+    metrics.increment("model_calls_total", provider=provider.name, outcome="failure")
     if db is not None and provider.name in _USAGE_TRACKED_PROVIDERS and usage.is_rate_limit_error(exc):
         usage.record_429(db, provider.name)
 
