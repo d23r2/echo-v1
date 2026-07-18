@@ -45,6 +45,7 @@ frontend/src-tauri/target/release/bundle/
 *.log
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
 frontend/.vite/
 backend/data/backups/
 

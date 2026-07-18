@@ -27,6 +27,23 @@ Full setup/run instructions are in `README.md`.
 4. No git repo is initialized in this folder yet. If you need change history, that's worth flagging to the user rather than silently working around it.
 5. A daily scheduled task (`echo-daily-build-checkin`) already reads `PROGRESS.md` and recent file activity each morning to propose a prioritized checklist — don't duplicate that logic elsewhere.
 
+## Dual-agent role and coordination
+
+Full detail: `docs/development/DUAL_AGENT_WORKFLOW.md`. `AGENTS.md`'s non-negotiables and its "Dual-agent workflow" section apply here too and take precedence over anything below.
+
+Default role: Claude Code is the primary implementer and repository-exploration agent, unless `tasks/ACTIVE_TASK.md` assigns a different role (e.g. reviewing a Codex implementation). Especially suited for understanding large areas of the codebase, cross-file/architectural changes, interactive debugging, and documentation updates alongside implementation.
+
+Coordination checklist for any task:
+
+1. Read `Owner`, `Implementer`, `Reviewer`, and the branch/worktree fields in `tasks/ACTIVE_TASK.md`.
+2. Do not edit if another agent is the listed active implementer, unless the task explicitly permits parallel, non-overlapping work.
+3. Never edit the same working tree as Codex at the same time — use separate branches/worktrees (see `docs/development/DUAL_AGENT_WORKFLOW.md`, Mode B).
+4. Stop at `Ready for review` once implementation is complete; do not merge, push, or approve your own work.
+
+Implementation handoff (written into the active task before stopping) must include: a summary of behavior changed, files changed, migration/configuration changes, tests executed and their actual results, known limitations, and specific areas the reviewer should inspect.
+
+Git safety for this workflow: do not force-push, rewrite shared branch history, delete another agent's branch, or discard uncommitted work without explicit user approval — consistent with the top-level Git Safety Protocol Claude Code always follows.
+
 ## Current priority order (per PROGRESS.md, check there for latest)
 
 1. Core chat UI (message list + input, wired to `/chat`)

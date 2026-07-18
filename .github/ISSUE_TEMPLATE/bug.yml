@@ -1,0 +1,39 @@
+name: Echo bug
+description: Report reproducible incorrect behavior
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: example
+    attributes:
+      label: Concrete example
+      description: What did you do, and what did Echo show?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include model/provider, local/cloud mode, and relevant settings without secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Add sanitized logs, screenshots, or failing tests.
+  - type: checkboxes
+    id: severity
+    attributes:
+      label: Safety impact
+      options:
+        - label: Possible privacy or cross-memory exposure
+        - label: Possible paid call without permission
+        - label: Fabricated tool/source/action success
+        - label: Data loss or corruption
