@@ -11,7 +11,7 @@ Compact orientation for coding agents. Code is the source of truth when this dis
 - Backend: FastAPI, SQLAlchemy, SQLite, local ChromaDB (`all-MiniLM-L6-v2` embeddings).
 - Frontend: React, TypeScript, Tailwind, Vite (dev server on port `5174`; backend on port `8000`).
 - Packaging: responsive web app, Android (Capacitor) project, Tauri Windows project.
-- Model providers: local Ollama plus optional Anthropic/OpenAI/xAI cloud adapters, routed via `backend/app/providers/` and `router.py`.
+- Model providers: local Ollama plus optional Anthropic, OpenAI, xAI, Gemini, and Azure adapters, routed through `backend/app/providers/` and `router.py`.
 
 ## Product principles
 
@@ -27,15 +27,15 @@ Compact orientation for coding agents. Code is the source of truth when this dis
 - Single-user application; the frontend `RoleSwitcher` lets the one user simulate Founder/Guardian A-C/Verifier for Guardian Council purposes only.
 - SQLite (source of truth) + local Chroma (semantic mirror) are appropriate for the current personal-scale version.
 - Ollama fallback and provider error classification already exist in `backend/app/providers/` and `router.py`.
-- Frontend is early relative to the backend: no chat UI, Atlas viewer, constitution/amendment viewer, or model picker yet (see `CLAUDE.md`). Check `PROGRESS.md` for the current build status rather than assuming either direction.
+- Frontend and backend are both substantially developed. Check current code and `PROGRESS.md` for the implemented screens and current gaps rather than relying on a static feature list here.
 
 ## Source-of-truth order
 
 When documents conflict, use this order:
 
-1. Active task acceptance criteria (`tasks/ACTIVE_TASK.md`).
-2. `AGENTS.md` non-negotiable constraints.
-3. Current tested code behavior.
+1. `AGENTS.md` non-negotiable constraints.
+2. Active task acceptance criteria (`tasks/ACTIVE_TASK.md`), within those constraints.
+3. Current tested code behavior for the existing baseline.
 4. `docs/development/DECISIONS.md`.
 5. `PROGRESS.md` / `README.md` / `ROADMAP.md` and other root documentation.
 6. `docs/early-vision-drafts/` — superseded planning drafts, lowest priority.

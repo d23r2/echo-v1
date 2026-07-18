@@ -23,12 +23,12 @@ if (-not (Test-Path $activeTask)) {
 
 $content = Get-Content $activeTask -Raw
 
-if ($content -match 'Status:\s*\*\*No task loaded\*\*') {
+if ($content -match '(?m)^Status:\s*\*\*No task loaded\*\*\s*$') {
     throw 'There is no active task to archive.'
 }
 
-if ($content -notmatch 'Status:\s*\*\*Completed\*\*') {
-    $statusMatch = [regex]::Match($content, 'Status:\s*\*\*([^*]+)\*\*')
+if ($content -notmatch '(?m)^Status:\s*\*\*Completed\*\*\s*$') {
+    $statusMatch = [regex]::Match($content, '(?m)^Status:\s*\*\*([^*]+)\*\*\s*$')
     $currentStatus = if ($statusMatch.Success) { $statusMatch.Groups[1].Value.Trim() } else { 'Unknown' }
     throw "Refusing to archive: Status is '$currentStatus', not Completed. 'Verified' means the reviewer approved the work but the user has not yet merged -- only the user sets Completed, and only after merging."
 }
@@ -38,11 +38,15 @@ if (-not (Test-Path $completedDir)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($TaskId)) {
-    if ($content -match 'Task ID:\s*`?([^`\r\n]+)`?') {
+    if ($content -match '(?m)^Task ID:\s*`?([^`\r\n]+)`?\s*$') {
         $TaskId = $Matches[1].Trim()
     } else {
         throw 'Could not determine Task ID. Pass -TaskId explicitly.'
     }
+}
+
+if ($TaskId -notmatch '^[A-Za-z0-9_-]+$') {
+    throw "Invalid Task ID '$TaskId'. Use only letters, numbers, underscores, and hyphens."
 }
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'

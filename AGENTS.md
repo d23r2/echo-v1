@@ -62,4 +62,4 @@ Before finishing:
 
 ## Active task bootstrap
 
-For ECHO-DEV-001, read `tasks/ACTIVE_TASK.md`. The active task may narrow scope but can never override these non-negotiable rules.
+When a task is loaded, read `tasks/ACTIVE_TASK.md`. The active task may narrow scope but can never override these non-negotiable rules.

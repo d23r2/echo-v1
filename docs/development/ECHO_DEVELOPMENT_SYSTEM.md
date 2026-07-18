@@ -50,7 +50,7 @@ Describe the feature, trade-offs, UI, and risks in whatever form is convenient, 
 
 ### 2. Put the result in `tasks/ACTIVE_TASK.md`
 
-Either edit the file directly, or draft it under `tasks/active/` from `tasks/TASK_TEMPLATE.md` and load it with `scripts/new-task.ps1`. Only one task should be loaded/active at a time.
+Either edit the file directly, or use `scripts/new-task.ps1` to create a task from `tasks/TASK_TEMPLATE.md` and load it immediately. `tasks/active/` is for manually queued drafts; activate one only after confirming `ACTIVE_TASK.md` has no loaded task, then move that draft into the canonical `ACTIVE_TASK.md`. Only one task should be loaded at a time.
 
 ### 3. Assign implementer and reviewer
 
@@ -69,7 +69,7 @@ Reverse the roles when Codex is better suited to the implementation for a given 
 
 ### 5. Hand off to the reviewer
 
-The implementer commits, records the handoff, and sets status `Ready for review`. The reviewer works from that committed state (its own worktree, branched from the recorded commit — see `DUAL_AGENT_WORKFLOW.md`), verifies each acceptance criterion, and records the reviewer report, ending in `Verified` or `Changes requested`.
+The implementer commits, records the handoff, and sets status `Ready for review`. The reviewer resolves the clean implementation branch tip after the implementer stops, records it as `Review base commit`, and works from that exact committed state in its own worktree (see `DUAL_AGENT_WORKFLOW.md`). It verifies each acceptance criterion and records the reviewer report, ending in `Verified` or `Changes requested`.
 
 ### 6. Review the result yourself
 

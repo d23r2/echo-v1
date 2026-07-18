@@ -57,23 +57,40 @@ Use this only when one agent works at a time and the other reviews after a commi
 
 ## Mode B — Separate worktrees (recommended for anything non-trivial)
 
-Create the implementer's worktree from the actual base branch (`master`):
+Before creating a worktree, confirm the primary checkout's status and existing worktrees, then resolve and record the exact clean base commit in the active task. Do not assume uncommitted primary-worktree changes will appear in a new worktree.
 
 ```powershell
-git worktree add ..\<repo>-claude -b claude/<task-id>-<short-name> master
+git status --short --branch
+git worktree list
+$Base = git rev-parse master
+# Confirm $Base exactly matches tasks/ACTIVE_TASK.md's Base commit.
+git worktree add ..\<repo>-claude -b claude/<task-id>-<short-name> $Base
 ```
 
-Claude Code implements and commits inside `..\<repo>-claude`. Record the exact implementation commit SHA in `tasks/ACTIVE_TASK.md`'s `Implementation commit` field before handing off.
+Claude Code implements and commits inside `..\<repo>-claude`. Its implementation handoff may require a final task-record commit after the main implementation commit; therefore the reviewer must use the clean implementation branch tip, not an earlier code-only SHA. The reviewer records that exact tip as `Review base commit` in its first review commit.
 
-Create the reviewer's worktree **directly from that recorded commit** — not from `master`, and not via `git fetch` pointed at the implementer's linked worktree:
+After the implementer has stopped, resolve and verify the final clean branch tip. If `Implementation commit` names an earlier code commit, confirm it is an ancestor of the final tip:
 
 ```powershell
-git worktree add ..\<repo>-codex -b codex/<task-id>-<short-name>-review <IMPLEMENTATION_COMMIT_SHA>
+$ImplTip = git rev-parse claude/<task-id>-<short-name>
+git merge-base --is-ancestor <IMPLEMENTATION_COMMIT_SHA> $ImplTip
+if ($LASTEXITCODE -ne 0) { throw 'Recorded implementation commit is not in the implementation branch tip.' }
+git worktree add ..\<repo>-codex -b codex/<task-id>-<short-name>-review $ImplTip
 ```
 
-This gives the reviewer the exact implementer state with no fetch/cherry-pick step and no risk of picking up the implementer's uncommitted changes. The reviewer commits any small fixes on top of that branch and records the review commit SHA.
+This gives the reviewer the exact final implementer state, including its committed handoff, with no fetch/cherry-pick step and no risk of picking up uncommitted changes. The reviewer commits the resolved `Review base commit`, any small fixes, its report, and the final review SHA separately.
 
 Do not delete either worktree or branch, and do not merge, until the user has reviewed and approved the result.
+
+### Runtime and data isolation
+
+Worktrees isolate files, but not ports, provider accounts, environment variables, or explicitly configured absolute data paths. For tests, prefer the existing isolated test fixtures and fake providers. For any live/manual run:
+
+- never copy the real `.env`, user database, Chroma directory, attachments, exports, or private memory into an agent worktree;
+- give each simultaneously running worktree its own `DATABASE_URL`, `CHROMA_DIR`, `ATTACHMENTS_DIR`, and ports;
+- force local-only evaluation with `DEFAULT_PROVIDER=ollama`, `FREE_MODE=true`, and `CLOUD_FALLBACK_ENABLED=false` unless the active task and user explicitly authorize a cloud call;
+- never reuse a running Echo instance until its working directory, data paths, provider mode, and owning task have been positively identified;
+- stop only processes started by that worktree and never kill an unrelated process to free a port.
 
 ## Mode C — Parallel tasks
 

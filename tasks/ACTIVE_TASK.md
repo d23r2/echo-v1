@@ -12,6 +12,7 @@ Implementation worktree: `C:\Users\newte\echo-claude`
 Implementation commit: `a25b0a86d15f8cb301a8d2b3ab837e527c6c06c2`
 Review branch: `codex/ECHO-DEV-001-dual-agent-review`
 Review worktree: `C:\Users\newte\echo-codex`
+Review base commit: `4e68c5639e61ba146f230aa540d8277f6ae5f577`
 Review commit: `Pending`
 
 ## Objective
@@ -66,7 +67,7 @@ The user can define one approved task, let one agent implement it in an isolated
 - `complete-task.ps1` must archive only a task whose status is `Completed`; `Verified` means reviewer approval awaiting the user, while only the user may authorize `Completed` after merge.
 - Keep the queued task copy and `ACTIVE_TASK.md` synchronized or document one canonical record without allowing silent divergence.
 - Use `master`, not nonexistent `main`.
-- For sequential review, create the reviewer branch/worktree directly from the implementer's recorded commit. Do not use `git fetch` from another linked worktree.
+- For sequential review, create the reviewer worktree from the implementation branch's exact clean tip after the implementer stops, verify the recorded implementation commit is an ancestor, and record that tip as `Review base commit`. Do not use `git fetch` from another linked worktree.
 - Treat the task file as a social coordination record, not a mutex: require branch, worktree, clean-status, and base-SHA checks.
 - Major defects or scope expansion return `Changes requested` to the implementer; reviewer fixes are limited to small confirmed in-scope defects in a separate commit.
 
@@ -78,7 +79,7 @@ The user can define one approved task, let one agent implement it in an isolated
 - [ ] Task status semantics clearly reserve `Verified` for reviewer and `Completed` for user-approved merge.
 - [ ] New-task refuses accidental active-task overwrite.
 - [ ] Complete-task refuses incomplete, Ready, In-progress, Ready-for-review, Changes-requested, Blocked, and merely Verified tasks.
-- [ ] Worktree instructions are correct for `master` and require clean/recorded commits.
+- [ ] Worktree instructions are correct for `master`, require a recorded base and clean handoff tip, and account for a final task-record commit after the main implementation commit.
 - [ ] Runtime isolation and no-real-data/no-silent-paid-provider safeguards are explicit.
 - [ ] No archive application source, secret, generated data, or stale test-count claim is introduced.
 - [ ] Scripts parse and their positive/negative lifecycle paths are tested in a disposable temporary directory.

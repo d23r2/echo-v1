@@ -42,7 +42,7 @@ if (Test-Path $draftFile) {
 
 if (Test-Path $activeTask) {
     $currentContent = Get-Content $activeTask -Raw
-    $hasLoadedTask = -not ($currentContent -match 'Status:\s*\*\*No task loaded\*\*')
+    $hasLoadedTask = -not ($currentContent -match '(?m)^Status:\s*\*\*No task loaded\*\*\s*$')
     if ($hasLoadedTask) {
         if (-not $Force) {
             throw "tasks/ACTIVE_TASK.md already has a loaded task. Pass -Force to replace it. This does not archive the current task first -- make sure it is committed, completed, or otherwise safe to lose before forcing."

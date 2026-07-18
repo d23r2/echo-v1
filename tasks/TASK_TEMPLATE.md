@@ -12,6 +12,7 @@ Implementation worktree: `Not created`
 Implementation commit: `Pending`
 Review branch: `Not created`
 Review worktree: `Not created`
+Review base commit: `Pending`
 Review commit: `Pending`
 
 ## Objective
