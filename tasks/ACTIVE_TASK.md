@@ -9,7 +9,7 @@ Base branch: `master`
 Base commit: `be3c686ebe2f78f6c081e11b0ea050694598d990`
 Implementation branch: `claude/ECHO-DEV-001-dual-agent`
 Implementation worktree: `C:\Users\newte\echo-claude`
-Implementation commit: `Pending — will be recorded in a small follow-up commit once known`
+Implementation commit: `a25b0a86d15f8cb301a8d2b3ab837e527c6c06c2`
 Review branch: `codex/ECHO-DEV-001-dual-agent-review`
 Review worktree: `C:\Users\newte\echo-codex`
 Review commit: `Pending`
@@ -223,7 +223,7 @@ No backend/frontend gate was run — product source is out of scope and none was
 - Check that the reasoning-visibility correction (Atlas-silent vs. Echo's visible envelope) accurately reflects `backend/app/persona.py` and doesn't itself introduce a new inaccuracy.
 - Check that `AGENTS.md`'s and `CLAUDE.md`'s new sections don't conflict with, weaken, or duplicate the existing non-negotiables above them.
 
-Implementation commit: recorded below once committed (see `Implementation commit` field at the top of this file).
+Implementation commit: `a25b0a86d15f8cb301a8d2b3ab837e527c6c06c2` (verified: `git diff --name-only be3c686ebe2f78f6c081e11b0ea050694598d990...HEAD` lists exactly the 17 files above, all within Allowed paths).
 
 ## Reviewer report
 
