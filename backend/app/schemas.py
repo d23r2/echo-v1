@@ -2903,3 +2903,112 @@ class SelfModHealthOut(BaseModel):
     sandbox_runner_available: bool
     network_isolation_enforced: bool
     sandbox_image: str
+
+
+# ---- ECHO Supervised Maintenance Workspace v1 (Phase 2: Analyse Only) ----
+CapabilityMode = Literal["disabled", "analyse_only", "propose_only", "sandbox_verify", "human_approved_local_commit"]
+MaintenanceAnalysisStatus = Literal["draft", "analysing", "analysis_complete", "cancelled"]
+MaintenanceEpistemicStatus = Literal["verified", "inferred", "hypothesis", "unknown"]
+
+
+class ApprovedRepositoryCreate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=200)
+    requested_by: str
+    approved_branches: list[str] = Field(default_factory=list)
+
+
+class ApprovedRepositoryModeUpdate(BaseModel):
+    capability_mode: CapabilityMode
+    requested_by: str
+
+
+class ApprovedRepositoryOut(_UtcAssumingModel):
+    id: str
+    display_name: str
+    root_path_reference: str
+    fingerprint: str
+    approved_branches: list[str]
+    permitted_read_paths: list[str]
+    permitted_proposal_paths: list[str]
+    blocked_file_patterns: list[str]
+    capability_mode: CapabilityMode
+    owner: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    last_verified_at: datetime | None
+
+
+class MaintenanceAnalysisCreate(BaseModel):
+    repository_id: str
+    objective: str = Field(min_length=1, max_length=500)
+    requested_by: str = "echo"
+    problem_statement: str = ""
+
+
+class MaintenanceAnalysisOut(_UtcAssumingModel):
+    id: str
+    repository_id: str
+    objective: str
+    requested_by: str
+    status: MaintenanceAnalysisStatus
+    problem_statement: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class MaintenanceFindingCreate(BaseModel):
+    epistemic_status: MaintenanceEpistemicStatus
+    description: str = Field(min_length=1, max_length=4000)
+    affected_files: list[str] = Field(default_factory=list)
+    evidence_reference: str = ""
+
+
+class MaintenanceFindingOut(_UtcAssumingModel):
+    id: str
+    analysis_id: str
+    epistemic_status: MaintenanceEpistemicStatus
+    description: str
+    affected_files: list[str]
+    evidence_reference: str
+    created_at: datetime
+
+
+class MaintenanceFileEntryOut(BaseModel):
+    path: str
+    size_bytes: int
+    is_directory: bool
+
+
+class MaintenanceFileContentOut(BaseModel):
+    path: str
+    content: str
+    sha256: str
+
+
+class MaintenanceSearchHitOut(BaseModel):
+    path: str
+    line: int
+    text: str
+
+
+class MaintenanceAuditEventOut(_UtcAssumingModel):
+    id: str
+    repository_id: str | None
+    analysis_id: str | None
+    event_type: str
+    actor_role: str
+    summary: str
+    safe_context_json: dict
+    created_at: datetime
+
+
+class MaintenanceHealthOut(BaseModel):
+    supervised_maintenance_enabled: bool
+    supervised_analysis_enabled: bool
+    supervised_proposals_enabled: bool
+    supervised_sandbox_enabled: bool
+    supervised_local_commit_enabled: bool
+    supervised_maintenance_frontend_enabled: bool
+    registered_repository_count: int
+    open_analysis_count: int

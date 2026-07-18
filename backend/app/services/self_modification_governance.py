@@ -153,6 +153,17 @@ PROTECTED_PATHS = frozenset(
         "backend/app/core/errors.py",
         "backend/app/self_improvement_verify.py",
         "backend/app/routers/self_improvement.py",
+        # ECHO Supervised Maintenance Workspace v1 — self-protecting, same
+        # principle as this file protecting itself: the workflow can never
+        # modify its own governance/containment code, including the
+        # analysis-focused workspace layered on top of it. See
+        # docs/supervised_maintenance/protected_scope.md.
+        "backend/app/services/maintenance_code_access.py",
+        "backend/app/services/maintenance_analysis.py",
+        "backend/app/services/maintenance_policy.py",
+        "backend/app/routers/supervised_maintenance.py",
+        "docs/supervised_maintenance/protected_scope.md",
+        "docs/supervised_maintenance/policy.md",
     }
 )
 
@@ -189,6 +200,16 @@ PROTECTED_SYMBOL_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("self-modification approval verification", re.compile(r"\bapprove_revision\b|\bHumanApproval\b")),
     ("self-modification kill switch", re.compile(r"\bSelfModificationKillSwitch\b|\b_check_kill_switch\b")),
     ("secret redaction", re.compile(r"\b(?:redact|redaction|_clean_error)\b", re.IGNORECASE)),
+    # ECHO Supervised Maintenance Workspace v1 additions — see
+    # docs/supervised_maintenance/protected_scope.md §3.
+    ("scope validator", re.compile(r"\bclassify_scope\b|\b_is_unsafe_path\b|\b_canonical_path\b")),
+    ("constitutional compliance service", re.compile(r"\brun_compliance_check\b")),
+    ("maintenance policy loader", re.compile(r"\bApprovedRepository\b|\bMaintenancePolicyService\b|\bcapability_mode\b")),
+    (
+        "code access containment",
+        re.compile(r"\bdef\s+(?:list_repository_files|read_repository_file|search_repository_text|locate_symbol)\s*\("),
+    ),
+    ("audit append", re.compile(r"\b_record_audit_event\b|\bSelfModificationAuditEvent\b|\bMaintenanceAuditEvent\b")),
 )
 
 #: Path prefixes that are always protected regardless of exact filename —

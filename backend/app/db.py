@@ -83,6 +83,7 @@ def init_db() -> None:
     _seed_cognitive_core()
     _seed_core_identity()
     _seed_self_modification_governance()
+    _seed_supervised_maintenance()
     _ensure_schema_version()
 
 
@@ -223,7 +224,12 @@ def _ensure_layer1_memory_columns() -> None:
 # self_modification_kill_switch), created by Base.metadata.create_all()
 # v10 hardens approval invalidation and records the actual sandbox boundary;
 # additive columns are installed above for databases that saw the partial v9.
-CURRENT_SCHEMA_VERSION = 10
+# v11 (ECHO Supervised Maintenance Workspace v1, Phase 2): Analyse-Only —
+# new tables only (approved_repositories, maintenance_analyses,
+# maintenance_findings, maintenance_audit_events), created by
+# Base.metadata.create_all() above with no _ensure_column() calls needed.
+# See docs/supervised_maintenance/architecture.md.
+CURRENT_SCHEMA_VERSION = 11
 
 
 def _ensure_schema_version() -> None:
@@ -295,6 +301,19 @@ def _seed_self_modification_governance() -> None:
 
     with SessionLocal() as db:
         self_modification_governance.ensure_defaults(db)
+
+
+def _seed_supervised_maintenance() -> None:
+    """ECHO Supervised Maintenance Workspace v1 — same delegation pattern as
+    _seed_self_modification_governance(): idempotent, seeds new
+    supervised_maintenance_* permission_center keys. Runs unconditionally —
+    seeding inert permission rows is safe even when every maintenance
+    feature flag is off; nothing reads them until a flag is explicitly
+    enabled and a repository is explicitly registered."""
+    from app.services import maintenance_policy
+
+    with SessionLocal() as db:
+        maintenance_policy.ensure_defaults(db)
 
 
 def _ensure_atlas_memory_type_column() -> None:

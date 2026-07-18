@@ -314,6 +314,33 @@ class Settings(BaseSettings):
     self_modification_approval_expiry_hours: int = 24
     self_modification_sandbox_image: str = "echo-selfmod-sandbox:local"
 
+    # --- ECHO Supervised Maintenance Workspace v1 ---
+    # All five default OFF. This is a read-only-first analysis layer that
+    # feeds the self-modification pipeline above (see
+    # docs/supervised_maintenance/architecture.md) — its own flags are
+    # independent of and layered on top of the self_modification_* flags,
+    # so enabling analysis here does not by itself enable sandbox execution
+    # or deployment; those still require the self_modification_* flags too.
+    #   - supervised_maintenance_enabled gates the whole subsystem (repository
+    #     registration, status/policy endpoints).
+    #   - supervised_analysis_enabled separately gates CodeAccessService reads
+    #     and MaintenanceAnalysisService (Analyse-Only mode).
+    #   - supervised_proposals_enabled separately gates turning an analysis
+    #     into a self-modification proposal.
+    #   - supervised_sandbox_enabled/supervised_local_commit_enabled exist for
+    #     parity with the milestone's own flag list but are not yet wired to
+    #     any new code path in Phase 2 — sandbox/local-commit for an
+    #     analysis-originated proposal already goes through the unchanged
+    #     self_modification_sandbox_enabled/self_modification_deployment_enabled
+    #     flags once Phase 3+ wires proposal creation through.
+    supervised_maintenance_enabled: bool = False
+    supervised_analysis_enabled: bool = False
+    supervised_proposals_enabled: bool = False
+    supervised_sandbox_enabled: bool = False
+    supervised_local_commit_enabled: bool = False
+    supervised_maintenance_frontend_enabled: bool = False
+    supervised_maintenance_max_read_bytes: int = 512_000
+
     # --- Observability ---
     metrics_enabled: bool = True
     request_logging_enabled: bool = True

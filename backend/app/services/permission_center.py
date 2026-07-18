@@ -158,6 +158,24 @@ DEFAULT_PERMISSIONS: list[dict] = [
         "risk_level": "destructive",
         "description": "Activating or resetting the self-modification emergency stop. Reset is Founder-only and requires a reason; role labels are simulated in this single-user app.",
     },
+    {
+        "key": "supervised_maintenance_register_repository",
+        "level": "ask_first",
+        "risk_level": "high",
+        "description": "Registering or reconfiguring an approved repository for Supervised Maintenance read access. Owner-only; never reachable by the model.",
+    },
+    {
+        "key": "supervised_maintenance_read_code",
+        "level": "allowed",
+        "risk_level": "low",
+        "description": "Read-only repository inspection (list/read files, search text, git status/diff) through CodeAccessService, subject to the repository's own approved scope, protected-path/secret checks, and capability mode.",
+    },
+    {
+        "key": "supervised_maintenance_create_analysis",
+        "level": "allowed",
+        "risk_level": "low",
+        "description": "Creating a structured maintenance analysis and its findings. Creates database rows only — no file on disk is touched by this step.",
+    },
 ]
 
 _DEFAULTS_BY_KEY = {p["key"]: p for p in DEFAULT_PERMISSIONS}

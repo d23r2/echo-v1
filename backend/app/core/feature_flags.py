@@ -218,6 +218,48 @@ def list_feature_flags(settings: Settings, db: Session | None = None) -> list[Fe
             developer_only=True,
         )
     )
+    flags.append(
+        _flag(
+            "supervised_maintenance",
+            "Supervised maintenance workspace",
+            settings.supervised_maintenance_enabled,
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
+            "supervised_maintenance_analysis",
+            "Supervised maintenance read-only analysis",
+            settings.supervised_analysis_enabled,
+            dependency_ok=settings.supervised_maintenance_enabled,
+            unavailable_reason=None if settings.supervised_maintenance_enabled else "requires supervised_maintenance",
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
+            "supervised_maintenance_proposals",
+            "Supervised maintenance proposal generation",
+            settings.supervised_proposals_enabled,
+            dependency_ok=settings.supervised_maintenance_enabled and settings.supervised_analysis_enabled,
+            unavailable_reason=None
+            if (settings.supervised_maintenance_enabled and settings.supervised_analysis_enabled)
+            else "requires supervised_maintenance and supervised_maintenance_analysis",
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
+            "supervised_maintenance_frontend",
+            "Supervised maintenance review UI",
+            settings.supervised_maintenance_frontend_enabled,
+            restart_required=True,
+            developer_only=True,
+        )
+    )
 
     return flags
 

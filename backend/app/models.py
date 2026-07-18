@@ -2375,3 +2375,114 @@ class SelfModificationKillSwitch(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reset_by: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+# --- ECHO Supervised Maintenance Workspace v1 (Phase 2: Analyse Only) ---
+#
+# A read-only analysis front-end that feeds the existing Layer 3A Part 2D
+# self-modification pipeline (CodeModificationProposal et al., above) —
+# it is not a second proposal/sandbox/approval system. See
+# docs/supervised_maintenance/architecture.md for the full component-reuse
+# mapping. These three tables are the only genuinely new persistence Phase 2
+# needs: an owner-registered repository, a structured analysis, and its
+# findings. Proposal creation (Phase 3) will add an additive analysis_id
+# column to CodeModificationProposal rather than a new proposal table.
+
+
+class ApprovedRepository(Base):
+    """Exactly one owner-registered repository root is expected to be
+    accessible initially (see protected_scope.md) — nothing here scans the
+    filesystem or infers a root path automatically."""
+
+    __tablename__ = "approved_repositories"
+    __table_args__ = (
+        CheckConstraint(
+            "capability_mode IN ('disabled', 'analyse_only', 'propose_only', "
+            "'sandbox_verify', 'human_approved_local_commit')",
+            name="ck_approved_repository_capability_mode",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    display_name: Mapped[str] = mapped_column(String)
+    # Resolved once at registration time (MaintenancePolicyService), never a
+    # raw client-supplied path re-resolved per request.
+    root_path_reference: Mapped[str] = mapped_column(String)
+    fingerprint: Mapped[str] = mapped_column(String)
+    approved_branches: Mapped[list] = mapped_column(JSON, default=list)
+    permitted_read_paths: Mapped[list] = mapped_column(JSON, default=list)
+    permitted_proposal_paths: Mapped[list] = mapped_column(JSON, default=list)
+    blocked_file_patterns: Mapped[list] = mapped_column(JSON, default=list)
+    capability_mode: Mapped[str] = mapped_column(String, default="disabled")
+    owner: Mapped[str] = mapped_column(String, default="founder")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MaintenanceAnalysis(Base):
+    __tablename__ = "maintenance_analyses"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'analysing', 'analysis_complete', 'cancelled')",
+            name="ck_maintenance_analysis_status",
+        ),
+        Index("ix_maintenance_analyses_repository_id", "repository_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    repository_id: Mapped[str] = mapped_column(ForeignKey("approved_repositories.id"))
+    objective: Mapped[str] = mapped_column(Text)
+    # Simulated role or "echo", same convention as CodeModificationProposal.proposed_by.
+    requested_by: Mapped[str] = mapped_column(String, default="echo")
+    status: Mapped[str] = mapped_column(String, default="draft")
+    problem_statement: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class MaintenanceFinding(Base):
+    """No hidden chain-of-thought is ever stored here — description is the
+    reviewable engineering statement, evidence_reference points at a real
+    file:line rather than duplicating file content into the row."""
+
+    __tablename__ = "maintenance_findings"
+    __table_args__ = (
+        CheckConstraint(
+            "epistemic_status IN ('verified', 'inferred', 'hypothesis', 'unknown')",
+            name="ck_maintenance_finding_epistemic_status",
+        ),
+        Index("ix_maintenance_findings_analysis_id", "analysis_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    analysis_id: Mapped[str] = mapped_column(ForeignKey("maintenance_analyses.id"))
+    epistemic_status: Mapped[str] = mapped_column(String, default="hypothesis")
+    description: Mapped[str] = mapped_column(Text)
+    affected_files: Mapped[list] = mapped_column(JSON, default=list)
+    evidence_reference: Mapped[str] = mapped_column(String, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class MaintenanceAuditEvent(Base):
+    """Dedicated audit trail for this subsystem, following the same
+    one-table-per-subsystem convention as SelfModificationAuditEvent rather
+    than sharing that table across two conceptually distinct governance
+    systems. Same pre-sanitized safe_context_json discipline; same honest
+    no-tamper-evidence limitation (see threat_model.md §D)."""
+
+    __tablename__ = "maintenance_audit_events"
+    __table_args__ = (
+        Index("ix_maintenance_audit_events_repository_id", "repository_id"),
+        Index("ix_maintenance_audit_events_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    repository_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    analysis_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    event_type: Mapped[str] = mapped_column(String)
+    actor_role: Mapped[str] = mapped_column(String, default="system")
+    summary: Mapped[str] = mapped_column(Text)
+    safe_context_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

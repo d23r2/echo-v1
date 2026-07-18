@@ -35,6 +35,7 @@ from app.routers import (
     schedule,
     self_improvement,
     self_modification,
+    supervised_maintenance,
     system,
     tasks,
     tools,
@@ -91,6 +92,7 @@ app.include_router(amendments.router)
 app.include_router(models.router)
 app.include_router(self_improvement.router)
 app.include_router(self_modification.router)
+app.include_router(supervised_maintenance.router)
 app.include_router(usage.router)
 app.include_router(memory_candidates.router)
 app.include_router(memory.router)
