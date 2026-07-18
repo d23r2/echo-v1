@@ -145,6 +145,12 @@ def _validate_and_resolve(repository: ApprovedRepository, relative_path: str, *,
         raise CodeAccessRejectedError("Absolute (drive-letter) paths are not permitted.")
     if ".." in candidate.split("/"):
         raise CodeAccessRejectedError("Path traversal ('..') is not permitted.")
+    if ":" in candidate:
+        # NTFS Alternate Data Stream syntax ("file.txt:hidden_stream"). A
+        # colon can never appear in a legitimate relative path component on
+        # any platform this app targets, so this is an unconditional reject
+        # rather than an attempt to allowlist safe colon usage.
+        raise CodeAccessRejectedError("Alternate data stream syntax is not permitted.")
 
     root = _repo_root(repository).resolve()
     unresolved = root / candidate

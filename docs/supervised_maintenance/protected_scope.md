@@ -1,6 +1,9 @@
-# ECHO Supervised Maintenance Workspace v1 — Protected Scope (Phase 1)
+# ECHO Supervised Maintenance Workspace v1 — Protected Scope
 
-**Status: design-stage policy specification. No application code has been written yet.** This document
+**Status: Phase 8 closed. Every file listed below as "once built"/"once written" in the original
+Phase 1 draft now exists and is genuinely registered in `PROTECTED_SYMBOL_PATTERNS`/`PROTECTED_PATHS`
+— confirmed by reading `self_modification_governance.py` directly, not just this document's own claim.**
+This document
 is the authoritative source for what Supervised Maintenance's proposal-generation path (§18 of the
 milestone) must never be able to touch. It is additive to, not a replacement for, the protected scope
 already enforced by Layer 3A Part 2D's `self_modification_governance.PROTECTED_PATHS`/
@@ -37,18 +40,19 @@ backend/app/self_improvement_verify.py
 backend/app/routers/self_improvement.py
 ```
 
-**Newly added for Supervised Maintenance's own self-protection** (same principle Part 2D applied to
+**Added for Supervised Maintenance's own self-protection** (same principle Part 2D applied to
 itself — the workflow can never modify its own governance code):
 
 ```
-backend/app/services/maintenance_code_access.py           # CodeAccessService, once built
-backend/app/services/maintenance_analysis.py               # MaintenanceAnalysisService, once built
-backend/app/services/maintenance_policy.py                 # MaintenancePolicyService, once built
-backend/app/routers/supervised_maintenance.py               # once built
+backend/app/services/maintenance_code_access.py           # CodeAccessService (Phase 2)
+backend/app/services/maintenance_analysis.py               # MaintenanceAnalysisService (Phase 2)
+backend/app/services/maintenance_policy.py                 # MaintenancePolicyService (Phase 2)
+backend/app/services/maintenance_proposal.py                # MaintenanceProposalService (Phase 3)
+backend/app/routers/supervised_maintenance.py               # (Phase 2)
 backend/selfmod_runner.py                                   # already protected transitively (sandbox command dispatcher)
 backend/selfmod.Dockerfile                                  # already protected transitively
 docs/supervised_maintenance/protected_scope.md               # this file — the policy defining protection cannot itself be edited through the workflow it governs
-docs/supervised_maintenance/policy.md                        # once written (Phase 6), same reasoning
+docs/supervised_maintenance/policy.md                        # written in Phase 8, same reasoning
 ```
 
 ## 2. Protected path prefixes

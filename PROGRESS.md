@@ -2,30 +2,35 @@
 
 Last check-in: 2026-07-19
 
-## New since 2026-07-19 — ECHO Supervised Maintenance Workspace v1 (Phases 1-6)
+## New since 2026-07-19 — ECHO Supervised Maintenance Workspace v1 (complete, Phases 1-8, GREEN)
 
 Built a read-only-first code analysis workspace that feeds the existing Layer 3A Part 2D self-
 modification pipeline rather than duplicating it — per the milestone's own explicit "do not create a
 second Permission Center, Audit system, Action System, Feature Flag service, or Governance Center"
 requirement. `CodeAccessService` gives Echo a contained, canonicalized, secret-safe read-only view of
-its own approved repository (which is always this backend's own running codebase — `register_repository()`
-never accepts a client-supplied path, eliminating path-injection by construction rather than
-validation); a capability-mode ladder (`disabled` → `analyse_only` → `propose_only` → `sandbox_verify`
-→ `human_approved_local_commit`) layers on top of the four independent Part 2D flags; and a thin
-`MaintenanceProposalService` wrapper calls the unmodified Part 2D `create_proposal()`/`submit_revision()`,
-tagging results with `analysis_id`. Twelve of fourteen requested components are reused unmodified or
-additively extended rather than rebuilt. A dedicated pipeline-reuse test proved the full 7-stage
-proposal → scope/compliance check → sandbox → approval → deploy → rollback flow needs zero special-
-casing for an analysis-originated proposal, and that critical-risk patches are still blocked before
-sandbox regardless of origin. Phase 6 added the human review frontend (repository registration,
-capability-mode controls, analysis lifecycle, read-only code browsing, findings, proposal generation,
-audit trail) and introduced a vitest + Testing Library frontend test framework, since none existed on
-`master`. Backend suite: **1627/1627 passed**; frontend typecheck/build clean; new frontend test suite
-4/4 passed. All maintenance feature flags default off. Phases 7 (local-commit reuse confirmation) and
-8 (adversarial hardening + final report) are next. See
+its own approved repository (which is always this backend's own running codebase —
+`register_repository()` never accepts a client-supplied path, eliminating path-injection by
+construction rather than validation); a capability-mode ladder (`disabled` → `analyse_only` →
+`propose_only` → `sandbox_verify` → `human_approved_local_commit`) layers on top of the independent
+Part 2D flags; and a thin `MaintenanceProposalService` wrapper calls the unmodified Part 2D
+`create_proposal()`/`submit_revision()`, tagging results with `analysis_id`. 12 of 14 requested
+components are reused unmodified or additively extended rather than rebuilt. Dedicated tests proved the
+full 7-stage proposal pipeline and the local-branch deploy/rollback machinery are both completely
+analysis-agnostic — zero special-casing anywhere. Phase 6 added the human review frontend and this
+repo's first frontend test framework (vitest + Testing Library). Phase 8's adversarial hardening pass
+found and fixed one real gap — `CodeAccessService` did not reject a mid-path NTFS Alternate Data Stream
+colon (`file.py:hidden_stream`); direct interpreter probing showed `Path.resolve()` silently accepted
+it — now explicitly rejected and covered by 2 dedicated tests, alongside 9 more adversarial tests
+(Windows junction escape via a real `mklink /J`, reserved device names, oversized files,
+archive-as-opaque-binary, case/separator scope bypass, prompt-injection content pass-through,
+special-character filenames). Final state: **backend 1639/1639 passed**, ruff clean, frontend
+typecheck/build clean, frontend tests 4/4 passed, 51 dedicated Supervised Maintenance tests total. All
+five maintenance feature flags default off. Final verdict: **GREEN** — see
+[ECHO_SUPERVISED_MAINTENANCE_WORKSPACE_V1_REPORT.md](ECHO_SUPERVISED_MAINTENANCE_WORKSPACE_V1_REPORT.md),
 [docs/supervised_maintenance/architecture.md](docs/supervised_maintenance/architecture.md),
-[threat_model.md](docs/supervised_maintenance/threat_model.md), and
-[tasks/ACTIVE_TASK.md](tasks/ACTIVE_TASK.md) for full detail.
+[threat_model.md](docs/supervised_maintenance/threat_model.md),
+[policy.md](docs/supervised_maintenance/policy.md), and
+[operator_guide.md](docs/supervised_maintenance/operator_guide.md).
 
 ## New since 2026-07-19 — ECHO Layer 3A Part 2D: Supervised Self-Modification
 
@@ -828,10 +833,22 @@ not just a scaffold.
 - Static import-resolution check passed (no broken relative imports, 2026-07-09).
 
 ## Gaps / next up (working priority order)
-1. Reconcile the simultaneous self-modification work's stale schema-v8 identity assertion and
-   missing `SelfModificationView`, then review Part 2C and begin Layer 3A Part 2D API and integration
-   hardening. Keep operational identity, global safety invariants, and user-specific preferences as
-   separate sources.
+1. **(Resolved, superseded)** The stale schema-v8 identity assertion / missing `SelfModificationView`
+   blocking Part 2C review are long since fixed. Layer 3A Parts 2A-2D and Supervised Maintenance
+   Workspace Phases 1-7 are all built, tested, and pushed (see top of this file). Current top
+   priority: finish Supervised Maintenance **Phase 8** — adversarial hardening tests for
+   `CodeAccessService` (path traversal/symlink/junction/secret-file/prompt-injection per
+   `docs/supervised_maintenance/threat_model.md`), remaining operator/security docs, final
+   Green/Yellow/Red report. An untracked draft of the adversarial test file
+   (`backend/tests/test_supervised_maintenance_adversarial.py`, 245 lines) and both new docs
+   (`operator_guide.md`, `policy.md`, 97 lines each) already exist locally — run/finish/commit them.
+   See `tasks/ACTIVE_TASK.md` for the full allowed-paths list and verification commands.
+1a. **New (2026-07-19 check-in)**: the working tree's `git diff --stat` shows ~14,000 total
+   insertions/deletions across files that shouldn't have changed that much this session
+   (`models.py` 4986 lines, `schemas.py` 6046, `client.ts` 6146, `ChatView.tsx` 1794, etc.) —
+   almost certainly CRLF/LF line-ending churn, not real edits. This is the same `.gitattributes`
+   gap flagged 2026-07-16/17 and never fixed. Add `* text=auto` + renormalize (`git add --renormalize .`)
+   *before* committing Phase 8 work, or the real diff will be unreviewable inside the noise.
 2. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
    (Partially underway — mobile hamburger drawer landed 2026-07-11, sidebar redesign +
    new Search/Library/Schedule pages landed 2026-07-13 — but not complete.)
@@ -1019,6 +1036,13 @@ recall, chat UI overhaul — all tested, 255 backend tests passing, frontend bui
 stale `.git/index.lock` from a Cowork sandbox session) are gone — the search-system work
 is in commits `b144ef37`/`dc56cf75`, and git reads/writes cleanly from this sandbox now
 with no lock issue.
+
+**Resolved since 2026-07-19**: the 2026-07-18 "sandbox git index is corrupt again" blocker no
+longer applies — `git log`/`git status`/`git diff --stat` all run clean from this session (real
+history through `31d2b323`, branch `master` up to date with `origin/master`, no lock/fsck errors).
+Real, current blocker instead: a large uncommitted working tree (51 modified + 3 untracked files)
+mixing genuine Phase 8 work with what looks like CRLF line-ending noise in several large files —
+see Gaps/next-up item 1a above.
 
 ## Notes for the daily check-in task
 - This file is the source of truth for "where things stand." Update the **Last check-in**
