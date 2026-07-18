@@ -16,8 +16,9 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import ActionDefinition, ActionRun, KnowledgeItem, Project, ScheduleItem, Task, _now
-from app.services import permission_center
+from app.services import identity_runtime, permission_center
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,7 @@ def _handle_summarize_file(db: Session, input: dict) -> dict:
     from app.config import get_settings
     from app.models import LibraryItem
     from app.providers.base import ChatMessage
+    from app.services import identity_context
     from app.services.local_model_router import LocalModelRouter
 
     item_id = input.get("library_item_id")
@@ -152,9 +154,15 @@ def _handle_summarize_file(db: Session, input: dict) -> dict:
         return {"library_item_id": item.id, "title": item.title, "summary": None, "note": "This file type can't be summarized (not text/PDF/code)."}
 
     router = LocalModelRouter()
+    identity_section, _identity_brief = identity_context.build_identity_prompt_section(
+        db, "document_analysis"
+    )
+    system_prompt = "Summarize the following document in 3-5 concise sentences. No preamble, no internal notes."
+    if identity_section:
+        system_prompt = f"{identity_section}\n\n{system_prompt}"
     result = router.call(
         "fast",
-        "Summarize the following document in 3-5 concise sentences. No preamble, no internal notes.",
+        system_prompt,
         [ChatMessage(role="user", content=text)],
     )
     if not result.ok:
@@ -396,6 +404,24 @@ def _needs_confirmation(spec: ActionSpec, definition: ActionDefinition, permissi
     return definition.requires_confirmation
 
 
+def _identity_requires_confirmation(db: Session, spec: ActionSpec) -> bool:
+    """Part 2B fail-safe for consequential (medium+) actions.
+
+    Low-risk local workflows keep ordinary degraded availability. When the
+    dynamic identity cannot be verified, a consequential action may still
+    proceed only through the Action System's existing explicit-confirmation
+    lifecycle; no new consent or moral-policy engine is introduced here.
+    """
+    if spec.risk_level == "low" or not get_settings().core_identity_v1_enabled:
+        return False
+    snapshot = identity_runtime.get_active_identity_snapshot(db)
+    try:
+        identity_runtime.require_verified_identity_for_consequential_action(snapshot)
+    except identity_runtime.ConsequentialIdentityUnavailableError:
+        return True
+    return False
+
+
 def run_action(db: Session, action_name: str, input: dict, confirm: bool = False) -> ActionRun:
     ensure_registered(db)
     spec = ACTIONS.get(action_name)
@@ -417,10 +443,22 @@ def run_action(db: Session, action_name: str, input: dict, confirm: bool = False
         db.refresh(run)
         return run
 
-    needs_confirmation = _needs_confirmation(spec, definition, permission_result)
+    identity_confirmation = _identity_requires_confirmation(db, spec)
+    needs_confirmation = _needs_confirmation(spec, definition, permission_result) or identity_confirmation
 
     if needs_confirmation and not confirm:
-        run = ActionRun(action_name=action_name, status="pending", risk_level=spec.risk_level, input_json=input, user_confirmed=False)
+        run = ActionRun(
+            action_name=action_name,
+            status="pending",
+            risk_level=spec.risk_level,
+            input_json=input,
+            user_confirmed=False,
+            error_summary=(
+                "Core identity verification is degraded; explicit confirmation is required."
+                if identity_confirmation
+                else None
+            ),
+        )
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -468,6 +506,7 @@ def approve_run(db: Session, run_id: str) -> ActionRun:
         return run
     run.status = "running"
     run.user_confirmed = True
+    run.error_summary = None
     db.commit()
     try:
         result = spec.handler(db, run.input_json)

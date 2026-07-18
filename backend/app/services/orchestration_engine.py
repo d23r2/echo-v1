@@ -25,7 +25,7 @@ from app.config import get_settings
 from app.models import OrchestrationPolicy, OrchestrationRun, _now
 from app.provider_errors import classify_provider_error
 from app.providers.base import ChatMessage
-from app.services import tool_strategy
+from app.services import identity_context, tool_strategy
 from app.services.cognitive_core import _task_type_for
 from app.services.intent_classifier import IntentClassification, classify_intent
 from app.services.local_intelligence_engine import LocalIntelligenceEngine
@@ -344,7 +344,17 @@ def run_orchestration(db: Session, request: schemas.OrchestrationRequest) -> Orc
         role = next((s.role for s in plan.stages if s.stage == "final"), "fast")
         local_router = LocalModelRouter()
         call_start = time.monotonic()
-        result = local_router.call(role, "You are Echo, a helpful assistant. Answer directly and concisely.", [ChatMessage(role="user", content=request.user_message)])
+        identity_section, _identity_brief = identity_context.build_identity_prompt_section(
+            db, plan.task_category
+        )
+        simple_prompt = "You are Echo, a helpful assistant. Answer directly and concisely."
+        if identity_section:
+            simple_prompt = f"{identity_section}\n\nYou are ECHO. Answer directly and concisely."
+        result = local_router.call(
+            role,
+            simple_prompt,
+            [ChatMessage(role="user", content=request.user_message)],
+        )
         duration_ms = (time.monotonic() - call_start) * 1000
         calls_made += 1
         if result.ok:
@@ -368,6 +378,7 @@ def run_orchestration(db: Session, request: schemas.OrchestrationRequest) -> Orc
         engine_result = engine.generate_response(
             request.user_message,
             conversation_id=request.conversation_id,
+            identity_context_type=plan.task_category,
             allow_cloud_fallback=plan.cloud_allowed,
             mode=mode,
         )

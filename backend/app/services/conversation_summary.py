@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import Conversation, ConversationSummary, Message
 from app.providers.base import ChatMessage
+from app.services import identity_context
 from app.services.local_model_router import LocalModelRouter
 
 logger = logging.getLogger(__name__)
@@ -79,8 +80,17 @@ def summarize_conversation(db: Session, conversation_id: str) -> ConversationSum
         return None
 
     router = LocalModelRouter()
+    identity_section, _identity_brief = identity_context.build_identity_prompt_section(db, "memory")
+    system_prompt = "You produce structured conversation summaries only."
+    if identity_section:
+        system_prompt = (
+            f"{identity_section}\n\n{system_prompt} Do not infer or persist changes to ECHO's "
+            "operational identity, commitments, consciousness, feelings, or global values."
+        )
     result = router.call(
-        "fast", "You produce structured conversation summaries only.", [ChatMessage(role="user", content=_SUMMARY_PROMPT.format(transcript=_transcript_for(messages)))]
+        "fast",
+        system_prompt,
+        [ChatMessage(role="user", content=_SUMMARY_PROMPT.format(transcript=_transcript_for(messages)))],
     )
     parsed = _parse_summary_json(result.text) if result.ok else None
     data = parsed or _deterministic_fallback(conversation, messages)

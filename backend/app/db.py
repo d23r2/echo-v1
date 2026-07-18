@@ -76,6 +76,7 @@ def init_db() -> None:
     _ensure_layer2a_cognitive_columns()
     _seed_action_reliability_core()
     _seed_cognitive_core()
+    _seed_core_identity()
     _ensure_schema_version()
 
 
@@ -203,7 +204,12 @@ def _ensure_layer1_memory_columns() -> None:
 # Center — new tables (goals, goal_reviews, context_selection_metrics)
 # created by Base.metadata.create_all() above, plus two additive columns on
 # pre-existing tables (tasks.goal_id, plans.goal_id) via _ensure_column().
-CURRENT_SCHEMA_VERSION = 7
+# v8 (ECHO Layer 3A Part 2A): Core Identity data foundation — new tables
+# only (assistant_identity_profiles, identity_commitments), created by
+# Base.metadata.create_all() above with no _ensure_column() calls needed
+# since nothing existing gained a column. See
+# ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md section 11.
+CURRENT_SCHEMA_VERSION = 8
 
 
 def _ensure_schema_version() -> None:
@@ -245,6 +251,23 @@ def _seed_cognitive_core() -> None:
 
     with SessionLocal() as db:
         cognitive_core.seed_world_model(db)
+
+
+def _seed_core_identity() -> None:
+    """ECHO Layer 3A Part 2A — same delegation pattern as
+    _seed_action_reliability_core()/_seed_cognitive_core(): one idempotent
+    seeding implementation, called both here (real startup) and directly by
+    tests using the isolated db_session fixture. Creates the default
+    "echo-primary" identity profile (active, version 1) only if no identity
+    profile exists yet for that key — never duplicates, never overwrites an
+    already-seeded or user-modified identity. Gated behind
+    core_identity_v1_enabled (default True — see config.py's comment)."""
+    if not settings.core_identity_v1_enabled:
+        return
+    from app.services import identity_service
+
+    with SessionLocal() as db:
+        identity_service.ensure_default_identity(db)
 
 
 def _ensure_atlas_memory_type_column() -> None:

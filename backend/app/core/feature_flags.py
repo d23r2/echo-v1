@@ -110,6 +110,15 @@ def list_feature_flags(settings: Settings, db: Session | None = None) -> list[Fe
     flags.append(_flag("human_persona", "Human Persona", True, source="default"))
     flags.append(
         _flag(
+            "core_identity",
+            "Core Identity runtime",
+            settings.core_identity_v1_enabled,
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
             "operational_self_model",
             "Operational Self-Model",
             True,  # actual on/off is the InterfaceSettings DB row, checked by callers with db access

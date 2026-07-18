@@ -9,7 +9,8 @@ from app.human_persona import CHARACTER_CODE, UNCERTAINTY_GUIDANCE
 from app.models import Conversation, TaskUnderstanding
 from app.schemas import AtlasCitation
 from app.search_intent import detect_search_intent
-from app.services import cognitive_core, memory_retrieval, operational_self_model
+from app.services import cognitive_core, identity_context, memory_retrieval, operational_self_model
+from app.services.intent_classifier import classify_intent
 from app.web_search import GatherResult, SourceResult
 
 BEHAVIOR_DIRECTIVES = """
@@ -337,8 +338,15 @@ def build_system_prompt(
         latest_message=latest_user_message,
     )
 
-    sections = [
-        constitution_view["full_text"],
+    identity_section, _identity_brief = identity_context.build_identity_prompt_section(
+        db, classify_intent(latest_user_message, conversation_id).intent
+    )
+    sections = [constitution_view["full_text"]]
+    if identity_section:
+        # Trusted policy/identity precedes communication persona and every
+        # user-, memory-, web-, document-, and tool-derived context block.
+        sections += ["", identity_section]
+    sections += [
         "",
         CHARACTER_CODE,
         "",

@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 EpistemicStatus = Literal["Verified", "Inferred", "Hypothesis", "Narrative"]
 MemoryType = Literal[
@@ -63,6 +63,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     message: str
     provider: str = "auto"
+    goal_id: str | None = None
     # Lightweight tester identity (Human Persona Layer v1) — normally supplied via
     # the X-Tester-Id header (see app/tester.py); this field exists for API callers
     # (docs, tests) that prefer body-level control. The header wins if both are set.
@@ -748,6 +749,7 @@ class TaskCreate(BaseModel):
     description: str | None = None
     priority: Priority = "medium"
     project_id: str | None = None
+    goal_id: str | None = None
     due_at: datetime | None = None
     source_type: str | None = None
     source_id: str | None = None
@@ -760,6 +762,7 @@ class TaskUpdate(BaseModel):
     status: TaskStatus | None = None
     priority: Priority | None = None
     project_id: str | None = None
+    goal_id: str | None = None
     due_at: datetime | None = None
     tags: list[str] | None = None
     sort_order: int | None = None
@@ -772,6 +775,7 @@ class TaskOut(BaseModel):
     status: TaskStatus
     priority: Priority
     project_id: str | None
+    goal_id: str | None
     # Populated by the router via a single bulk project_id -> title lookup,
     # not stored on the row — avoids N+1 queries and a fragile join in every
     # list endpoint while still letting the frontend show "Project X" next
@@ -2069,6 +2073,7 @@ class PlanCreate(BaseModel):
     system_model_id: str | None = None
     task_id: str | None = None
     project_id: str | None = None
+    goal_id: str | None = None
     steps: list[PlanStepCreate] = Field(default_factory=list)  # empty -> auto-generate a minimum viable plan
 
 
@@ -2077,6 +2082,7 @@ class PlanUpdate(BaseModel):
     assumptions: list[str] | None = None
     constraints: list[str] | None = None
     success_criteria: list[str] | None = None
+    goal_id: str | None = None
 
 
 class PlanValidationIssue(BaseModel):
@@ -2121,6 +2127,7 @@ class PlanOut(_UtcAssumingModel):
     system_model_id: str | None
     task_id: str | None
     project_id: str | None
+    goal_id: str | None
     revision_number: int
     superseded_by_plan_id: str | None
     created_at: datetime
@@ -2438,15 +2445,24 @@ class ContextRequest(BaseModel):
     required_context_types: list[str] = Field(default_factory=list)
     privacy_level: PrivacyLevel = "local_only"
     freshness_requirement: ContextFreshness = "any"
-    max_tokens: int | None = None
-    max_chars: int | None = None
+    max_tokens: int | None = Field(default=None, gt=0)
+    max_chars: int | None = Field(default=None, gt=0)
 
 
 class ContextBundle(BaseModel):
+    # Mandatory trusted system context. It participates in selection/budget
+    # accounting but is excluded from normal API serialization so the
+    # runtime prompt section and identity diagnostics are not exposed as
+    # caller-visible context data.
+    identity_context: str | None = Field(default=None, exclude=True)
     cognitive_brief: str | None = None
+    success_criteria: list[str] = Field(default_factory=list)
+    has_missing_knowledge: bool = False
     memory_brief: str | None = None
+    conversation_brief: str | None = None
     goal_context: str | None = None
     project_context: str | None = None
+    schedule_context: str | None = None
     relevant_skills: list[str] = Field(default_factory=list)
     relevant_documents: list[str] = Field(default_factory=list)
     system_or_simulation_context: str | None = None
@@ -2462,6 +2478,20 @@ class ContextBundle(BaseModel):
     budget_chars: int = 0
     compressed: bool = False
     fallback_used: bool = False
+
+    # Service-internal provenance needed by LocalIntelligenceEngine. Private
+    # attributes never appear in API serialization, so callers get the
+    # compact public bundle while the response path retains real citation
+    # rows and structured search evidence instead of reconstructing them.
+    _atlas_citations: list[Any] = PrivateAttr(default_factory=list)
+    _gather_result: Any = PrivateAttr(default=None)
+    _identity_profile_id: str | None = PrivateAttr(default=None)
+    _identity_version: int | None = PrivateAttr(default=None)
+    _identity_fingerprint: str | None = PrivateAttr(default=None)
+    _identity_fallback_used: bool = PrivateAttr(default=False)
+    _identity_validation_status: str | None = PrivateAttr(default=None)
+    _identity_context_type: str | None = PrivateAttr(default=None)
+    _identity_brief_size: int = PrivateAttr(default=0)
 
 
 class ContextSelectionPreviewOut(BaseModel):
@@ -2494,3 +2524,136 @@ class IntelligenceOverviewOut(BaseModel):
     intelligence_health_reasons: list[str] = Field(default_factory=list)
     routing_status_summary: str
     last_evaluation_summary: str | None = None
+
+
+# ---- ECHO Layer 3A Part 2A: Core Identity data foundation ----
+# See ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md section 8/12.
+# Deliberately no schema here represents a user moral value, permission, or
+# private memory — that is out of scope for Core Identity by design.
+
+IdentityStatus = Literal["draft", "active", "superseded", "archived"]
+# Never "inferred_user" — a user interaction must never silently rewrite
+# ECHO's own core identity (see identity_service.py's validation).
+IdentitySource = Literal[
+    "system_default", "migration", "administrator", "application_update", "explicit_configuration", "imported"
+]
+CommitmentCategory = Literal[
+    "honesty",
+    "uncertainty",
+    "autonomy",
+    "consent",
+    "privacy",
+    "non_manipulation",
+    "reliability",
+    "safety",
+    "accessibility",
+    "communication",
+    "local_first",
+    "identity_boundary",
+    "capability_boundary",
+    "governance",
+]
+EnforcementLevel = Literal["informational", "advisory", "confirmation_required", "blocking", "invariant"]
+
+
+class IdentityCommitmentCreate(BaseModel):
+    commitment_key: str
+    title: str
+    description: str
+    category: CommitmentCategory
+    priority: int = 200
+    enforcement_level: EnforcementLevel = "advisory"
+    user_visible: bool = True
+    active: bool = True
+    source: IdentitySource = "system_default"
+    effective_from: datetime | None = None
+    effective_until: datetime | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+class IdentityCommitmentRead(_UtcAssumingModel):
+    """User/developer-facing shape — deliberately omits metadata_json (see
+    ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md section 16's
+    'never expose internal-only metadata by default' rule)."""
+
+    id: str
+    identity_profile_id: str
+    commitment_key: str
+    title: str
+    description: str
+    category: CommitmentCategory
+    priority: int
+    enforcement_level: EnforcementLevel
+    user_visible: bool
+    active: bool
+    source: IdentitySource
+    effective_from: datetime | None
+    effective_until: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class IdentityProfileDraftCreate(BaseModel):
+    """Input for creating a new draft identity version — never activates it;
+    see IdentityActivationRequest for that separate, explicit step."""
+
+    profile_key: str = "echo-primary"
+    display_name: str
+    subtitle: str | None = None
+    public_role: str
+    internal_role: str
+    persona_summary: str
+    capability_summary: str
+    limitation_summary: str
+    source: IdentitySource = "explicit_configuration"
+    created_by: str | None = None
+    metadata: dict = Field(default_factory=dict)
+    commitments: list[IdentityCommitmentCreate] = Field(default_factory=list)
+
+
+class IdentityProfileRead(_UtcAssumingModel):
+    """Full, user/developer-facing shape. Deliberately omits metadata_json."""
+
+    id: str
+    profile_key: str
+    display_name: str
+    subtitle: str | None
+    public_role: str
+    internal_role: str
+    persona_summary: str
+    capability_summary: str
+    limitation_summary: str
+    version_number: int
+    status: IdentityStatus
+    effective_from: datetime | None
+    effective_until: datetime | None
+    source: IdentitySource
+    created_by: str | None
+    superseded_by_identity_id: str | None
+    created_at: datetime
+    updated_at: datetime
+    commitments: list[IdentityCommitmentRead] = Field(default_factory=list)
+
+
+class IdentityProfileSummary(_UtcAssumingModel):
+    """Compact shape for history/list views — no commitments, no role/
+    persona/capability/limitation text."""
+
+    id: str
+    profile_key: str
+    display_name: str
+    version_number: int
+    status: IdentityStatus
+    created_at: datetime
+
+
+class IdentityActivationRequest(BaseModel):
+    identity_id: str
+
+
+class IdentityActivationResult(BaseModel):
+    activated_id: str
+    previous_active_id: str | None
+    profile_key: str
+    version_number: int
+    activated_at: datetime

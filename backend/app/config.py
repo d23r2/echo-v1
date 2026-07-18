@@ -273,6 +273,18 @@ class Settings(BaseSettings):
     # services/context_selector.py.
     context_selection_v2_enabled: bool = False
 
+    # --- ECHO Layer 3A Part 2A: Core Identity data foundation ---
+    # Default True (unlike the flags above): this milestone only adds new,
+    # previously-nonexistent tables and a bootstrap seed — nothing existing
+    # reads or is affected by them yet, so there's no "don't break existing
+    # chat" risk to gate against. Runtime prompt integration (the part that
+    # *would* change model-visible behavior) is explicitly Part 2B's job and
+    # is gated at every runtime integration seam by this same flag. When
+    # disabled, the legacy persona/prompt behavior remains byte-for-byte
+    # active and identity tables may remain present but unused at runtime.
+    core_identity_v1_enabled: bool = True
+    core_identity_cache_ttl_seconds: int = 300
+
     # --- Observability ---
     metrics_enabled: bool = True
     request_logging_enabled: bool = True
@@ -298,6 +310,11 @@ class Settings(BaseSettings):
             problems.append(f"max_concurrent_model_requests must be positive, got {self.max_concurrent_model_requests}")
         if self.cache_ttl_seconds < 0:
             problems.append(f"cache_ttl_seconds cannot be negative, got {self.cache_ttl_seconds}")
+        if self.core_identity_cache_ttl_seconds < 0:
+            problems.append(
+                "core_identity_cache_ttl_seconds cannot be negative, got "
+                f"{self.core_identity_cache_ttl_seconds}"
+            )
         return problems
 
     # Field names that must never appear in a diagnostics/status response —

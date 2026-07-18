@@ -24,6 +24,7 @@ from app import human_persona, schemas
 from app.config import get_settings
 from app.providers.base import ChatMessage
 from app.services import cognitive_core, context_selector
+from app.services import identity_context as identity_context_builder
 from app.services.context_gatherer import GatheredContext, gather_context
 from app.services.intent_classifier import IntentClassification, classify_intent
 from app.services.local_model_router import LocalModelRouter, ModelRole
@@ -92,9 +93,14 @@ def _context_block(context: GatheredContext) -> str:
     for label, items in (
         ("Relevant memory", context.memory_context),
         ("Earlier conversation", context.conversation_context),
+        ("Active goal", context.goal_context),
         ("Active projects", context.project_context),
         ("Relevant tasks", context.task_context),
         ("Upcoming reminders", context.schedule_context),
+        ("Relevant skills", context.skill_context),
+        ("Systems context", context.system_context),
+        ("Decision and plan context", context.decision_plan_context),
+        ("Active permissions", context.permission_context),
         ("Relevant files", context.library_context),
         ("Background (Wikipedia)", context.wiki_context),
         ("Current headlines", context.rss_context),
@@ -117,26 +123,26 @@ def _context_bundle_to_gathered(bundle: schemas.ContextBundle) -> GatheredContex
     _build_draft_system_prompt()/_context_block() need no changes at all —
     the prompt builder genuinely consumes one compact ContextBundle, it just
     arrives through the existing rendering path rather than a second one.
-    Goal/system/decision context (which GatheredContext has no dedicated
-    field for) is folded into project_context so it still reaches the
-    prompt — never silently dropped."""
-    project_lines = []
-    if bundle.project_context:
-        project_lines.append(bundle.project_context)
-    if bundle.goal_context:
-        project_lines.append(bundle.goal_context)
-    if bundle.system_or_simulation_context:
-        project_lines.append(bundle.system_or_simulation_context)
-    if bundle.decision_or_plan_context:
-        project_lines.append(bundle.decision_or_plan_context)
-
+    The adapter preserves every prompt-bearing category plus the private
+    Atlas/search provenance required for honest citations and confidence
+    metadata — nothing is reconstructed from display strings."""
     return GatheredContext(
+        identity_context=bundle.identity_context,
         memory_context=[bundle.memory_brief] if bundle.memory_brief else [],
-        project_context=project_lines,
+        conversation_context=[bundle.conversation_brief] if bundle.conversation_brief else [],
+        goal_context=[bundle.goal_context] if bundle.goal_context else [],
+        project_context=[bundle.project_context] if bundle.project_context else [],
+        schedule_context=[bundle.schedule_context] if bundle.schedule_context else [],
+        skill_context=list(bundle.relevant_skills),
         library_context=list(bundle.relevant_documents),
+        system_context=[bundle.system_or_simulation_context] if bundle.system_or_simulation_context else [],
+        decision_plan_context=[bundle.decision_or_plan_context] if bundle.decision_or_plan_context else [],
+        permission_context=list(bundle.active_permissions),
         web_context=list(bundle.tool_evidence),
         source_display_names=list(bundle.provenance_summary),
-        warnings=([bundle.uncertainty_summary] if bundle.uncertainty_summary else []) + list(bundle.excluded_context_summary),
+        warnings=[bundle.uncertainty_summary] if bundle.uncertainty_summary else [],
+        atlas_citations=list(bundle._atlas_citations),
+        gather_result=bundle._gather_result,
     )
 
 
@@ -165,7 +171,13 @@ def _persona_compact_overlay(db: Session, tester_id: str) -> str | None:
 def _build_draft_system_prompt(
     db: Session, intent: IntentClassification, context: GatheredContext, tester_id: str, cognitive_brief_text: str | None = None
 ) -> str:
-    parts = [
+    identity_section = context.identity_context
+    if identity_section is None:
+        identity_section, _brief = identity_context_builder.build_identity_prompt_section(db, intent.intent)
+    parts = []
+    if identity_section:
+        parts += [identity_section, ""]
+    parts += [
         human_persona.CHARACTER_CODE,
         "",
         "You are ECHO. Answer the user's message directly and honestly.",
@@ -353,6 +365,8 @@ class LocalIntelligenceEngine:
         prompt = _CRITIC_PROMPT_TEMPLATE.format(
             message=message, draft=draft, context=_context_block(context), answer_style=intent.answer_style, success_criteria_block=success_criteria_block
         )
+        if context.identity_context:
+            prompt = f"{context.identity_context}\n\n{prompt}"
         result = self.model_router.call("critic", prompt, [ChatMessage(role="user", content="Evaluate the draft.")])
         if not result.ok:
             return None
@@ -368,13 +382,17 @@ class LocalIntelligenceEngine:
             answer_style_instruction=_ANSWER_STYLE_INSTRUCTION.get(intent.answer_style, ""),
             source_rules=_SOURCE_RULES,
         )
+        if context.identity_context:
+            prompt = f"{context.identity_context}\n\n{prompt}"
         result = self.model_router.call("reasoning", prompt, [ChatMessage(role="user", content=message)])
         if not result.ok or not result.text.strip():
             return None
         return result.text.strip()
 
-    def _run_style_shorten(self, draft: str) -> str | None:
+    def _run_style_shorten(self, draft: str, identity_section: str | None = None) -> str | None:
         prompt = _STYLE_SHORTEN_PROMPT_TEMPLATE.format(draft=draft)
+        if identity_section:
+            prompt = f"{identity_section}\n\n{prompt}"
         result = self.model_router.call("writing", prompt, [ChatMessage(role="user", content="Shorten this.")])
         if not result.ok or not result.text.strip():
             return None
@@ -430,6 +448,8 @@ class LocalIntelligenceEngine:
         conversation_id: str | None = None,
         tester_id: str = "default",
         active_project_id: str | None = None,
+        goal_id: str | None = None,
+        identity_context_type: str | None = None,
         mode: str | None = None,
         allow_cloud_fallback: bool = False,
         history: list[ChatMessage] | None = None,
@@ -450,15 +470,22 @@ class LocalIntelligenceEngine:
         # when this flag is off.
         if settings.context_selection_v2_enabled:
             bundle = context_selector.select_context(
-                self.db, schemas.ContextRequest(user_message=user_message, conversation_id=conversation_id, project_id=active_project_id)
+                self.db,
+                schemas.ContextRequest(
+                    user_message=user_message,
+                    conversation_id=conversation_id,
+                    project_id=active_project_id,
+                    goal_id=goal_id,
+                ),
             )
             context = _context_bundle_to_gathered(bundle)
             pipeline_steps.append("context_bundle:v2")
             cognitive_brief_text = bundle.cognitive_brief
-            success_criteria: list[str] = []
-            has_missing_knowledge = bool(bundle.uncertainty_summary)
+            success_criteria = list(bundle.success_criteria)
+            has_missing_knowledge = bundle.has_missing_knowledge
             if cognitive_brief_text:
                 pipeline_steps.append("cognitive_brief:built")
+
         else:
             context = gather_context(self.db, intent, user_message, conversation_id, active_project_id)
             pipeline_steps.append("context_gathered")
@@ -469,6 +496,16 @@ class LocalIntelligenceEngine:
             cognitive_brief_text, success_criteria, has_missing_knowledge = self._cognitive_brief(user_message, conversation_id)
             if cognitive_brief_text:
                 pipeline_steps.append("cognitive_brief:built")
+
+        # Resolve one immutable identity snapshot/brief for this request. It
+        # is reused by draft, critic, repair, style, and cloud fallback so an
+        # in-flight request cannot drift across a hot-swap.
+        if identity_context_type is not None or context.identity_context is None:
+            context.identity_context, _identity_brief = (
+                identity_context_builder.build_identity_prompt_section(
+                    self.db, identity_context_type or intent.intent
+                )
+            )
 
         # Step 3: model role
         role = _select_role(intent, quality_mode)
@@ -539,7 +576,7 @@ class LocalIntelligenceEngine:
             intent.answer_style == "short" and len(answer) > 400
         )
         if needs_shortening:
-            shortened = self._run_style_shorten(answer)
+            shortened = self._run_style_shorten(answer, context.identity_context)
             if shortened:
                 answer = shortened
                 pipeline_steps.append("style:shortened")

@@ -25,6 +25,7 @@ from collections import defaultdict
 _lock = threading.Lock()
 _counters: dict[str, int] = defaultdict(int)
 _durations: dict[str, list[float]] = defaultdict(list)
+_measurements: dict[str, list[float]] = defaultdict(list)
 _MAX_SAMPLES_PER_KEY = 500  # bounded — never grows unboundedly for a long-running process
 _start_time = time.monotonic()
 
@@ -40,6 +41,20 @@ def record_duration(name: str, elapsed_ms: float, **tags: str) -> None:
     with _lock:
         samples = _durations[key]
         samples.append(elapsed_ms)
+        if len(samples) > _MAX_SAMPLES_PER_KEY:
+            del samples[: len(samples) - _MAX_SAMPLES_PER_KEY]
+
+
+def record_value(name: str, value: float, **tags: str) -> None:
+    """Record a bounded non-time measurement such as a prompt size.
+
+    Like durations, values are summarized at read time and accept only short
+    labels—never prompts, messages, or other raw content.
+    """
+    key = _make_key(name, tags)
+    with _lock:
+        samples = _measurements[key]
+        samples.append(value)
         if len(samples) > _MAX_SAMPLES_PER_KEY:
             del samples[: len(samples) - _MAX_SAMPLES_PER_KEY]
 
@@ -70,10 +85,20 @@ def snapshot() -> dict:
                 "avg_ms": round(sum(samples) / len(samples), 1),
                 "max_ms": round(max(samples), 1),
             }
+        measurement_summary = {}
+        for key, samples in _measurements.items():
+            if not samples:
+                continue
+            measurement_summary[key] = {
+                "count": len(samples),
+                "avg": round(sum(samples) / len(samples), 1),
+                "max": round(max(samples), 1),
+            }
     return {
         "uptime_seconds": round(uptime_seconds(), 1),
         "counters": counters,
         "durations": duration_summary,
+        "measurements": measurement_summary,
     }
 
 
@@ -83,3 +108,4 @@ def reset() -> None:
     with _lock:
         _counters.clear()
         _durations.clear()
+        _measurements.clear()

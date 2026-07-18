@@ -89,6 +89,18 @@ def _clear_provider_cooldowns():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _isolate_runtime_identity_cache():
+    """Runtime identity is process-cached in production. Tests use a fresh
+    SQLite database per case, so retaining a snapshot across cases would
+    couple unrelated temporary databases and conceal cache misses."""
+    from app.services import identity_runtime
+
+    identity_runtime.reset_runtime_state_for_tests()
+    yield
+    identity_runtime.reset_runtime_state_for_tests()
+
+
 @pytest.fixture()
 def db_session():
     """A fresh, isolated SQLite database for a single test. Each test gets its

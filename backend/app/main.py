@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.core.errors import RequestIDMiddleware, register_exception_handlers
 from app.core.logging import configure_logging
-from app.db import init_db
+from app.db import SessionLocal, init_db
 from app.routers import (
     actions,
     amendments,
@@ -39,6 +39,7 @@ from app.routers import (
     tools,
     usage,
 )
+from app.services import identity_runtime
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -51,6 +52,15 @@ async def lifespan(app: FastAPI):
     for problem in problems:
         logger.warning("startup config problem: %s", problem)
     init_db()
+    # Part 2B: preload a validated, immutable identity snapshot after schema
+    # creation/bootstrap. No network calls occur. A missing/corrupt database
+    # identity activates the deterministic local fallback and startup
+    # continues in an observable degraded state.
+    try:
+        with SessionLocal() as db:
+            identity_runtime.refresh_active_identity(db, reason="startup")
+    except Exception as exc:
+        logger.warning("identity runtime preload failed safely: %s", type(exc).__name__)
     logger.info(
         "ECHO backend started — app_env=%s version=%s ollama_enabled=%s",
         settings.app_env,

@@ -2,6 +2,56 @@
 
 Last check-in: 2026-07-18
 
+## New since 2026-07-18 — ECHO Layer 3A Part 2B: Identity Runtime and Prompt Integration
+
+Implemented the runtime boundary on top of Part 2A: validated frozen identity snapshots, stable
+non-secret fingerprints, existing-cache integration with explicit activation/archive invalidation,
+atomic last-valid retention, deterministic degraded fallback, context-specific budgeted
+`IdentityBrief` construction, protected Context Selection v2 identity context, startup preload,
+safe status/version/developer diagnostics, and bounded logs/metrics. The same trusted identity
+section now reaches ordinary chat, streaming/upload chat, welcome generation, Local Intelligence
+draft/critic/repair/style passes, orchestration simple/standard/deep paths, cloud and Ollama
+fallback/retry, tool document summaries, and conversation summaries. Provider adapters remain
+transport-only and receive the identical composed system prompt. The flag-off path preserves legacy
+prompt/action behavior; degraded runtime identity forces medium/high/destructive actions through the
+existing explicit-confirmation lifecycle. Full verification results are recorded in
+[ECHO_LAYER_3A_PART2B_IDENTITY_RUNTIME_REPORT.md](ECHO_LAYER_3A_PART2B_IDENTITY_RUNTIME_REPORT.md);
+architecture, budgets, provider matrix, runbook, and security notes are in
+[ECHO_LAYER_3A_PART2B_IDENTITY_RUNTIME_ARCHITECTURE.md](ECHO_LAYER_3A_PART2B_IDENTITY_RUNTIME_ARCHITECTURE.md).
+
+## New since 2026-07-18 — ECHO Layer 3A Part 2A: Core Identity Database Foundation
+
+Implemented the first production Layer 3A slice without runtime prompt integration: versioned
+`AssistantIdentityProfile` and per-version `IdentityCommitment` tables (schema v8), a deterministic
+14-commitment `echo-primary` seed, typed repository/lifecycle functions, strict JSON/secret-safe
+metadata validation, and safe structured lifecycle events. Activation is transactional and backed by
+a SQLite partial unique index; replacement flush order, typed rollback, and a real two-session race
+are tested. The false-consciousness guard now matches explicit positive claims rather than treating
+any unrelated “no/not” in a sentence as a denial. **93/93 dedicated identity tests and all 1401
+combined-worktree backend tests pass**, backend lint and focused identity mypy pass, and frontend
+typecheck/no-write build are clean. See
+[ECHO_LAYER_3A_PART2A_CORE_IDENTITY_ARCHITECTURE.md](ECHO_LAYER_3A_PART2A_CORE_IDENTITY_ARCHITECTURE.md)
+and [ECHO_LAYER_3A_PART2A_CORE_IDENTITY_REPORT.md](ECHO_LAYER_3A_PART2A_CORE_IDENTITY_REPORT.md).
+No API, prompt injection, user values, consent records, or moral-evaluation engine was added; those
+remain later Layer 3A work.
+
+## New since 2026-07-18 — Layer 2E review remediation
+
+- Closed the post-review approval bypass: system-suggested goals can no longer become active through
+  the generic PATCH route and must use explicit approval.
+- Completed end-to-end goal linkage for tasks, plans, replans, chat context, and the corresponding
+  create/select UI; goal cards now support activate/resume/pause and collect a real abandonment
+  reason.
+- Restored Context Selection v2 fidelity (conversation, schedule, goal/system/decision/permission
+  context, cognitive success criteria, Atlas citations, and gather diagnostics), added honest
+  required-context fallbacks, and persist privacy-safe selection metrics without raw prompt content.
+- Evaluation fixtures now execute in an isolated in-memory database, so evaluation runs retain their
+  results without polluting the user's goals, plans, decisions, or task understandings.
+- Verification: the focused regression set is 111/111, Ruff is clean, and the production frontend
+  build passes. Its intermediate full run reached 1376 passes plus 3 failures in the separate Layer
+  3A activation work; the Part 2A continuation above fixed those failures, and the final combined
+  suite is now 1401/1401.
+
 ## New since 2026-07-18 (yet even later) — ECHO Layer 3A Part 1: Core Identity and Moral Compass — Architecture Audit
 
 **Audit and design only — no production code, no schema changes, no commit.** Five parallel research
@@ -716,13 +766,16 @@ not just a scaffold.
 - Static import-resolution check passed (no broken relative imports, 2026-07-09).
 
 ## Gaps / next up (working priority order)
-1. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
+1. Review and begin Layer 3A Part 2C: Persona Engine, Communication Style, Relationship Model,
+   Accessibility Adaptation, and User Preference Integration. Keep operational identity, global
+   safety invariants, and user-specific preferences as separate sources.
+2. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
    (Partially underway — mobile hamburger drawer landed 2026-07-11, sidebar redesign +
    new Search/Library/Schedule pages landed 2026-07-13 — but not complete.)
-2. See PROJECT_HEALTH_REPORT.md's "Next 5 zero-cost priorities" for the current top
+3. See PROJECT_HEALTH_REPORT.md's "Next 5 zero-cost priorities" for the current top
    picks (ComfyUI real generation, frontend test setup, Schedule background
    notifications, real Groq/OpenRouter providers, `npm audit fix`).
-3. Self-improvement verification's `git status`/`git diff --stat` checks report
+4. Self-improvement verification's `git status`/`git diff --stat` checks report
    "unavailable" inside the production Docker container — the image only ships `app/`
    (see `backend/Dockerfile`), not a `.git` directory, so there's genuinely nothing for
    git to check even though the binary itself is now installed. Not a bug to fix further;

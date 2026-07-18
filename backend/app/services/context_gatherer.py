@@ -37,12 +37,21 @@ _SOURCE_LABELS = {
 
 @dataclass
 class GatheredContext:
+    # Trusted system identity is deliberately not emitted by as_dict() or
+    # rendered inside the untrusted CONTEXT block. Local prompt composition
+    # places it before all retrieved/user-controlled material.
+    identity_context: str | None = None
     memory_context: list[str] = field(default_factory=list)
     project_context: list[str] = field(default_factory=list)
     task_context: list[str] = field(default_factory=list)
     schedule_context: list[str] = field(default_factory=list)
     library_context: list[str] = field(default_factory=list)
     conversation_context: list[str] = field(default_factory=list)
+    goal_context: list[str] = field(default_factory=list)
+    skill_context: list[str] = field(default_factory=list)
+    system_context: list[str] = field(default_factory=list)
+    decision_plan_context: list[str] = field(default_factory=list)
+    permission_context: list[str] = field(default_factory=list)
     wiki_context: list[str] = field(default_factory=list)
     rss_context: list[str] = field(default_factory=list)
     web_context: list[str] = field(default_factory=list)
@@ -62,6 +71,11 @@ class GatheredContext:
             "schedule_context": self.schedule_context,
             "library_context": self.library_context,
             "conversation_context": self.conversation_context,
+            "goal_context": self.goal_context,
+            "skill_context": self.skill_context,
+            "system_context": self.system_context,
+            "decision_plan_context": self.decision_plan_context,
+            "permission_context": self.permission_context,
             "wiki_context": self.wiki_context,
             "rss_context": self.rss_context,
             "web_context": self.web_context,

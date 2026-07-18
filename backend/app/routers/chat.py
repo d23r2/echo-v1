@@ -32,7 +32,7 @@ from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError
 from app.router import router as model_router
-from app.services import memory_privacy
+from app.services import identity_context, memory_privacy
 from app.tester import get_tester_id
 from app.web_search import GatherResult
 
@@ -156,6 +156,7 @@ def _try_local_intelligence_engine(
         payload.message,
         conversation_id=conversation.id,
         tester_id=tester_id,
+        goal_id=payload.goal_id,
         mode=quality_mode,
         history=history,
         # The engine's own settings.cloud_fallback_enabled check (off by
@@ -1087,6 +1088,10 @@ def get_welcome_greeting(db: Session = Depends(get_db)):
         system_prompt = _WELCOME_PROMPT_WITH_MEMORIES.format(memories=memory_lines)
     else:
         system_prompt = _WELCOME_PROMPT_EMPTY
+
+    identity_section, _identity_brief = identity_context.build_identity_prompt_section(db, "general_chat")
+    if identity_section:
+        system_prompt = f"{identity_section}\n\n{system_prompt}"
 
     try:
         result, _provider_used, _fallback_note = model_router.chat(

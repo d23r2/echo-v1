@@ -6,6 +6,7 @@ from pathlib import Path
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -1914,4 +1916,164 @@ class ContextSelectionMetric(Base):
     compressed: Mapped[bool] = mapped_column(Boolean, default=False)
     fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+# ---- ECHO Layer 3A Part 2A — Core Identity data foundation ----
+#
+# Domain boundary (see ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md
+# section 8): this represents ECHO's own stable, versioned operational identity
+# and behavioral commitments — never a user's moral values, permissions, or
+# private memory. Deliberately no `user_id` anywhere (this is a confirmed
+# single-user app — see the architecture doc section 3.9). Deliberately no
+# separate `AssistantIdentityRevision`/`PolicyDefinition` tables — identity
+# history is the immutable version rows themselves (status transitions,
+# never overwritten in place), and the existing `constitution.py`
+# (CORE_VALUES/VALUE_INVARIANTS) plus `OrchestrationPolicy` already cover
+# what a generic policy table would duplicate.
+
+
+class AssistantIdentityProfile(Base):
+    """One versioned snapshot of ECHO's operational identity. Never updated
+    in place for a meaningful change — see services/identity_service.py's
+    create_new_identity_version()/activate_identity(): a new row is always
+    created and the old one is marked "superseded", so history is never
+    silently overwritten. `status` is the sole lifecycle field (no separate
+    is_active boolean), matching the Goal/Plan/DecisionCase convention
+    elsewhere in this codebase."""
+
+    __tablename__ = "assistant_identity_profiles"
+    __table_args__ = (
+        UniqueConstraint("profile_key", "version_number", name="uq_identity_profile_key_version"),
+        CheckConstraint("version_number > 0", name="ck_identity_profile_version_positive"),
+        CheckConstraint("length(trim(profile_key)) > 0", name="ck_identity_profile_key_nonempty"),
+        CheckConstraint("length(trim(display_name)) > 0", name="ck_identity_profile_name_nonempty"),
+        CheckConstraint(
+            "status IN ('draft', 'active', 'superseded', 'archived')",
+            name="ck_identity_profile_status",
+        ),
+        CheckConstraint(
+            "source IN ('system_default', 'migration', 'administrator', "
+            "'application_update', 'explicit_configuration', 'imported')",
+            name="ck_identity_profile_source",
+        ),
+        CheckConstraint(
+            "effective_until IS NULL OR effective_from IS NULL OR effective_until > effective_from",
+            name="ck_identity_profile_effective_dates",
+        ),
+        Index("ix_identity_profiles_profile_key", "profile_key"),
+        Index("ix_identity_profiles_status", "status"),
+        Index("ix_identity_profiles_active_lookup", "profile_key", "status"),
+        # SQLite supports partial unique indexes. This is the final backstop
+        # against two transactions leaving two active rows for one profile
+        # key; identity_service.activate_identity() also enforces the rule
+        # transactionally and translates collisions into a typed error.
+        Index(
+            "uq_identity_profiles_one_active",
+            "profile_key",
+            unique=True,
+            sqlite_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    profile_key: Mapped[str] = mapped_column(String, default="echo-primary")
+    display_name: Mapped[str] = mapped_column(String)
+    subtitle: Mapped[str | None] = mapped_column(String, nullable=True)
+    public_role: Mapped[str] = mapped_column(Text)
+    internal_role: Mapped[str] = mapped_column(Text)
+    persona_summary: Mapped[str] = mapped_column(Text)
+    capability_summary: Mapped[str] = mapped_column(Text)
+    # Must always include an honest, non-consciousness-claiming limitation
+    # statement — enforced at write time by identity_service's validation,
+    # not just by prompt-time instruction (see architecture doc threat T-6).
+    limitation_summary: Mapped[str] = mapped_column(Text)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    # draft|active|superseded|archived
+    status: Mapped[str] = mapped_column(String, default="draft")
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # system_default|migration|administrator|application_update|explicit_configuration|imported
+    # — deliberately never "inferred_user": a user interaction must never
+    # silently rewrite ECHO's own core identity (rule 14 of the milestone).
+    source: Mapped[str] = mapped_column(String, default="system_default")
+    created_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    superseded_by_identity_id: Mapped[str | None] = mapped_column(
+        ForeignKey("assistant_identity_profiles.id"), nullable=True
+    )
+    # Strictly bounded, non-sensitive JSON only — see identity_service's
+    # _validate_metadata() for the enforced strict-JSON/size/secret policy
+    # (migration ids, release versions, and compatibility notes are valid;
+    # secrets, tokens, raw conversations, and hidden reasoning are not).
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    commitments: Mapped[list["IdentityCommitment"]] = relationship(back_populates="identity_profile")
+
+
+class IdentityCommitment(Base):
+    """A structured behavioral commitment tied to one specific identity
+    version (see architecture doc section 17: commitments belong to a
+    specific identity version — when a new version is created, commitments
+    are copied/re-created for it, never mutated in place on an already
+    activated version). Describes the commitment for identity/self-
+    description purposes; the existing constitution.py VALUE_INVARIANTS
+    remain the actual enforcement source of truth for the invariant-level
+    ones (commitment_key intentionally matches ValueInvariant.id where the
+    commitment mirrors an existing invariant, e.g. "no-power-seeking")."""
+
+    __tablename__ = "identity_commitments"
+    __table_args__ = (
+        UniqueConstraint("identity_profile_id", "commitment_key", name="uq_identity_commitment_key"),
+        CheckConstraint("length(trim(commitment_key)) > 0", name="ck_identity_commitment_key_nonempty"),
+        CheckConstraint("length(trim(title)) > 0", name="ck_identity_commitment_title_nonempty"),
+        CheckConstraint("priority BETWEEN 0 AND 1000", name="ck_identity_commitment_priority"),
+        CheckConstraint(
+            "category IN ('honesty', 'uncertainty', 'autonomy', 'consent', 'privacy', "
+            "'non_manipulation', 'reliability', 'safety', 'accessibility', 'communication', "
+            "'local_first', 'identity_boundary', 'capability_boundary', 'governance')",
+            name="ck_identity_commitment_category",
+        ),
+        CheckConstraint(
+            "enforcement_level IN ('informational', 'advisory', 'confirmation_required', "
+            "'blocking', 'invariant')",
+            name="ck_identity_commitment_enforcement_level",
+        ),
+        CheckConstraint(
+            "source IN ('system_default', 'migration', 'administrator', "
+            "'application_update', 'explicit_configuration', 'imported')",
+            name="ck_identity_commitment_source",
+        ),
+        CheckConstraint(
+            "effective_until IS NULL OR effective_from IS NULL OR effective_until > effective_from",
+            name="ck_identity_commitment_effective_dates",
+        ),
+        Index("ix_identity_commitments_profile_id", "identity_profile_id"),
+        Index("ix_identity_commitments_category", "category"),
+        Index("ix_identity_commitments_enforcement_level", "enforcement_level"),
+        Index("ix_identity_commitments_active", "active"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    identity_profile_id: Mapped[str] = mapped_column(ForeignKey("assistant_identity_profiles.id"))
+    commitment_key: Mapped[str] = mapped_column(String)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text)
+    # honesty|uncertainty|autonomy|consent|privacy|non_manipulation|reliability|
+    # safety|accessibility|communication|local_first|identity_boundary|
+    # capability_boundary|governance
+    category: Mapped[str] = mapped_column(String)
+    # 1000 invariant | 800 blocking | 600 confirmation_required | 400 advisory | 200 informational
+    priority: Mapped[int] = mapped_column(Integer, default=200)
+    # informational|advisory|confirmation_required|blocking|invariant
+    enforcement_level: Mapped[str] = mapped_column(String, default="advisory")
+    user_visible: Mapped[bool] = mapped_column(Boolean, default=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    source: Mapped[str] = mapped_column(String, default="system_default")
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    identity_profile: Mapped["AssistantIdentityProfile"] = relationship(back_populates="commitments")

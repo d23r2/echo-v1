@@ -20,6 +20,7 @@ from app.core.feature_flags import list_feature_flags
 from app.db import engine, get_db
 from app.providers.registry import build_local_model_roles, build_provider_registry
 from app.router import ModelRouter
+from app.services import identity_runtime
 from app.services.local_model_router import list_installed_models
 
 router = APIRouter(tags=["system"])
@@ -73,12 +74,15 @@ def system_status(db: Session = Depends(get_db)):
     settings = get_settings()
     db_healthy, db_reason = _database_healthy()
     ollama_status = _ollama_health(settings)
+    identity = identity_runtime.get_safe_identity_diagnostics()
 
     warnings: list[str] = []
     if db_reason:
         warnings.append(db_reason)
     if ollama_status == "offline":
         warnings.append("Ollama is enabled but not reachable")
+    if identity["status"] == "degraded":
+        warnings.append("Core identity runtime is using degraded protection")
 
     if not db_healthy:
         overall = "red"
@@ -99,6 +103,11 @@ def system_status(db: Session = Depends(get_db)):
         "searxng": "enabled" if (settings.web_search_enabled and settings.searxng_base_url) else "disabled",
         "atlas": "healthy" if db_healthy else "unhealthy",
         "cognitive_core": "enabled" if settings.cognitive_core_enabled else "disabled",
+        "identity": {
+            "enabled": identity["enabled"],
+            "status": identity["status"],
+            "fallback_used": identity["fallback_used"],
+        },
         "version": settings.app_version,
         "warnings": warnings,
     }
@@ -126,6 +135,7 @@ def system_diagnostics(db: Session = Depends(get_db)):
 
     flags = list_feature_flags(settings, db)
     providers = build_provider_registry(settings, _model_router, db)
+    identity = identity_runtime.get_safe_identity_diagnostics(detailed=settings.developer_mode)
 
     return {
         "configuration": settings.public_dict(),
@@ -140,6 +150,7 @@ def system_diagnostics(db: Session = Depends(get_db)):
             "write_check_error": write_check_error,
         },
         "schema_version": _get_schema_version(),
+        "identity": identity,
         "version": settings.app_version,
     }
 
@@ -210,10 +221,17 @@ def system_metrics():
 @router.get("/api/system/version")
 def system_version():
     settings = get_settings()
+    identity = identity_runtime.get_safe_identity_diagnostics()
     return {
         "application_version": settings.app_version,
         "backend_version": settings.app_version,
         "frontend_expected_version": settings.app_version,
         "schema_version": _get_schema_version(),
         "api_version": "1",
+        "identity_engine": {
+            "enabled": identity["enabled"],
+            "schema_version": 1,
+            "active_profile_version": identity.get("version"),
+            "status": identity["status"],
+        },
     }
