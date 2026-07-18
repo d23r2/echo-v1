@@ -218,6 +218,23 @@ cd frontend && npm run build
 Fix anything ruff flags (or run `ruff check . --fix` for the safe ones) and make sure
 tests/build are green before committing.
 
+## Multi-agent task workflow
+
+When work is being coordinated between Claude Code and Codex (implementer/reviewer),
+the process above still applies per-agent, but task scope, roles, and handoff are
+tracked in the repository rather than a chat transcript:
+
+- `AGENTS.md` — non-negotiable rules for any coding agent, always higher precedence
+  than an active task.
+- `CLAUDE.md` — Claude Code's specific role and coordination rules.
+- `tasks/ACTIVE_TASK.md` — the single task currently loaded for implementation.
+- `docs/development/DUAL_AGENT_WORKFLOW.md` — branch/worktree setup, task statuses, and
+  review responsibilities.
+- `docs/development/DECISIONS.md` — durable architecture/product decisions.
+
+See `docs/development/ECHO_DEVELOPMENT_SYSTEM.md` for the full daily workflow (drafting
+a task, assigning implementer/reviewer, handoff, review, merge, archive).
+
 ## Recommended git commit workflow
 
 - Small, focused commits over one giant one — makes `git log`/`git blame` actually useful

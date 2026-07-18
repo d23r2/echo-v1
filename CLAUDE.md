@@ -4,9 +4,9 @@ This repo builds "Echo" (God Tear AI Brain): a truth-seeking AI persona governed
 
 ## Stack
 
-- **Backend**: FastAPI + SQLAlchemy (SQLite) + ChromaDB (local, persistent, `all-MiniLM-L6-v2` embeddings). ~1400 lines, substantially built.
-- **Frontend**: React + TypeScript + Tailwind (Vite). Early — `App.tsx`, `Sidebar.tsx`, `RoleSwitcher.tsx` exist; no chat UI, Atlas viewer, constitution/amendment viewer, or model picker yet.
-- Model routing: Anthropic, OpenAI, xAI (Grok), local Ollama fallback (`backend/app/providers/`, `router.py`), "auto" mode tries them in order.
+- **Backend**: FastAPI + SQLAlchemy (SQLite) + ChromaDB (local, persistent, `all-MiniLM-L6-v2` embeddings).
+- **Frontend**: React + TypeScript + Tailwind (Vite), with web, Android, and Tauri packaging support. Check current code and `PROGRESS.md` for implemented screens.
+- Model routing: Anthropic, OpenAI, xAI, Gemini, Azure when explicitly configured, and local Ollama fallback (`backend/app/providers/`, `router.py`).
 
 Full setup/run instructions are in `README.md`.
 
@@ -24,13 +24,26 @@ Full setup/run instructions are in `README.md`.
 1. Don't modify `constitution.py`'s `VALUE_INVARIANTS` or `council.py`'s approval thresholds without the user explicitly asking for that exact change.
 2. New durable facts about the project or the user's preferences belong in Atlas (via the real backend, once it's running) — not in ad hoc files.
 3. Update `PROGRESS.md` when you complete meaningful work: bump "Last check-in," move finished items out of "Next up," add anything that naturally follows. Keep edits minimal and additive, not a rewrite.
-4. No git repo is initialized in this folder yet. If you need change history, that's worth flagging to the user rather than silently working around it.
+4. This is an active Git repository. Inspect branch, worktree, and dirty state before editing; preserve unrelated changes and use the assigned worktree from `tasks/ACTIVE_TASK.md`.
 5. A daily scheduled task (`echo-daily-build-checkin`) already reads `PROGRESS.md` and recent file activity each morning to propose a prioritized checklist — don't duplicate that logic elsewhere.
 
-## Current priority order (per PROGRESS.md, check there for latest)
+## Dual-agent role and coordination
 
-1. Core chat UI (message list + input, wired to `/chat`)
-2. Atlas memory viewer (list/search with epistemic-status badges)
-3. Constitution + Guardian Council UI (view values/invariants, propose/vote on amendments)
-4. Model picker UI (pin provider or "auto")
-5. Wire up `.env` files, first end-to-end local run (backend + frontend)
+Full detail: `docs/development/DUAL_AGENT_WORKFLOW.md`. `AGENTS.md`'s non-negotiables and its "Dual-agent workflow" section apply here too and take precedence over anything below.
+
+Default role: Claude Code is the primary implementer and repository-exploration agent, unless `tasks/ACTIVE_TASK.md` assigns a different role (e.g. reviewing a Codex implementation). Especially suited for understanding large areas of the codebase, cross-file/architectural changes, interactive debugging, and documentation updates alongside implementation.
+
+Coordination checklist for any task:
+
+1. Read `Owner`, `Implementer`, `Reviewer`, and the branch/worktree fields in `tasks/ACTIVE_TASK.md`.
+2. Do not edit if another agent is the listed active implementer, unless the task explicitly permits parallel, non-overlapping work.
+3. Never edit the same working tree as Codex at the same time — use separate branches/worktrees (see `docs/development/DUAL_AGENT_WORKFLOW.md`, Mode B).
+4. Stop at `Ready for review` once implementation is complete; do not merge, push, or approve your own work.
+
+Implementation handoff (written into the active task before stopping) must include: a summary of behavior changed, files changed, migration/configuration changes, tests executed and their actual results, known limitations, and specific areas the reviewer should inspect.
+
+Git safety for this workflow: do not force-push, rewrite shared branch history, delete another agent's branch, or discard uncommitted work without explicit user approval — consistent with the top-level Git Safety Protocol Claude Code always follows.
+
+## Current priorities
+
+Read `PROGRESS.md` for the current priority order. Do not rely on a static list in this agent file.
