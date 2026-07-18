@@ -85,9 +85,11 @@ merge, or deploy on its own.
 - [x] Phase 6: human review frontend gated behind `supervised_maintenance_frontend_enabled`, wired
       into Sidebar/App under Governance; frontend test framework introduced with passing tests for the
       disabled state, empty-repository state, error surfacing, and repository listing.
-- [ ] Phase 7: confirm `LocalCommitController`/`deploy()` needs no changes for analysis-originated
-      proposals (substantially proven already by Phase 4-5's pipeline-reuse test; this phase should
-      mostly document that confirmation rather than add new code).
+- [x] Phase 7: confirmed `LocalCommitController`/`deploy()` and `RollbackRecordService`/`rollback()`
+      need no changes for analysis-originated proposals — source inspection shows zero `analysis_id`
+      references anywhere in `self_modification_sandbox.py`/`deploy()`/`rollback()`, and
+      `test_supervised_maintenance_local_commit_reuse.py` proves an analysis-originated and a
+      directly-created proposal deploy/roll back identically. See architecture.md §11.
 - [ ] Phase 8: hardening pass — adversarial tests for the genuinely-new `CodeAccessService` attack
       surface (path traversal/symlink/junction/secret-file/prompt-injection per
       `docs/supervised_maintenance/threat_model.md`), remaining operator/security docs, final

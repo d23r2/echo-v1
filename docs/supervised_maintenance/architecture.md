@@ -209,3 +209,26 @@ mechanics in detail — they are unchanged from `ECHO_LAYER_3A_PART2D_SELF_MODIF
 which remains the authoritative reference for those subsystems. Duplicating that description here would
 itself be exactly the kind of parallel-documentation risk this milestone's own §2 warns against for
 code.
+
+## 11. Phase 7 — local commit and rollback reuse, confirmed
+
+Row K/L of §2's component-reuse table claimed `LocalCommitController` and `RollbackRecordService` are
+reused unmodified as `self_modification_governance.deploy()`/`sandbox.deploy_to_local_branch()` and
+`rollback()`/`RollbackEvent`. That claim is now closed out with direct evidence rather than left as an
+architectural intention:
+
+- **Source inspection**: `self_modification_sandbox.py` contains zero references to `analysis_id`
+  anywhere in the file. `deploy()` and `rollback()` in `self_modification_governance.py` operate only
+  on `proposal_id`/`revision_id`/`approval_id` — neither function branches on, reads, or is even aware
+  of whether a proposal originated from a Supervised Maintenance analysis. `DeploymentAttempt` and
+  `RollbackEvent` (`models.py`) have no `analysis_id` column; only `CodeModificationProposal` carries
+  that optional, loose reference (added in Phase 3), and it is never propagated further down the
+  pipeline.
+- **Test evidence**: `backend/tests/test_supervised_maintenance_local_commit_reuse.py` drives one
+  analysis-originated proposal and one directly-created proposal (the same code path a Part 2D user
+  already had) through identical `deploy()`/`rollback()` calls and asserts the results are structurally
+  identical — same status transitions, same `echo/self-modification/<proposal_id>/<revision_number>`
+  branch-naming scheme (never analysis-derived), same rollback shape.
+
+Conclusion: no code change was needed for Phase 7. This section, plus the dedicated test file, is that
+phase's deliverable.
