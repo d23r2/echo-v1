@@ -461,6 +461,10 @@ class Task(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # ECHO Layer 2E — an ad hoc task directly tracked toward a Goal (loose
+    # reference, same convention as Plan.task_id/project_id below — not every
+    # goal-tracked task is part of a formal Plan).
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     project: Mapped["Project | None"] = relationship(back_populates="tasks")
 
@@ -1363,6 +1367,10 @@ class Plan(Base):
     system_model_id: Mapped[str | None] = mapped_column(String, nullable=True)
     task_id: Mapped[str | None] = mapped_column(String, nullable=True)
     project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # ECHO Layer 2E — when set, this plan is (one of) the concrete plan(s)
+    # working toward a Goal; goal_engine.py's progress calculation walks this
+    # plan's own steps/milestones rather than a second, duplicate hierarchy.
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
     revision_number: Mapped[int] = mapped_column(Integer, default=1)
     superseded_by_plan_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -1805,4 +1813,105 @@ class MemoryFeedback(Base):
     feedback_type: Mapped[str] = mapped_column(String)
     scope: Mapped[str | None] = mapped_column(String, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+# ============================================================================
+# ECHO Layer 2E — Goal Manager, Context Selection v2, and Intelligence Center.
+#
+# Goal deliberately does NOT invent a parallel milestone/task-execution
+# system: "goal -> subgoal -> milestone -> task" is satisfied by chaining
+# already-built Layer 2C infrastructure — a Goal's concrete work is tracked
+# through Plan rows that declare goal_id (their existing Milestones/PlanSteps
+# and materialise_plan()'s real Task creation already do the rest), plus
+# Task.goal_id for ad hoc tasks not part of a formal plan, plus
+# parent_goal_id for the subgoal chain itself. Progress is computed
+# (goal_engine.py) from this evidence — never a model-estimated percentage.
+# ============================================================================
+
+
+class Goal(Base):
+    """A durable, evidence-tracked commitment — proposed by the user or (as a
+    proposal only, never silently committed) by the system. See
+    services/goal_engine.py for approval policy, hierarchy, and progress
+    calculation."""
+
+    __tablename__ = "goals"
+    __table_args__ = (
+        Index("ix_goals_status", "status"),
+        Index("ix_goals_parent_goal_id", "parent_goal_id"),
+        Index("ix_goals_project_id", "project_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)  # free-text — no invented rigid taxonomy
+    # explicit_user|imported_project|derived_from_plan|system_suggestion
+    origin: Mapped[str] = mapped_column(String, default="explicit_user")
+    owner: Mapped[str] = mapped_column(String, default="user")
+    # proposed|approved|active|paused|blocked|achieved|abandoned|superseded — the
+    # exact 8 states the milestone spec requires. Doubles as the approval gate:
+    # a system_suggestion Goal is created as "proposed" and only ever reaches
+    # "approved" through an explicit POST /api/goals/{id}/approve call — there is
+    # no separate approval_state field, since status already carries that meaning
+    # without risking the two disagreeing with each other.
+    status: Mapped[str] = mapped_column(String, default="proposed")
+    priority: Mapped[str] = mapped_column(String, default="medium")  # low|medium|high
+    horizon: Mapped[str] = mapped_column(String, default="medium_term")  # short_term|medium_term|long_term
+    target_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    success_criteria_json: Mapped[list] = mapped_column(JSON, default=list)
+    constraints_json: Mapped[list] = mapped_column(JSON, default=list)
+    motivation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    parent_goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.6)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    achieved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    abandoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    abandoned_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    superseded_by_goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class GoalReview(Base):
+    """One generated review snapshot (daily/weekly/project/on-demand) —
+    deterministic, evidence-derived text, never a model call. See
+    goal_engine.generate_review()."""
+
+    __tablename__ = "goal_reviews"
+    __table_args__ = (Index("ix_goal_reviews_goal_id", "goal_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    goal_id: Mapped[str | None] = mapped_column(String, nullable=True)  # null = cross-goal review
+    review_type: Mapped[str] = mapped_column(String, default="on_demand")  # daily|weekly|project|on_demand
+    summary: Mapped[str] = mapped_column(Text)
+    stalled_goal_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    missing_next_action_goal_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    unresolved_blocker_ids_json: Mapped[list] = mapped_column(JSON, default=list)
+    conflicting_commitment_notes_json: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_next_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommended_next_action_goal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ContextSelectionMetric(Base):
+    """Phase 5 — a record of what a context selection *decision* looked like
+    (counts/sizes/categories), never raw private content, so selection
+    quality can be inspected/tuned without re-exposing what was actually
+    retrieved."""
+
+    __tablename__ = "context_selection_metrics"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    purpose: Mapped[str | None] = mapped_column(String, nullable=True)
+    included_category_counts_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    excluded_category_counts_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    total_chars_selected: Mapped[int] = mapped_column(Integer, default=0)
+    budget_chars: Mapped[int] = mapped_column(Integer, default=0)
+    compressed: Mapped[bool] = mapped_column(Boolean, default=False)
+    fallback_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

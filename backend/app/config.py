@@ -264,6 +264,15 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 300
     max_concurrent_model_requests: int = 2
 
+    # --- ECHO Layer 2E: Context Selection v2 ---
+    # Off by default, same "don't break existing chat" posture as
+    # local_intelligence_engine_enabled above — when off,
+    # LocalIntelligenceEngine.generate_response() gathers context exactly as
+    # it did before this milestone (context_gatherer.gather_context() +
+    # its own cognitive-brief call), unaffected by anything in
+    # services/context_selector.py.
+    context_selection_v2_enabled: bool = False
+
     # --- Observability ---
     metrics_enabled: bool = True
     request_logging_enabled: bool = True

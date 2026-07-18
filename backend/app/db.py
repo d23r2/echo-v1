@@ -69,6 +69,9 @@ def init_db() -> None:
     _ensure_column("persona_settings", "local_answer_quality_mode", "TEXT DEFAULT 'balanced'")
     _ensure_column("persona_settings", "voice_mode", "TEXT DEFAULT 'push_to_talk'")
     _ensure_column("persona_settings", "tts_enabled", "BOOLEAN DEFAULT 0")
+    # ECHO Layer 2E — goal_id loose-reference columns on two pre-existing tables.
+    _ensure_column("tasks", "goal_id", "TEXT")
+    _ensure_column("plans", "goal_id", "TEXT")
     _ensure_layer1_memory_columns()
     _ensure_layer2a_cognitive_columns()
     _seed_action_reliability_core()
@@ -196,7 +199,11 @@ def _ensure_layer1_memory_columns() -> None:
 # tables only (orchestration_policies, orchestration_runs), created by
 # Base.metadata.create_all() above with no _ensure_column() calls needed
 # since nothing existing gained a column.
-CURRENT_SCHEMA_VERSION = 6
+# v7 (ECHO Layer 2E): Goal Manager, Context Selection v2, and Intelligence
+# Center — new tables (goals, goal_reviews, context_selection_metrics)
+# created by Base.metadata.create_all() above, plus two additive columns on
+# pre-existing tables (tasks.goal_id, plans.goal_id) via _ensure_column().
+CURRENT_SCHEMA_VERSION = 7
 
 
 def _ensure_schema_version() -> None:

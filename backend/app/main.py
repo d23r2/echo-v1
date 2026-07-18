@@ -18,6 +18,7 @@ from app.routers import (
     conversation_summary,
     evaluations,
     features,
+    goals,
     human_persona,
     intelligence,
     knowledge,
@@ -100,6 +101,7 @@ app.include_router(cognitive.router)
 app.include_router(intelligence.router)
 app.include_router(operational_self_model.router)
 app.include_router(system.router)
+app.include_router(goals.router)
 
 
 @app.get("/api/health")

@@ -358,6 +358,23 @@ Knowledge & Memory → Cognitive Core → Routing. See
 [ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_ARCHITECTURE.md](ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_ARCHITECTURE.md)
 and [ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_REPORT.md](ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_REPORT.md).
 
+## Goal Manager, Context Selection v2, and Intelligence Center (Layer 2E)
+
+The final Layer 2 milestone. A Goal Manager tracks long-running objectives with evidence-only
+progress — completion is computed strictly from real linked `Task`/plan-step evidence, never
+estimated by a model, and a goal never auto-achieves without complete, real evidence behind it.
+Explicit-user goals are approved immediately; system-suggested goals wait for an explicit approval. A
+Context Selection v2 layer (`ContextRequest` → `ContextBundle`) gives the rest of Layer 2 one compact,
+deterministically-filtered view of what's relevant to a message — goal/project/system/decision-or-plan
+context, memory, tool evidence, permissions — with priority-ordered compression when a budget is
+tight, and an honest empty result (never fabricated content) when nothing applies. A new Intelligence
+Center page ties Layers 2A-2E together: goal health and progress, a live context preview, and
+routing/evaluation status — deep-linking to Systems/Simulations/Decisions/Plans/Routing/Evaluations in
+their existing homes rather than duplicating their controls. Explore it under Advanced → Knowledge &
+Memory → Intelligence Center. See
+[ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_ARCHITECTURE.md](ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_ARCHITECTURE.md)
+and [ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_REPORT.md](ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_REPORT.md).
+
 ## Multi-device
 
 The frontend is a fully responsive web app — the same build works on desktop and mobile

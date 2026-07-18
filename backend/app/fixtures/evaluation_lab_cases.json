@@ -146,5 +146,119 @@
     "check_type": "cloud_disabled_by_default",
     "check_expected": true,
     "notes": "Both CLOUD_FALLBACK_ENABLED and the cloud_api_use permission must default to off/disabled — ECHO should never silently call a paid API."
+  },
+  {
+    "id": "layer2_explanation_understanding",
+    "name": "Explanation request classifies correctly",
+    "category": "explanation",
+    "user_message": "Can you explain how OAuth2 authorization code flow works?",
+    "check_type": "task_understanding_category",
+    "check_expected": "explanation",
+    "notes": "ECHO Layer 2E Phase 8 — a 'how does X work' request should classify as explanation, not research or question. A short, single-clause explanation question may legitimately classify as 'easy' difficulty and skip TaskUnderstanding entirely (cognitive_core.py's own is_complex_task() gate, pre-existing Layer 2A behavior) — the check honestly reports 'warning', not a fabricated pass, when that happens."
+  },
+  {
+    "id": "layer2_coding_understanding",
+    "name": "Coding request classifies correctly",
+    "category": "coding",
+    "user_message": "Implement a new feature that lets users export their tasks as a CSV file, including error handling.",
+    "check_type": "task_understanding_category",
+    "check_expected": "coding",
+    "notes": "ECHO Layer 2E Phase 8 — an explicit feature-add request should classify as coding."
+  },
+  {
+    "id": "layer2_debugging_understanding",
+    "name": "Debugging request classifies correctly",
+    "category": "debugging",
+    "user_message": "The login test is failing with a 500 error, can you find the bug?",
+    "check_type": "task_understanding_category",
+    "check_expected": "debugging",
+    "notes": "ECHO Layer 2E Phase 8 — a 'this is failing, find the bug' request should classify as debugging."
+  },
+  {
+    "id": "layer2_planning_plan_valid",
+    "name": "A dependency-ordered plan validates clean",
+    "category": "planning",
+    "user_message": "Plan the launch of a new feature",
+    "steps": [
+      {"title": "Write the design doc"},
+      {"title": "Implement the feature", "depends_on_titles": ["Write the design doc"]},
+      {"title": "Ship it", "depends_on_titles": ["Implement the feature"]}
+    ],
+    "check_type": "plan_validity",
+    "check_expected": true,
+    "notes": "ECHO Layer 2E Phase 8 — plan_validity check reuses Layer 2C's plan_engine.validate_plan() directly; a clean linear chain must validate."
+  },
+  {
+    "id": "layer2_planning_plan_cycle_detected",
+    "name": "A circular dependency is correctly flagged invalid",
+    "category": "planning",
+    "user_message": "Plan with a circular dependency",
+    "steps": [
+      {"title": "Step A", "depends_on_titles": ["Step B"]},
+      {"title": "Step B", "depends_on_titles": ["Step A"]}
+    ],
+    "check_type": "plan_validity",
+    "check_expected": false,
+    "notes": "ECHO Layer 2E Phase 8 — constraint adherence: a real 2-cycle must make validate_plan() report invalid, not silently pass."
+  },
+  {
+    "id": "layer2_decision_transparency",
+    "name": "Decision report carries required transparency fields",
+    "category": "decision",
+    "user_message": "Should we use Postgres or SQLite for this project?",
+    "options": [
+      {"label": "Postgres"},
+      {"label": "SQLite"}
+    ],
+    "check_type": "decision_transparency",
+    "check_expected": null,
+    "notes": "ECHO Layer 2E Phase 8 — decision transparency: reuses Layer 2C's decision_engine.analyse() directly and checks the report exposes summary/evidence/confidence/no-clear-winner/confirmation-needed, never a raw reasoning dump."
+  },
+  {
+    "id": "layer2_research_context_relevance",
+    "name": "A current-info research question pulls tool evidence",
+    "category": "research",
+    "user_message": "What's the latest breaking news on quantum computing today?",
+    "check_type": "context_relevance",
+    "check_expected": "tool_evidence",
+    "notes": "ECHO Layer 2E Phase 8 — context relevance: reuses Context Selection v2 (context_selector.select_context()) directly and checks a live-info question actually pulls tool_evidence (wiki/rss/web) into the bundle."
+  },
+  {
+    "id": "layer2_project_continuation_context",
+    "name": "Continuation phrasing checks memory/project context inclusion",
+    "category": "project_continuation",
+    "user_message": "Let's continue where we left off on the project.",
+    "check_type": "context_relevance",
+    "check_expected": "memory_brief",
+    "notes": "ECHO Layer 2E Phase 8 — context relevance for project continuation; a 'warning' (not 'fail') result is expected/acceptable here when no memory has been seeded for this fixture run — the check confirms the field is honestly empty, not fabricated."
+  },
+  {
+    "id": "layer2_tool_use_efficiency_scoped",
+    "name": "A scoped Mission Control question selects only the tools it needs",
+    "category": "tool_use",
+    "user_message": "what are my active projects and open tasks?",
+    "max_expected_tools": 2,
+    "check_type": "tool_efficiency",
+    "check_expected": null,
+    "notes": "ECHO Layer 2E Phase 8 — tool efficiency: reuses Layer 2D's tool_strategy.build_tool_plan() directly; no duplicate tools and no more than the minimum needed."
+  },
+  {
+    "id": "layer2_tool_use_none_for_creative",
+    "name": "A creative-writing request selects zero tools",
+    "category": "tool_use",
+    "user_message": "Write me a short haiku about autumn leaves.",
+    "max_expected_tools": 0,
+    "check_type": "tool_efficiency",
+    "check_expected": null,
+    "notes": "ECHO Layer 2E Phase 8 — tool efficiency: a purely creative request must select no tools at all — using a tool here would be wasted latency, not helpfulness."
+  },
+  {
+    "id": "layer2_context_with_without_comparison",
+    "name": "ContextBundle genuinely differs with vs. without Layer 2 goal linkage",
+    "category": "context_comparison",
+    "user_message": "What should I focus on next?",
+    "check_type": "layer2_context_comparison",
+    "check_expected": null,
+    "notes": "ECHO Layer 2E Phase 8's explicit 'compare with and without Layer 2 features' requirement — the same message's ContextBundle must include goal_context only once a real Goal is linked."
   }
 ]

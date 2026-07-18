@@ -11,9 +11,26 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app import schemas
+from app.config import Settings, get_settings
 from app.db import get_db
-from app.models import CognitiveConcept, DecisionCase, OrchestrationRun, Simulation, TaskUnderstanding
-from app.services import cognitive_core, plan_engine, tool_strategy
+from app.models import (
+    CognitiveConcept,
+    DecisionCase,
+    OrchestrationRun,
+    Plan,
+    Simulation,
+    Task,
+    TaskUnderstanding,
+)
+from app.routers.system import _database_healthy, _ollama_health
+from app.services import (
+    cognitive_core,
+    context_selector,
+    evaluation_lab,
+    goal_engine,
+    plan_engine,
+    tool_strategy,
+)
 from app.services import decision_engine as dec_engine
 from app.services import orchestration_engine as oe
 from app.services import simulation_engine as sim_engine
@@ -550,3 +567,111 @@ def plan_tools(payload: schemas.ToolPlanRequest):
     """Preview-only — never executes a tool. Real execution stays behind
     /api/tools/{tool_name}/run, unchanged (Phase 5)."""
     return tool_strategy.build_tool_plan(payload.user_message, payload.conversation_id)
+
+
+# ============================================================================
+# ECHO Layer 2E — Context Selection v2, cross-goal review, Intelligence Center
+# ============================================================================
+
+
+@router.post("/context/select", response_model=schemas.ContextBundle)
+def select_context(payload: schemas.ContextRequest, db: Session = Depends(get_db)):
+    """The full typed bundle — developer-facing (excluded_context_summary is
+    internal diagnostic detail, not hidden reasoning about the answer
+    itself). The UI-facing view is /context/preview below."""
+    return context_selector.select_context(db, payload)
+
+
+@router.post("/context/preview", response_model=schemas.ContextSelectionPreviewOut)
+def preview_context(payload: schemas.ContextRequest, db: Session = Depends(get_db)):
+    """What the UI actually shows — categories and sources, never raw
+    content (Phase 7's explicit rule)."""
+    return context_selector.preview_context(db, payload)
+
+
+@router.post("/goals/review", response_model=schemas.GoalReviewOut)
+def review_all_goals(payload: schemas.GoalReviewRequest, db: Session = Depends(get_db)):
+    """Cross-goal daily/weekly/project review — goal_id-scoped reviews live
+    at POST /api/goals/{id}/review instead."""
+    return goal_engine.generate_review(db, payload)
+
+
+@router.post("/evaluations/run", response_model=schemas.EvaluationRunOut)
+def run_evaluations(db: Session = Depends(get_db)):
+    """Thin alias onto the existing /api/evaluations/run — same
+    evaluation_lab.py, not a second evaluator (Phase 8 rule: don't duplicate
+    a working capability)."""
+    return evaluation_lab.run_evaluation(db)
+
+
+def _intelligence_health(settings: Settings, db: Session, blockers: list[str]) -> tuple[str, list[str]]:
+    db_healthy, db_reason = _database_healthy()
+    if not db_healthy:
+        return "red", [db_reason or "database unhealthy"]
+
+    reasons: list[str] = []
+    if _ollama_health(settings) == "offline":
+        reasons.append("Ollama is enabled but not reachable")
+    latest_eval = evaluation_lab.list_runs(db, limit=1)
+    if latest_eval and latest_eval[0].result_summary == "red":
+        reasons.append("most recent evaluation run reported red")
+    if blockers:
+        reasons.append(f"{len(blockers)} unresolved blocker(s) across active goals")
+    return ("yellow" if reasons else "green"), reasons
+
+
+@router.get("/overview", response_model=schemas.IntelligenceOverviewOut)
+def get_overview(db: Session = Depends(get_db)):
+    settings = get_settings()
+
+    goals = goal_engine.list_goals(db)
+    active_count = sum(1 for g in goals if g.status == "active")
+    proposed_count = sum(1 for g in goals if g.status == "proposed")
+    blocked_count = sum(1 for g in goals if g.status == "blocked")
+
+    blockers: list[str] = []
+    for g in goals:
+        if g.status not in ("achieved", "abandoned", "superseded"):
+            progress = goal_engine.compute_progress(db, g.id)
+            blockers.extend(progress.blockers)
+    blockers = blockers[:5]
+
+    current_task = db.query(Task).filter(Task.status == "in_progress").order_by(Task.updated_at.desc()).first()
+    if current_task is None:
+        current_task = db.query(Task).filter(Task.status == "todo").order_by(Task.sort_order).first()
+    current_task_summary = current_task.title if current_task else None
+
+    active_plan = db.query(Plan).filter(Plan.status.in_(("approved", "active"))).order_by(Plan.updated_at.desc()).first()
+    active_plan_summary = f"{active_plan.objective[:80]} ({active_plan.status})" if active_plan else None
+
+    recent_decisions = db.query(DecisionCase).order_by(DecisionCase.updated_at.desc()).limit(3).all()
+    recent_decision_summaries = [f"{d.question[:60]} ({d.status})" for d in recent_decisions]
+
+    recent_sims = db.query(Simulation).order_by(Simulation.created_at.desc()).limit(3).all()
+    recent_simulation_summaries = [f"{s.objective[:60]} ({s.status})" for s in recent_sims]
+
+    health, health_reasons = _intelligence_health(settings, db, blockers)
+
+    run_count = db.query(OrchestrationRun).count()
+    ollama_status = _ollama_health(settings)
+    routing_status_summary = f"{run_count} orchestration run(s) recorded; Ollama {ollama_status}."
+
+    latest_eval = evaluation_lab.list_runs(db, limit=1)
+    last_evaluation_summary = (
+        f"{latest_eval[0].passed_cases}/{latest_eval[0].total_cases} passed ({latest_eval[0].result_summary})" if latest_eval else None
+    )
+
+    return schemas.IntelligenceOverviewOut(
+        active_goals_count=active_count,
+        proposed_goals_count=proposed_count,
+        blocked_goals_count=blocked_count,
+        current_task_summary=current_task_summary,
+        active_plan_summary=active_plan_summary,
+        recent_decision_summaries=recent_decision_summaries,
+        recent_simulation_summaries=recent_simulation_summaries,
+        blockers=blockers,
+        intelligence_health=health,
+        intelligence_health_reasons=health_reasons,
+        routing_status_summary=routing_status_summary,
+        last_evaluation_summary=last_evaluation_summary,
+    )

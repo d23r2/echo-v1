@@ -2522,3 +2522,198 @@ export const updateOrchestrationPolicy = (id: string, payload: OrchestrationPoli
 export const planTools = (userMessage: string, conversationId?: string) =>
   request<ToolPlanOut>("/api/intelligence/tools/plan", { method: "POST", body: JSON.stringify({ user_message: userMessage, conversation_id: conversationId }) });
 export const getSystemModelRoles = () => request<{ roles: LocalModelRoleRecord[] }>("/api/system/models/roles");
+
+// ECHO Layer 2E — Goal Manager, Context Selection v2, and Intelligence Center
+
+export type GoalStatus = "proposed" | "approved" | "active" | "paused" | "blocked" | "achieved" | "abandoned" | "superseded";
+export type GoalOrigin = "explicit_user" | "imported_project" | "derived_from_plan" | "system_suggestion";
+export type GoalHorizon = "short_term" | "medium_term" | "long_term";
+export type GoalPriority = "low" | "medium" | "high";
+
+export interface GoalCreatePayload {
+  title: string;
+  description?: string;
+  scope?: string;
+  origin?: GoalOrigin;
+  priority?: GoalPriority;
+  horizon?: GoalHorizon;
+  target_date?: string;
+  success_criteria?: string[];
+  constraints?: string[];
+  motivation?: string;
+  project_id?: string;
+  parent_goal_id?: string;
+  confidence?: number;
+}
+
+export interface GoalUpdatePayload {
+  title?: string;
+  description?: string;
+  scope?: string;
+  priority?: GoalPriority;
+  horizon?: GoalHorizon;
+  target_date?: string;
+  success_criteria?: string[];
+  constraints?: string[];
+  motivation?: string;
+  project_id?: string;
+  parent_goal_id?: string;
+  confidence?: number;
+  status?: "active" | "paused" | "blocked";
+}
+
+export interface GoalOut {
+  id: string;
+  title: string;
+  description: string | null;
+  scope: string | null;
+  origin: GoalOrigin;
+  owner: string;
+  status: GoalStatus;
+  priority: GoalPriority;
+  horizon: GoalHorizon;
+  target_date: string | null;
+  success_criteria_json: string[];
+  constraints_json: string[];
+  motivation: string | null;
+  project_id: string | null;
+  parent_goal_id: string | null;
+  confidence: number;
+  created_at: string;
+  updated_at: string;
+  approved_at: string | null;
+  achieved_at: string | null;
+  abandoned_at: string | null;
+  abandoned_reason: string | null;
+  superseded_by_goal_id: string | null;
+}
+
+export interface ChildGoalProgress {
+  goal_id: string;
+  title: string;
+  status: GoalStatus;
+  percent_complete: number;
+}
+
+export interface GoalProgressOut {
+  goal_id: string;
+  percent_complete: number;
+  evidence_task_total: number;
+  evidence_task_done: number;
+  evidence_plan_step_total: number;
+  evidence_plan_step_done: number;
+  child_goals: ChildGoalProgress[];
+  blockers: string[];
+  next_action: string | null;
+  stale: boolean;
+}
+
+export type GoalReviewType = "daily" | "weekly" | "project" | "on_demand";
+
+export interface GoalReviewOut {
+  id: string;
+  goal_id: string | null;
+  review_type: GoalReviewType;
+  summary: string;
+  stalled_goal_ids_json: string[];
+  missing_next_action_goal_ids_json: string[];
+  unresolved_blocker_ids_json: string[];
+  conflicting_commitment_notes_json: string[];
+  recommended_next_action: string | null;
+  recommended_next_action_goal_id: string | null;
+  created_at: string;
+}
+
+export const createGoal = (payload: GoalCreatePayload) => request<GoalOut>("/api/goals", { method: "POST", body: JSON.stringify(payload) });
+export const listGoals = (params?: { status?: GoalStatus; project_id?: string; parent_goal_id?: string; limit?: number }) => {
+  const search = new URLSearchParams();
+  if (params?.status) search.set("status", params.status);
+  if (params?.project_id) search.set("project_id", params.project_id);
+  if (params?.parent_goal_id) search.set("parent_goal_id", params.parent_goal_id);
+  if (params?.limit) search.set("limit", String(params.limit));
+  const qs = search.toString();
+  return request<GoalOut[]>(`/api/goals${qs ? `?${qs}` : ""}`);
+};
+export const getGoal = (id: string) => request<GoalOut>(`/api/goals/${id}`);
+export const updateGoal = (id: string, payload: GoalUpdatePayload) => request<GoalOut>(`/api/goals/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const approveGoal = (id: string) => request<GoalOut>(`/api/goals/${id}/approve`, { method: "POST" });
+export const pauseGoal = (id: string) => request<GoalOut>(`/api/goals/${id}/pause`, { method: "POST" });
+export const abandonGoal = (id: string, reason: string) => request<GoalOut>(`/api/goals/${id}/abandon`, { method: "POST", body: JSON.stringify({ reason }) });
+export const getGoalProgress = (id: string) => request<GoalProgressOut>(`/api/goals/${id}/progress`);
+export const reviewGoal = (id: string) => request<GoalReviewOut>(`/api/goals/${id}/review`, { method: "POST" });
+export const reviewAllGoals = (reviewType: GoalReviewType = "on_demand") =>
+  request<GoalReviewOut>("/api/intelligence/goals/review", { method: "POST", body: JSON.stringify({ review_type: reviewType }) });
+
+// ---- Context Selection v2 ----
+
+export type ContextFreshness = "any" | "recent" | "current";
+
+export interface ContextRequestPayload {
+  user_message: string;
+  task_id?: string;
+  purpose?: string;
+  project_id?: string;
+  goal_id?: string;
+  conversation_id?: string;
+  required_context_types?: string[];
+  privacy_level?: PrivacyLevel;
+  freshness_requirement?: ContextFreshness;
+  max_tokens?: number;
+  max_chars?: number;
+}
+
+export interface ContextBundleOut {
+  cognitive_brief: string | null;
+  memory_brief: string | null;
+  goal_context: string | null;
+  project_context: string | null;
+  relevant_skills: string[];
+  relevant_documents: string[];
+  system_or_simulation_context: string | null;
+  decision_or_plan_context: string | null;
+  tool_evidence: string[];
+  active_permissions: string[];
+  uncertainty_summary: string | null;
+  provenance_summary: string[];
+  excluded_context_summary: string[];
+  total_chars: number;
+  budget_chars: number;
+  compressed: boolean;
+  fallback_used: boolean;
+}
+
+export interface ContextSelectionPreviewOut {
+  categories_included: string[];
+  categories_excluded: string[];
+  sources_summary: string[];
+  estimated_chars: number;
+  budget_chars: number;
+  fallback_used: boolean;
+}
+
+export const selectContext = (payload: ContextRequestPayload) =>
+  request<ContextBundleOut>("/api/intelligence/context/select", { method: "POST", body: JSON.stringify(payload) });
+export const previewContextSelection = (payload: ContextRequestPayload) =>
+  request<ContextSelectionPreviewOut>("/api/intelligence/context/preview", { method: "POST", body: JSON.stringify(payload) });
+
+// ---- Intelligence Center overview ----
+
+export type IntelligenceHealth = "green" | "yellow" | "red";
+
+export interface IntelligenceOverviewOut {
+  active_goals_count: number;
+  proposed_goals_count: number;
+  blocked_goals_count: number;
+  current_task_summary: string | null;
+  active_plan_summary: string | null;
+  recent_decision_summaries: string[];
+  recent_simulation_summaries: string[];
+  blockers: string[];
+  intelligence_health: IntelligenceHealth;
+  intelligence_health_reasons: string[];
+  routing_status_summary: string;
+  last_evaluation_summary: string | null;
+}
+
+export const getIntelligenceOverview = () => request<IntelligenceOverviewOut>("/api/intelligence/overview");
+export const runIntelligenceEvaluations = () => request<EvaluationRunOut>("/api/intelligence/evaluations/run", { method: "POST" });

@@ -2303,3 +2303,194 @@ class InterfaceSettingsUpdate(BaseModel):
     poetic_language_enabled: bool | None = None
     operational_self_model_enabled: bool | None = None
     show_inner_state: ShowInnerState | None = None
+
+
+# ============================================================================
+# ECHO Layer 2E — Goal Manager, Context Selection v2, and Intelligence Center
+# ============================================================================
+
+GoalStatus = Literal["proposed", "approved", "active", "paused", "blocked", "achieved", "abandoned", "superseded"]
+GoalOrigin = Literal["explicit_user", "imported_project", "derived_from_plan", "system_suggestion"]
+GoalHorizon = Literal["short_term", "medium_term", "long_term"]
+GoalPriority = Literal["low", "medium", "high"]
+
+
+class GoalCreate(BaseModel):
+    title: str
+    description: str | None = None
+    scope: str | None = None
+    origin: GoalOrigin = "explicit_user"
+    priority: GoalPriority = "medium"
+    horizon: GoalHorizon = "medium_term"
+    target_date: datetime | None = None
+    success_criteria: list[str] = Field(default_factory=list)
+    constraints: list[str] = Field(default_factory=list)
+    motivation: str | None = None
+    project_id: str | None = None
+    parent_goal_id: str | None = None
+    confidence: float = Field(default=0.6, ge=0.0, le=1.0)
+
+
+class GoalUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    scope: str | None = None
+    priority: GoalPriority | None = None
+    horizon: GoalHorizon | None = None
+    target_date: datetime | None = None
+    success_criteria: list[str] | None = None
+    constraints: list[str] | None = None
+    motivation: str | None = None
+    project_id: str | None = None
+    parent_goal_id: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    # Only the transitions a plain PATCH may safely make without extra
+    # bookkeeping (paused/blocked, and back to active) — approve/abandon/
+    # achieve each have their own endpoint with the history/reason/evidence
+    # rules the milestone spec requires.
+    status: Literal["active", "paused", "blocked"] | None = None
+
+
+class GoalOut(_UtcAssumingModel):
+    id: str
+    title: str
+    description: str | None
+    scope: str | None
+    origin: GoalOrigin
+    owner: str
+    status: GoalStatus
+    priority: GoalPriority
+    horizon: GoalHorizon
+    target_date: datetime | None
+    success_criteria_json: list[str]
+    constraints_json: list[str]
+    motivation: str | None
+    project_id: str | None
+    parent_goal_id: str | None
+    confidence: float
+    created_at: datetime
+    updated_at: datetime
+    approved_at: datetime | None
+    achieved_at: datetime | None
+    abandoned_at: datetime | None
+    abandoned_reason: str | None
+    superseded_by_goal_id: str | None
+
+
+class GoalAbandonRequest(BaseModel):
+    reason: str
+
+
+class ChildGoalProgress(BaseModel):
+    goal_id: str
+    title: str
+    status: GoalStatus
+    percent_complete: float
+
+
+class GoalProgressOut(BaseModel):
+    goal_id: str
+    percent_complete: float = Field(ge=0.0, le=100.0)
+    evidence_task_total: int
+    evidence_task_done: int
+    evidence_plan_step_total: int
+    evidence_plan_step_done: int
+    child_goals: list[ChildGoalProgress] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    next_action: str | None = None
+    stale: bool = False  # no evidence-backed activity within the staleness window
+
+
+GoalReviewType = Literal["daily", "weekly", "project", "on_demand"]
+
+
+class GoalReviewRequest(BaseModel):
+    review_type: GoalReviewType = "on_demand"
+    goal_id: str | None = None  # None = cross-goal review
+
+
+class GoalReviewOut(_UtcAssumingModel):
+    id: str
+    goal_id: str | None
+    review_type: GoalReviewType
+    summary: str
+    stalled_goal_ids_json: list[str]
+    missing_next_action_goal_ids_json: list[str]
+    unresolved_blocker_ids_json: list[str]
+    conflicting_commitment_notes_json: list[str]
+    recommended_next_action: str | None
+    recommended_next_action_goal_id: str | None
+    created_at: datetime
+
+
+# ---- Context Selection v2 ----
+
+ContextFreshness = Literal["any", "recent", "current"]
+
+
+class ContextRequest(BaseModel):
+    user_message: str
+    task_id: str | None = None
+    purpose: str | None = None
+    project_id: str | None = None
+    goal_id: str | None = None
+    conversation_id: str | None = None
+    required_context_types: list[str] = Field(default_factory=list)
+    privacy_level: PrivacyLevel = "local_only"
+    freshness_requirement: ContextFreshness = "any"
+    max_tokens: int | None = None
+    max_chars: int | None = None
+
+
+class ContextBundle(BaseModel):
+    cognitive_brief: str | None = None
+    memory_brief: str | None = None
+    goal_context: str | None = None
+    project_context: str | None = None
+    relevant_skills: list[str] = Field(default_factory=list)
+    relevant_documents: list[str] = Field(default_factory=list)
+    system_or_simulation_context: str | None = None
+    decision_or_plan_context: str | None = None
+    tool_evidence: list[str] = Field(default_factory=list)
+    active_permissions: list[str] = Field(default_factory=list)
+    uncertainty_summary: str | None = None
+    provenance_summary: list[str] = Field(default_factory=list)
+    # Internal-only — a caller-facing serializer must strip this unless
+    # developer mode is explicitly enabled (see routers/intelligence.py).
+    excluded_context_summary: list[str] = Field(default_factory=list)
+    total_chars: int = 0
+    budget_chars: int = 0
+    compressed: bool = False
+    fallback_used: bool = False
+
+
+class ContextSelectionPreviewOut(BaseModel):
+    """What the UI actually shows — categories and sources, never raw
+    content (see Phase 7's "not raw hidden prompts" rule)."""
+
+    categories_included: list[str] = Field(default_factory=list)
+    categories_excluded: list[str] = Field(default_factory=list)
+    sources_summary: list[str] = Field(default_factory=list)
+    estimated_chars: int = 0
+    budget_chars: int = 0
+    fallback_used: bool = False
+
+
+# ---- Intelligence Center ----
+
+IntelligenceHealth = Literal["green", "yellow", "red"]
+
+
+class IntelligenceOverviewOut(BaseModel):
+    active_goals_count: int
+    proposed_goals_count: int
+    blocked_goals_count: int
+    current_task_summary: str | None
+    active_plan_summary: str | None
+    recent_decision_summaries: list[str] = Field(default_factory=list)
+    recent_simulation_summaries: list[str] = Field(default_factory=list)
+    blockers: list[str] = Field(default_factory=list)
+    intelligence_health: IntelligenceHealth
+    intelligence_health_reasons: list[str] = Field(default_factory=list)
+    routing_status_summary: str
+    last_evaluation_summary: str | None = None

@@ -17,6 +17,7 @@ export type View =
   | "action-center"
   | "tool-center"
   | "cognitive-core"
+  | "intelligence-center"
   | "release-manager"
   | "permission-center"
   | "constitution"
@@ -48,6 +49,7 @@ export const ADVANCED_NAV_GROUPS: { label: string; items: { id: View; label: str
       { id: "atlas", label: "Atlas", icon: "🗺️" },
       { id: "memory-center", label: "Memory Center", icon: "💾" },
       { id: "cognitive-core", label: "Cognitive Core", icon: "🧩" },
+      { id: "intelligence-center", label: "Intelligence Center", icon: "🧭" },
     ],
   },
   {

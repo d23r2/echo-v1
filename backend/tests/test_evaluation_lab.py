@@ -8,9 +8,9 @@ detection, the chat command parser) and the Action System's own registry.
 from app.services import evaluation_lab
 
 
-def test_fixture_has_ten_cases():
+def test_fixture_has_cases():
     cases = evaluation_lab.load_cases()
-    assert len(cases) == 10
+    assert len(cases) == 21
 
 
 def test_every_case_has_a_registered_checker():
@@ -22,8 +22,8 @@ def test_every_case_has_a_registered_checker():
 def test_evaluation_run_creates_results(db_session):
     run = evaluation_lab.run_evaluation(db_session)
     assert run.status == "completed"
-    assert run.total_cases == 10
-    assert run.passed_cases + run.failed_cases + run.warnings == 10
+    assert run.total_cases == 21
+    assert run.passed_cases + run.failed_cases + run.warnings == 21
 
 
 def test_failures_are_recorded(db_session):
@@ -31,7 +31,7 @@ def test_failures_are_recorded(db_session):
     from app.models import EvaluationResult
 
     results = db_session.query(EvaluationResult).filter(EvaluationResult.run_id == run.id).all()
-    assert len(results) == 10
+    assert len(results) == 21
 
 
 def test_green_only_when_all_required_checks_pass(db_session):

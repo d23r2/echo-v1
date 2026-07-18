@@ -2,6 +2,60 @@
 
 Last check-in: 2026-07-18
 
+## New since 2026-07-18 (even later) — ECHO Layer 2E: Goal Manager, Context Selection v2, and Intelligence Center
+
+**Final Layer 2 milestone.** 1296 backend tests passing (63 new), frontend build/typecheck clean,
+live-verified in a real browser against an isolated temporary backend with
+`CONTEXT_SELECTION_V2_ENABLED=true` (created a goal via the new Intelligence Center — appeared
+`APPROVED` immediately since it was explicit-user; expanded it and saw an honest `0% complete —
+stalled` reading, never a fabricated percentage; ran a cross-goal review and got a real
+recommendation back; previewed context for a simple message and got an honest empty bundle, then for
+a complexity-triggering message got a real populated `CognitiveBrief` at 816/12000 chars). Deliberately
+not a new hierarchy or retrieval layer — `Goal` reuses Layer 2C's `Plan`/`PlanStep` via a new
+`Plan.goal_id` column, and `context_selector.py` wraps the existing `context_gatherer.gather_context()`
+rather than re-deriving retrieval. See
+[ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_ARCHITECTURE.md](../ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_ARCHITECTURE.md),
+[ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_REPORT.md](../ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_REPORT.md),
+and
+[ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_SMOKE_TEST.md](../ECHO_LAYER_2E_GOALS_CONTEXT_INTELLIGENCE_CENTER_SMOKE_TEST.md).
+
+- **New: Goal model + approval policy (Phase 1)** — explicit-user goals are approved immediately;
+  system-suggested goals stay `proposed` until an explicit approve call. `status` is the only
+  approval gate, no separate `approval_state` field.
+- **New: goal hierarchy + evidence-only progress (Phase 2)** — `compute_progress()` counts only real
+  `Task.status=="done"`/approved-plan `PlanStep.status=="completed"` rows, never a model estimate;
+  a goal with zero linked evidence reports `0%`, never a guess; auto-achieve only fires with real,
+  complete evidence.
+- **New: cross-goal review + next-action engine (Phase 3)** — ranks by blocker status, priority, and
+  target date; a self-caught fix ensures an all-blocked goal set still produces a recommendation
+  (resolve the blocker) instead of going silent.
+- **New: Context Selection v2 — ContextRequest/ContextBundle (Phase 4)** — one compact bundle
+  (cognitive brief, memory, goal/project/system/decision-or-plan context, tool evidence, permissions)
+  wrapping the existing `context_gatherer`; deterministic status/relevance filtering (an abandoned
+  goal, a cancelled plan, or an unscoped decision query never surfaces fabricated context) plus a
+  self-caught exception guard so a genuine Chroma failure degrades to an honest empty-memory fallback
+  instead of crashing.
+- **New: budgeting + compression (Phase 5)** — lower-priority fields compress first, load-bearing
+  fields (cognitive brief, goal context, memory) survive longest; exact-duplicate tool evidence and
+  documents are deduplicated.
+- **New: cross-layer integration (Phase 6)** — `local_intelligence_engine`'s task-oriented generation
+  path consumes the `ContextBundle` behind a new default-off flag
+  (`context_selection_v2_enabled`); flag-off behavior confirmed byte-identical to pre-2E. The full
+  chain (message → CognitiveBrief → context → goal progress → achievement) is exercised end-to-end
+  by an automated test, not assumed to compose correctly from independently-passing pieces.
+- **New: `/api/goals/*` and `/api/intelligence/{context/select,context/preview,goals/review,overview}`**
+  — additive alongside the untouched Layer 2A-2D `/api/intelligence/*` endpoints.
+- **New: Layer 2 evaluation suite extension (Phase 8)** — 6 new deterministic checks, fixture cases
+  10 → 21, including the literal "compare with and without Layer 2 features" requirement as a
+  concrete assertion (a goal-linked `ContextBundle` must differ from an unlinked one).
+- **New: Intelligence Center page** — Overview (health, goal counts, current task/plan, recent
+  decisions/simulations, routing status, run-evaluations button), Goals (create/approve/pause/
+  abandon/review with evidence-based progress), Context (preview what a message would actually
+  gather) — every card naming another system links to its existing home rather than duplicating it.
+- Database schema bumped to v7 (two new nullable columns, three new tables, all additive). **Layer 2
+  is now complete** (2A Cognitive Core → 2B Systems/Simulation → 2C Decision/Planning →
+  2D Orchestration/Tools → 2E Goals/Context/Intelligence Center). No Layer 3 prompt has been started.
+
 ## New since 2026-07-18 (later) — ECHO Layer 2D: Multi-Model Orchestrator and Tool Strategy Engine
 
 1233 backend tests passing (57 new), frontend build/typecheck clean, live-verified in a real browser

@@ -20,10 +20,10 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
-from app import human_persona
+from app import human_persona, schemas
 from app.config import get_settings
 from app.providers.base import ChatMessage
-from app.services import cognitive_core
+from app.services import cognitive_core, context_selector
 from app.services.context_gatherer import GatheredContext, gather_context
 from app.services.intent_classifier import IntentClassification, classify_intent
 from app.services.local_model_router import LocalModelRouter, ModelRole
@@ -106,6 +106,38 @@ def _context_block(context: GatheredContext) -> str:
     if context.warnings:
         lines.append("Notes: " + "; ".join(context.warnings))
     return "\n".join(lines) if lines else "No additional context retrieved for this message."
+
+
+def _context_bundle_to_gathered(bundle: schemas.ContextBundle) -> GatheredContext:
+    """ECHO Layer 2E (Phase 6) — feature-flagged: when
+    settings.context_selection_v2_enabled is on, generate_response() builds
+    its context via context_selector.select_context() (the new typed,
+    budgeted, deduplicated ContextBundle) instead of gather_context(), then
+    adapts it back into this same GatheredContext shape so
+    _build_draft_system_prompt()/_context_block() need no changes at all —
+    the prompt builder genuinely consumes one compact ContextBundle, it just
+    arrives through the existing rendering path rather than a second one.
+    Goal/system/decision context (which GatheredContext has no dedicated
+    field for) is folded into project_context so it still reaches the
+    prompt — never silently dropped."""
+    project_lines = []
+    if bundle.project_context:
+        project_lines.append(bundle.project_context)
+    if bundle.goal_context:
+        project_lines.append(bundle.goal_context)
+    if bundle.system_or_simulation_context:
+        project_lines.append(bundle.system_or_simulation_context)
+    if bundle.decision_or_plan_context:
+        project_lines.append(bundle.decision_or_plan_context)
+
+    return GatheredContext(
+        memory_context=[bundle.memory_brief] if bundle.memory_brief else [],
+        project_context=project_lines,
+        library_context=list(bundle.relevant_documents),
+        web_context=list(bundle.tool_evidence),
+        source_display_names=list(bundle.provenance_summary),
+        warnings=([bundle.uncertainty_summary] if bundle.uncertainty_summary else []) + list(bundle.excluded_context_summary),
+    )
 
 
 def _persona_compact_overlay(db: Session, tester_id: str) -> str | None:
@@ -411,16 +443,32 @@ class LocalIntelligenceEngine:
         intent = classify_intent(user_message, conversation_id, active_project_id)
         pipeline_steps.append(f"intent:{intent.intent}")
 
-        # Step 2: context
-        context = gather_context(self.db, intent, user_message, conversation_id, active_project_id)
-        pipeline_steps.append("context_gathered")
+        # Step 2: context — ECHO Layer 2E (Phase 6): when Context Selection
+        # v2 is enabled, route through the new typed/budgeted/deduplicated
+        # ContextBundle pipeline (see _context_bundle_to_gathered()'s own
+        # docstring); off by default, so existing chat is provably unchanged
+        # when this flag is off.
+        if settings.context_selection_v2_enabled:
+            bundle = context_selector.select_context(
+                self.db, schemas.ContextRequest(user_message=user_message, conversation_id=conversation_id, project_id=active_project_id)
+            )
+            context = _context_bundle_to_gathered(bundle)
+            pipeline_steps.append("context_bundle:v2")
+            cognitive_brief_text = bundle.cognitive_brief
+            success_criteria: list[str] = []
+            has_missing_knowledge = bool(bundle.uncertainty_summary)
+            if cognitive_brief_text:
+                pipeline_steps.append("cognitive_brief:built")
+        else:
+            context = gather_context(self.db, intent, user_message, conversation_id, active_project_id)
+            pipeline_steps.append("context_gathered")
 
-        # Step 2.5: Cognitive Core task understanding + brief (Phase 16) —
-        # only ever engages for medium/hard requests (cognitive_core.py's
-        # own gating), so simple messages pay no extra cost here.
-        cognitive_brief_text, success_criteria, has_missing_knowledge = self._cognitive_brief(user_message, conversation_id)
-        if cognitive_brief_text:
-            pipeline_steps.append("cognitive_brief:built")
+            # Step 2.5: Cognitive Core task understanding + brief (Phase 16) —
+            # only ever engages for medium/hard requests (cognitive_core.py's
+            # own gating), so simple messages pay no extra cost here.
+            cognitive_brief_text, success_criteria, has_missing_knowledge = self._cognitive_brief(user_message, conversation_id)
+            if cognitive_brief_text:
+                pipeline_steps.append("cognitive_brief:built")
 
         # Step 3: model role
         role = _select_role(intent, quality_mode)

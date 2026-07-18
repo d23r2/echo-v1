@@ -10,6 +10,7 @@ import ChatView from "./components/chat/ChatView";
 import CognitiveCoreView from "./components/cognitive/CognitiveCoreView";
 import ConstitutionView from "./components/constitution/ConstitutionView";
 import EvaluationLabView from "./components/evaluations/EvaluationLabView";
+import IntelligenceCenterView from "./components/intelligence/IntelligenceCenterView";
 import KnowledgeVaultView from "./components/knowledge/KnowledgeVaultView";
 import LibraryView from "./components/library/LibraryView";
 import MemoryCenterView from "./components/memory/MemoryCenterView";
@@ -80,6 +81,7 @@ export default function App() {
           {view === "action-center" && <ActionCenterView />}
           {view === "tool-center" && <ToolCenterView />}
           {view === "cognitive-core" && <CognitiveCoreView />}
+          {view === "intelligence-center" && <IntelligenceCenterView onNavigate={setView} />}
           {view === "release-manager" && <ReleaseManagerView />}
           {view === "permission-center" && <PermissionCenterView />}
           {view === "constitution" && <ConstitutionView />}
