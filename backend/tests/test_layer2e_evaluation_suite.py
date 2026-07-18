@@ -5,7 +5,7 @@ rest of evaluation_lab.py's convention. Uses the isolated db_session
 fixture (never the real app DB), and separately confirms the whole
 fixture-driven run never touches AtlasEntry (real user memory)."""
 
-from app.models import AtlasEntry
+from app.models import AtlasEntry, DecisionCase, Goal, Plan, TaskUnderstanding
 from app.services import evaluation_lab
 
 
@@ -137,4 +137,15 @@ def test_evaluation_fixtures_never_create_atlas_entries(db_session):
     before = db_session.query(AtlasEntry).count()
     evaluation_lab.run_evaluation(db_session)
     after = db_session.query(AtlasEntry).count()
+    assert after == before
+
+
+def test_evaluation_run_isolates_all_fixture_domain_rows(db_session):
+    tracked_models = (Goal, Plan, DecisionCase, TaskUnderstanding)
+    before = {model: db_session.query(model).count() for model in tracked_models}
+
+    run = evaluation_lab.run_evaluation(db_session)
+
+    after = {model: db_session.query(model).count() for model in tracked_models}
+    assert run.status == "completed"
     assert after == before

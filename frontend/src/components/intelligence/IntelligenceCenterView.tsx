@@ -17,6 +17,7 @@ import {
   reviewGoal,
   runIntelligenceEvaluations,
   selectContext,
+  updateGoal,
 } from "../../api/client";
 import { View } from "../Sidebar";
 
@@ -362,6 +363,12 @@ function GoalDetail({ goal, onChanged }: { goal: GoalOut; onChanged: () => Promi
     }
   }
 
+  function requestAbandonment() {
+    const reason = window.prompt("Why are you abandoning this goal? This reason will be kept in its history.");
+    if (!reason?.trim()) return;
+    void run(() => abandonGoal(goal.id, reason.trim()));
+  }
+
   return (
     <div className="mt-3 flex flex-col gap-3 border-t border-zinc-800/60 pt-3 text-xs text-zinc-300">
       {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-2 py-1 text-red-300">{error}</div>}
@@ -388,7 +395,17 @@ function GoalDetail({ goal, onChanged }: { goal: GoalOut; onChanged: () => Promi
             Approve
           </button>
         )}
-        {(goal.status === "approved" || goal.status === "active") && (
+        {goal.status === "approved" && (
+          <button disabled={busy} onClick={() => void run(() => updateGoal(goal.id, { status: "active" }))} className="rounded-lg border border-emerald-700 px-2.5 py-1 text-emerald-400 hover:bg-emerald-950/40">
+            Activate
+          </button>
+        )}
+        {(goal.status === "paused" || goal.status === "blocked") && (
+          <button disabled={busy} onClick={() => void run(() => updateGoal(goal.id, { status: "active" }))} className="rounded-lg border border-emerald-700 px-2.5 py-1 text-emerald-400 hover:bg-emerald-950/40">
+            Resume
+          </button>
+        )}
+        {goal.status === "active" && (
           <button disabled={busy} onClick={() => void run(() => pauseGoal(goal.id))} className="rounded-lg border border-amber-700 px-2.5 py-1 text-amber-400 hover:bg-amber-950/40">
             Pause
           </button>
@@ -396,7 +413,7 @@ function GoalDetail({ goal, onChanged }: { goal: GoalOut; onChanged: () => Promi
         {!["achieved", "abandoned", "superseded"].includes(goal.status) && (
           <button
             disabled={busy}
-            onClick={() => void run(() => abandonGoal(goal.id, "No longer relevant"))}
+            onClick={requestAbandonment}
             className="rounded-lg border border-red-800 px-2.5 py-1 text-red-400 hover:bg-red-950/40"
           >
             Abandon
@@ -470,8 +487,10 @@ function ContextTab() {
               [
                 ["Cognitive brief", preview.cognitive_brief],
                 ["Memory", preview.memory_brief],
+                ["Earlier conversation", preview.conversation_brief],
                 ["Goal", preview.goal_context],
                 ["Project", preview.project_context],
+                ["Schedule", preview.schedule_context],
                 ["Systems/Simulation", preview.system_or_simulation_context],
                 ["Decision/Plan", preview.decision_or_plan_context],
               ] as [string, string | null][]

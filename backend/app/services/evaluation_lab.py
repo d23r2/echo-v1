@@ -13,11 +13,14 @@ import json
 import logging
 from pathlib import Path
 
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.config import get_settings
+from app.db import Base
 from app.models import EvaluationResult, EvaluationRun
-from app.services import action_system, permission_center
+from app.services import action_system, cognitive_core, permission_center, tool_registry
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +240,28 @@ _CHECKS = {
 }
 
 
+def _create_isolated_evaluation_session() -> tuple[Session, object]:
+    """Build a disposable database for fixture-created domain rows.
+
+    EvaluationRun/EvaluationResult remain durable in the caller's database,
+    but Goals, Plans, Decisions, TaskUnderstandings, ActionRuns, and context
+    metrics created while exercising capabilities can never leak into the
+    user's real views or affect a later evaluation.
+    """
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    evaluation_db = sessionmaker(autocommit=False, autoflush=False, bind=engine)()
+    action_system.ensure_registered(evaluation_db)
+    permission_center.ensure_defaults(evaluation_db)
+    tool_registry.ensure_registered(evaluation_db)
+    cognitive_core.seed_world_model(evaluation_db)
+    return evaluation_db, engine
+
+
 def run_evaluation(db: Session) -> EvaluationRun:
     cases = load_cases()
     run = EvaluationRun(status="running", total_cases=len(cases))
@@ -244,26 +269,40 @@ def run_evaluation(db: Session) -> EvaluationRun:
     db.commit()
     db.refresh(run)
 
+    evaluation_db, evaluation_engine = _create_isolated_evaluation_session()
     passed = failed = warnings = 0
-    for case in cases:
-        check_fn = _CHECKS.get(case.get("check_type"))
-        if check_fn is None:
-            status, reason = "warning", f"no checker registered for check_type '{case.get('check_type')}'"
-        else:
-            try:
-                status, reason = check_fn(db, case)
-            except Exception:  # noqa: BLE001 — one bad case must not abort the whole run
-                logger.warning("Evaluation case '%s' raised an error", case["id"], exc_info=True)
-                status, reason = "fail", "This case couldn't be evaluated due to an internal error."
+    try:
+        for case in cases:
+            check_fn = _CHECKS.get(case.get("check_type"))
+            if check_fn is None:
+                status, reason = "warning", f"no checker registered for check_type '{case.get('check_type')}'"
+            else:
+                try:
+                    status, reason = check_fn(evaluation_db, case)
+                except Exception:  # noqa: BLE001 — one bad case must not abort the whole run
+                    evaluation_db.rollback()
+                    logger.warning("Evaluation case '%s' raised an error", case["id"], exc_info=True)
+                    status, reason = "fail", "This case couldn't be evaluated due to an internal error."
 
-        if status == "pass":
-            passed += 1
-        elif status == "warning":
-            warnings += 1
-        else:
-            failed += 1
+            if status == "pass":
+                passed += 1
+            elif status == "warning":
+                warnings += 1
+            else:
+                failed += 1
 
-        db.add(EvaluationResult(run_id=run.id, case_id=case["id"], status=status, reason=reason, observed_json={"category": case["category"]}))
+            db.add(
+                EvaluationResult(
+                    run_id=run.id,
+                    case_id=case["id"],
+                    status=status,
+                    reason=reason,
+                    observed_json={"category": case["category"]},
+                )
+            )
+    finally:
+        evaluation_db.close()
+        evaluation_engine.dispose()
 
     run.passed_cases = passed
     run.failed_cases = failed

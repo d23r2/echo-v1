@@ -3,9 +3,11 @@ the isolated db_session fixture — progress is always computed from real
 Task/PlanStep evidence, never a model estimate, so no fake provider is
 needed anywhere in this file."""
 
+import pytest
+
 from app import schemas
 from app.models import Plan, PlanStep, Task
-from app.services import goal_engine
+from app.services import goal_engine, plan_engine
 
 
 def _goal(db_session, **overrides):
@@ -37,6 +39,26 @@ def test_approve_only_valid_from_proposed(db_session):
         raise AssertionError("should have raised")
     except ValueError:
         pass
+
+
+def test_generic_patch_cannot_bypass_proposed_goal_approval(db_session):
+    goal = _goal(db_session, origin="system_suggestion")
+
+    with pytest.raises(ValueError, match="explicit approval endpoint"):
+        goal_engine.update_goal(db_session, goal.id, schemas.GoalUpdate(status="active"))
+
+    unchanged = goal_engine.get_goal(db_session, goal.id)
+    assert unchanged.status == "proposed"
+    assert unchanged.approved_at is None
+
+
+def test_approved_and_paused_goals_can_activate(db_session):
+    goal = _goal(db_session)
+    active = goal_engine.update_goal(db_session, goal.id, schemas.GoalUpdate(status="active"))
+    assert active.status == "active"
+    paused = goal_engine.pause_goal(db_session, goal.id)
+    resumed = goal_engine.update_goal(db_session, paused.id, schemas.GoalUpdate(status="active"))
+    assert resumed.status == "active"
 
 
 # ---- Hierarchy and project linkage ----
@@ -103,6 +125,22 @@ def test_progress_includes_plan_step_evidence_only_for_approved_plans(db_session
     progress = goal_engine.compute_progress(db_session, goal.id)
     assert progress.evidence_plan_step_total == 2  # only the approved plan's steps
     assert progress.evidence_plan_step_done == 1
+
+
+def test_replan_preserves_goal_link(db_session):
+    goal = _goal(db_session)
+    plan = Plan(objective="linked plan", goal_id=goal.id, status="approved")
+    db_session.add(plan)
+    db_session.commit()
+
+    revision = plan_engine.replan(
+        db_session,
+        plan.id,
+        schemas.ReplanRequest(reason="Requirements changed"),
+    )
+
+    assert revision is not None
+    assert revision.goal_id == goal.id
 
 
 def test_evidence_only_auto_achieve(db_session):

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
-from app.models import Project, Task, _now
+from app.models import Goal, Project, Task, _now
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -36,11 +36,14 @@ def create_task(payload: schemas.TaskCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Title is required")
     if payload.project_id is not None and db.get(Project, payload.project_id) is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if payload.goal_id is not None and db.get(Goal, payload.goal_id) is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
     task = Task(
         title=payload.title.strip(),
         description=payload.description,
         priority=payload.priority,
         project_id=payload.project_id,
+        goal_id=payload.goal_id,
         due_at=payload.due_at,
         source_type=payload.source_type,
         source_id=payload.source_id,
@@ -57,6 +60,7 @@ def create_task(payload: schemas.TaskCreate, db: Session = Depends(get_db)):
 def list_tasks(
     status: str | None = Query(None),
     project_id: str | None = Query(None),
+    goal_id: str | None = Query(None),
     due_before: datetime | None = Query(None),
     due_after: datetime | None = Query(None),
     db: Session = Depends(get_db),
@@ -68,6 +72,8 @@ def list_tasks(
         query = query.filter(Task.status == status)
     if project_id:
         query = query.filter(Task.project_id == project_id)
+    if goal_id:
+        query = query.filter(Task.goal_id == goal_id)
     if due_before:
         query = query.filter(Task.due_at.isnot(None), Task.due_at <= due_before)
     if due_after:
@@ -106,6 +112,10 @@ def update_task(task_id: str, payload: schemas.TaskUpdate, db: Session = Depends
         if db.get(Project, payload.project_id) is None:
             raise HTTPException(status_code=404, detail="Project not found")
         task.project_id = payload.project_id
+    if "goal_id" in payload.model_fields_set:
+        if payload.goal_id is not None and db.get(Goal, payload.goal_id) is None:
+            raise HTTPException(status_code=404, detail="Goal not found")
+        task.goal_id = payload.goal_id
     if payload.due_at is not None:
         task.due_at = payload.due_at
     if payload.tags is not None:

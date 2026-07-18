@@ -91,6 +91,54 @@ def test_goal_progress_endpoint():
     assert resp.json()["percent_complete"] == 0.0
 
 
+def test_task_api_can_link_real_progress_evidence_to_goal():
+    goal = _create_goal(title="Task-linked goal")
+    task_resp = client.post("/api/tasks", json={"title": "Linked task", "goal_id": goal["id"]})
+    assert task_resp.status_code == 200
+    assert task_resp.json()["goal_id"] == goal["id"]
+
+    progress = client.get(f"/api/goals/{goal['id']}/progress").json()
+    assert progress["evidence_task_total"] == 1
+    assert progress["percent_complete"] == 0.0
+
+    client.post(f"/api/tasks/{task_resp.json()['id']}/complete")
+    completed = client.get(f"/api/goals/{goal['id']}/progress").json()
+    assert completed["percent_complete"] == 100.0
+
+
+def test_plan_api_can_link_plan_step_evidence_to_goal():
+    goal = _create_goal(title="Plan-linked goal")
+    plan_resp = client.post(
+        "/api/intelligence/plans",
+        json={"objective": "Linked plan", "goal_id": goal["id"], "steps": [{"title": "First step"}]},
+    )
+    assert plan_resp.status_code == 200
+    plan = plan_resp.json()
+    assert plan["goal_id"] == goal["id"]
+
+    assert client.post(f"/api/intelligence/plans/{plan['id']}/approve").status_code == 200
+    progress = client.get(f"/api/goals/{goal['id']}/progress").json()
+    assert progress["evidence_plan_step_total"] == 1
+
+
+def test_task_and_plan_goal_links_reject_unknown_goals():
+    assert client.post("/api/tasks", json={"title": "Orphan", "goal_id": "missing"}).status_code == 404
+    assert (
+        client.post(
+            "/api/intelligence/plans",
+            json={"objective": "Orphan", "goal_id": "missing", "steps": [{"title": "Step"}]},
+        ).status_code
+        == 404
+    )
+
+
+def test_patch_cannot_activate_unapproved_system_goal():
+    goal = _create_goal(title="Unapproved", origin="system_suggestion")
+    resp = client.patch(f"/api/goals/{goal['id']}", json={"status": "active"})
+    assert resp.status_code == 400
+    assert client.get(f"/api/goals/{goal['id']}").json()["status"] == "proposed"
+
+
 # ---- Context Selection v2 API ----
 
 

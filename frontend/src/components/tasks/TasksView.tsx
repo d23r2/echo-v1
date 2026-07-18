@@ -3,6 +3,8 @@ import {
   cancelTask,
   completeTask,
   createTask,
+  GoalOut,
+  listGoals,
   listProjects,
   listTasks,
   ProjectOut,
@@ -28,17 +30,20 @@ function isOverdue(task: TaskOut): boolean {
 export default function TasksView() {
   const [tasks, setTasks] = useState<TaskOut[]>([]);
   const [projects, setProjects] = useState<ProjectOut[]>([]);
+  const [goals, setGoals] = useState<GoalOut[]>([]);
   const [filter, setFilter] = useState<Filter>("all");
   const [title, setTitle] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [goalId, setGoalId] = useState("");
   const [dueAt, setDueAt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
-    const [t, p] = await Promise.all([listTasks(), listProjects()]);
+    const [t, p, g] = await Promise.all([listTasks(), listProjects(), listGoals()]);
     setTasks(t);
     setProjects(p);
+    setGoals(g);
   }
 
   useEffect(() => {
@@ -54,6 +59,7 @@ export default function TasksView() {
       await createTask({
         title: title.trim(),
         project_id: projectId || undefined,
+        goal_id: goalId || undefined,
         due_at: dueAt ? new Date(dueAt).toISOString() : undefined,
       });
       setTitle("");
@@ -97,7 +103,7 @@ export default function TasksView() {
       <div>
         <h2 className="text-xl font-semibold">Tasks</h2>
         <p className="mt-2 text-sm text-zinc-400">
-          Standalone or linked to a project. Completing a task never deletes it — filter to "Done" to
+          Standalone or linked to a project or goal. Completing a task never deletes it — filter to "Done" to
           see it again.
         </p>
       </div>
@@ -126,6 +132,20 @@ export default function TasksView() {
                   {p.title}
                 </option>
               ))}
+            </select>
+            <select
+              value={goalId}
+              onChange={(e) => setGoalId(e.target.value)}
+              className="min-h-[44px] rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300"
+            >
+              <option value="">No goal</option>
+              {goals
+                .filter((g) => !["achieved", "abandoned", "superseded"].includes(g.status))
+                .map((g) => (
+                  <option key={g.id} value={g.id}>
+                    {g.title}
+                  </option>
+                ))}
             </select>
             <input
               type="datetime-local"
@@ -164,6 +184,7 @@ export default function TasksView() {
             key={t.id}
             task={t}
             overdue={isOverdue(t)}
+            goalTitle={goals.find((g) => g.id === t.goal_id)?.title || null}
             onComplete={() => void handleComplete(t.id)}
             onCancel={() => void handleCancel(t.id, t.title)}
           />
@@ -176,11 +197,13 @@ export default function TasksView() {
 function TaskRow({
   task,
   overdue,
+  goalTitle,
   onComplete,
   onCancel,
 }: {
   task: TaskOut;
   overdue: boolean;
+  goalTitle: string | null;
   onComplete: () => void;
   onCancel: () => void;
 }) {
@@ -196,6 +219,7 @@ function TaskRow({
           </div>
           <div className="mt-1 flex flex-wrap gap-2 text-[10px] uppercase tracking-wide text-zinc-600">
             {task.project_title && <span>{task.project_title}</span>}
+            {goalTitle && <span>Goal: {goalTitle}</span>}
             {task.due_at && (
               <span className={overdue ? "text-red-400" : ""}>
                 Due {new Date(task.due_at).toLocaleString()}

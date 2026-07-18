@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   AttachmentAnalysisStatus,
   FeatureAvailability,
+  GoalOut,
   MemoryUpdate,
   MessageOut,
   StreamDoneEvent,
@@ -12,6 +13,7 @@ import {
   ConversationSummaryOut,
   getInterfaceSettings,
   getLocalIntelligenceSettings,
+  listGoals,
   getPersonaSettings,
   getWelcomeGreeting,
   summarizeConversation,
@@ -120,6 +122,8 @@ export default function ChatView() {
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const [features, setFeatures] = useState<FeatureAvailability | null>(null);
   const [localIntelligenceEnabled, setLocalIntelligenceEnabled] = useState(false);
+  const [goals, setGoals] = useState<GoalOut[]>([]);
+  const [goalId, setGoalId] = useState("");
   const [showUsage, setShowUsage] = useState(true);
   const [showModelSelector, setShowModelSelector] = useState(true);
   const [voiceMode, setVoiceMode] = useState<"off" | "push_to_talk" | "hands_free_placeholder">("push_to_talk");
@@ -164,6 +168,13 @@ export default function ChatView() {
     setSummary(null);
     setSummaryError(null);
   }, [conversationId]);
+
+  useEffect(() => {
+    if (!localIntelligenceEnabled) return;
+    listGoals()
+      .then((items) => setGoals(items.filter((g) => !["achieved", "abandoned", "superseded"].includes(g.status))))
+      .catch(() => setGoals([]));
+  }, [localIntelligenceEnabled]);
 
   useEffect(() => {
     if (!conversationId) {
@@ -481,7 +492,7 @@ export default function ChatView() {
     // POST /api/chat, so route there directly (no live typing indicator) when
     // it's enabled and the provider pin wouldn't bypass it anyway.
     if (localIntelligenceEnabled && (provider === "auto" || provider === "ollama")) {
-      const result = await runSend(text, provider, conversationId);
+      const result = await runSend(text, provider, conversationId, goalId || undefined);
       if (!result) return;
       selectConversation(result.conversation_id);
       setMessages((prev) => [
@@ -802,6 +813,26 @@ export default function ChatView() {
         </div>
 
         <div className="border-t border-zinc-800 p-3">
+          {localIntelligenceEnabled && (provider === "auto" || provider === "ollama") && goals.length > 0 && (
+            <div className="mb-2 flex items-center gap-2">
+              <label htmlFor="chat-goal" className="text-[10px] uppercase tracking-wide text-zinc-500">
+                Goal context
+              </label>
+              <select
+                id="chat-goal"
+                value={goalId}
+                onChange={(e) => setGoalId(e.target.value)}
+                className="min-h-[32px] rounded-lg border border-zinc-700 bg-zinc-950 px-2 py-1 text-xs text-zinc-300"
+              >
+                <option value="">None</option>
+                {goals.map((goal) => (
+                  <option key={goal.id} value={goal.id}>
+                    {goal.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {attachmentError && (
             <div className="mb-2 rounded-lg border border-red-900 bg-red-950/50 px-3 py-1.5 text-xs text-red-300">
               {attachmentError}

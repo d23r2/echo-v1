@@ -33,6 +33,12 @@ _TERMINAL_STATUSES = ("achieved", "abandoned", "superseded")
 # Plans in these statuses represent real, approved-or-further work — a
 # still-`proposed` (unapproved) plan's steps are not yet real evidence.
 _EVIDENCE_PLAN_STATUSES = ("approved", "active", "blocked", "completed")
+_PATCH_STATUS_TRANSITIONS = {
+    "approved": {"active", "paused", "blocked"},
+    "active": {"paused", "blocked"},
+    "paused": {"active", "blocked"},
+    "blocked": {"active", "paused"},
+}
 
 
 # ============================================================================
@@ -94,6 +100,11 @@ def update_goal(db: Session, goal_id: str, payload: schemas.GoalUpdate) -> Goal 
     if new_status is not None:
         if goal.status in _TERMINAL_STATUSES:
             raise ValueError(f"Cannot change status of a goal that is already '{goal.status}'.")
+        allowed = _PATCH_STATUS_TRANSITIONS.get(goal.status, set())
+        if new_status not in allowed:
+            if goal.status == "proposed":
+                raise ValueError("A proposed goal must be approved through the explicit approval endpoint first.")
+            raise ValueError(f"Cannot change goal status from '{goal.status}' to '{new_status}'.")
         goal.status = new_status
     for field in ("success_criteria", "constraints"):
         if field in updates:

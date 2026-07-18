@@ -509,10 +509,10 @@ export interface ProviderUsageOut {
 export type UsageSummary = Record<string, ProviderUsageOut>;
 
 // ---- Chat ----
-export const sendChatMessage = (message: string, provider: string, conversationId?: string) =>
+export const sendChatMessage = (message: string, provider: string, conversationId?: string, goalId?: string) =>
   request<ChatResponse>("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ message, provider, conversation_id: conversationId ?? null }),
+    body: JSON.stringify({ message, provider, conversation_id: conversationId ?? null, goal_id: goalId ?? null }),
   });
 
 export interface StreamDoneEvent {
@@ -1044,6 +1044,7 @@ export interface TaskOut {
   status: TaskStatus;
   priority: TaskPriority;
   project_id: string | null;
+  goal_id: string | null;
   project_title: string | null;
   due_at: string | null;
   scheduled_item_id: string | null;
@@ -1061,6 +1062,7 @@ export const createTask = (payload: {
   description?: string;
   priority?: TaskPriority;
   project_id?: string;
+  goal_id?: string;
   due_at?: string;
   tags?: string[];
 }) => request<TaskOut>("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
@@ -1068,12 +1070,14 @@ export const createTask = (payload: {
 export const listTasks = (filters?: {
   status?: TaskStatus;
   project_id?: string;
+  goal_id?: string;
   due_before?: string;
   due_after?: string;
 }) => {
   const params = new URLSearchParams();
   if (filters?.status) params.set("status", filters.status);
   if (filters?.project_id) params.set("project_id", filters.project_id);
+  if (filters?.goal_id) params.set("goal_id", filters.goal_id);
   if (filters?.due_before) params.set("due_before", filters.due_before);
   if (filters?.due_after) params.set("due_after", filters.due_after);
   const qs = params.toString();
@@ -1088,6 +1092,7 @@ export const updateTask = (
     status: TaskStatus;
     priority: TaskPriority;
     project_id: string;
+    goal_id: string | null;
     due_at: string;
     tags: string[];
     sort_order: number;
@@ -2181,6 +2186,7 @@ export interface PlanOut {
   system_model_id: string | null;
   task_id: string | null;
   project_id: string | null;
+  goal_id: string | null;
   revision_number: number;
   superseded_by_plan_id: string | null;
   created_at: string;
@@ -2253,6 +2259,7 @@ export const createPlan = (payload: {
   system_model_id?: string;
   task_id?: string;
   project_id?: string;
+  goal_id?: string;
   steps?: Array<{ title: string; description?: string; estimated_effort?: string; owner?: string; verification_criteria?: string[]; depends_on_titles?: string[] }>;
 }) => request<PlanOut>("/api/intelligence/plans", { method: "POST", body: JSON.stringify(payload) });
 export const listPlans = (params?: { project_id?: string; status?: string }) => {
@@ -2263,7 +2270,7 @@ export const listPlans = (params?: { project_id?: string; status?: string }) => 
   return request<PlanOut[]>(`/api/intelligence/plans${qs ? `?${qs}` : ""}`);
 };
 export const getPlan = (id: string) => request<PlanOut>(`/api/intelligence/plans/${id}`);
-export const updatePlan = (id: string, payload: { scope?: string; assumptions?: string[]; constraints?: string[]; success_criteria?: string[] }) =>
+export const updatePlan = (id: string, payload: { scope?: string; assumptions?: string[]; constraints?: string[]; success_criteria?: string[]; goal_id?: string | null }) =>
   request<PlanOut>(`/api/intelligence/plans/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
 export const validatePlan = (id: string) => request<PlanValidationOut>(`/api/intelligence/plans/${id}/validate`, { method: "POST" });
 export const approvePlan = (id: string) => request<PlanOut>(`/api/intelligence/plans/${id}/approve`, { method: "POST" });
@@ -2664,9 +2671,13 @@ export interface ContextRequestPayload {
 
 export interface ContextBundleOut {
   cognitive_brief: string | null;
+  success_criteria: string[];
+  has_missing_knowledge: boolean;
   memory_brief: string | null;
+  conversation_brief: string | null;
   goal_context: string | null;
   project_context: string | null;
+  schedule_context: string | null;
   relevant_skills: string[];
   relevant_documents: string[];
   system_or_simulation_context: string | null;

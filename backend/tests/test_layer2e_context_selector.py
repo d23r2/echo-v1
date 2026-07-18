@@ -6,7 +6,7 @@ atlas.search() path (same established pattern as test_atlas_second_brain.py)
 fixture, so these are order-independent."""
 
 from app import schemas
-from app.models import DecisionCase, Plan
+from app.models import ContextSelectionMetric, DecisionCase, Plan
 from app.services import context_selector, goal_engine
 
 
@@ -108,6 +108,41 @@ def test_context_budget_respected(db_session):
     assert bundle.budget_chars == 10
 
 
+def test_context_selection_persists_content_free_metrics(db_session):
+    goal = goal_engine.create_goal(
+        db_session,
+        schemas.GoalCreate(title="Sensitive title must not enter metrics", origin="explicit_user"),
+    )
+    bundle = context_selector.select_context(
+        db_session,
+        schemas.ContextRequest(user_message="status", goal_id=goal.id, purpose="review"),
+    )
+
+    metric = db_session.query(ContextSelectionMetric).order_by(ContextSelectionMetric.created_at.desc()).first()
+    assert metric is not None
+    assert metric.purpose == "review"
+    assert metric.included_category_counts_json["goal_context"] == 1
+    assert metric.total_chars_selected == bundle.total_chars
+    assert "Sensitive title" not in str(metric.included_category_counts_json)
+
+
+def test_required_context_and_current_freshness_fail_honestly_when_unavailable(db_session, monkeypatch):
+    from app.services import context_gatherer as cg
+
+    monkeypatch.setattr(cg, "gather_context", lambda *args, **kwargs: cg.GatheredContext())
+    bundle = context_selector.select_context(
+        db_session,
+        schemas.ContextRequest(
+            user_message="status",
+            required_context_types=["goal_context"],
+            freshness_requirement="current",
+        ),
+    )
+    assert bundle.fallback_used is True
+    assert any("required context unavailable" in item for item in bundle.excluded_context_summary)
+    assert any("current-info requirement not met" in item for item in bundle.excluded_context_summary)
+
+
 def test_duplicate_tool_evidence_deduplicated(db_session, monkeypatch):
     from app.web_search import GatherResult, SourceResult
 
@@ -163,9 +198,13 @@ def test_bundle_has_single_compact_shape():
     fields = set(bundle.model_dump().keys())
     assert fields == {
         "cognitive_brief",
+        "success_criteria",
+        "has_missing_knowledge",
         "memory_brief",
+        "conversation_brief",
         "goal_context",
         "project_context",
+        "schedule_context",
         "relevant_skills",
         "relevant_documents",
         "system_or_simulation_context",

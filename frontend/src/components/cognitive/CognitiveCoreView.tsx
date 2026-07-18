@@ -9,6 +9,7 @@ import {
   DecisionCaseOut,
   DecisionHandoffOut,
   GraphNodeOut,
+  GoalOut,
   LocalModelRoleRecord,
   MaterialiseTasksOut,
   OrchestrationPlanOut,
@@ -47,6 +48,7 @@ import {
   listCognitiveBriefs,
   listConcepts,
   listDecisions,
+  listGoals,
   listOrchestrationPolicies,
   listOrchestrationRuns,
   listPlans,
@@ -1171,7 +1173,9 @@ const PLAN_STATUS_COLOR: Record<string, string> = {
 
 function PlansTab() {
   const [plans, setPlans] = useState<PlanOut[]>([]);
+  const [goals, setGoals] = useState<GoalOut[]>([]);
   const [objective, setObjective] = useState("");
+  const [goalId, setGoalId] = useState("");
   const [stepTitles, setStepTitles] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -1188,6 +1192,7 @@ function PlansTab() {
 
   useEffect(() => {
     void refresh();
+    listGoals().then(setGoals).catch(() => undefined);
   }, []);
 
   async function handleCreate(e: React.FormEvent) {
@@ -1200,7 +1205,11 @@ function PlansTab() {
         .map((l) => l.trim())
         .filter(Boolean)
         .map((title) => ({ title }));
-      await createPlan({ objective: objective.trim(), steps: steps.length ? steps : undefined });
+      await createPlan({
+        objective: objective.trim(),
+        goal_id: goalId || undefined,
+        steps: steps.length ? steps : undefined,
+      });
       setObjective("");
       setStepTitles("");
       await refresh();
@@ -1221,6 +1230,16 @@ function PlansTab() {
 
       <form onSubmit={handleCreate} className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
         <input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="Objective (e.g. 'Ship the release')" className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm" />
+        <select value={goalId} onChange={(e) => setGoalId(e.target.value)} className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm">
+          <option value="">No goal</option>
+          {goals
+            .filter((g) => !["achieved", "abandoned", "superseded"].includes(g.status))
+            .map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.title}
+              </option>
+            ))}
+        </select>
         <textarea
           value={stepTitles}
           onChange={(e) => setStepTitles(e.target.value)}

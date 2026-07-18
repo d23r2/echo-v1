@@ -63,6 +63,7 @@ def create_plan(db: Session, payload: schemas.PlanCreate) -> Plan:
         system_model_id=payload.system_model_id,
         task_id=payload.task_id,
         project_id=payload.project_id,
+        goal_id=payload.goal_id,
     )
     db.add(plan)
     db.flush()
@@ -129,6 +130,8 @@ def update_plan(db: Session, plan_id: str, payload: schemas.PlanUpdate) -> Plan 
         plan.constraints_json = payload.constraints
     if payload.success_criteria is not None:
         plan.success_criteria_json = payload.success_criteria
+    if "goal_id" in payload.model_fields_set:
+        plan.goal_id = payload.goal_id
     db.commit()
     db.refresh(plan)
     return plan
@@ -335,6 +338,7 @@ def replan(db: Session, plan_id: str, payload: schemas.ReplanRequest) -> Plan | 
         system_model_id=old_plan.system_model_id,
         task_id=old_plan.task_id,
         project_id=old_plan.project_id,
+        goal_id=old_plan.goal_id,
         revision_number=old_plan.revision_number + 1,
     )
     db.add(new_plan)

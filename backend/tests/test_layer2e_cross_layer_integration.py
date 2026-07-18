@@ -56,6 +56,50 @@ def test_context_bundle_goal_context_reaches_the_draft_prompt(db_session, monkey
     assert "Ship the Intelligence Center" in prompt
 
 
+def test_real_generation_accepts_goal_context(db_session, monkeypatch):
+    monkeypatch.setenv("CONTEXT_SELECTION_V2_ENABLED", "true")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        goal = goal_engine.create_goal(
+            db_session,
+            schemas.GoalCreate(title="Goal visible to the real draft", origin="explicit_user"),
+        )
+        fake = FakeProvider("ollama", available=True, response_text="a goal-aware answer")
+        engine = LocalIntelligenceEngine(db_session, model_router=LocalModelRouter(provider=fake))
+
+        result = engine.generate_response("What should I do next?", goal_id=goal.id, mode="simple")
+
+        assert result.answer == "a goal-aware answer"
+        assert any("Goal visible to the real draft" in prompt for prompt in fake.system_prompts)
+    finally:
+        get_settings.cache_clear()
+
+
+def test_context_bundle_adapter_preserves_context_and_private_provenance():
+    from app.services.local_intelligence_engine import _context_bundle_to_gathered
+    from app.web_search import GatherResult
+
+    citation = object()
+    gather_result = GatherResult(sources=[], task_type="current_info")
+    bundle = schemas.ContextBundle(
+        conversation_brief="Earlier discussion",
+        schedule_context="Reminder tomorrow",
+        goal_context="Goal context",
+    )
+    bundle._atlas_citations = [citation]
+    bundle._gather_result = gather_result
+
+    gathered = _context_bundle_to_gathered(bundle)
+
+    assert gathered.conversation_context == ["Earlier discussion"]
+    assert gathered.schedule_context == ["Reminder tomorrow"]
+    assert gathered.goal_context == ["Goal context"]
+    assert gathered.atlas_citations == [citation]
+    assert gathered.gather_result is gather_result
+
+
 def test_end_to_end_request_to_goal_progress_pipeline(db_session, monkeypatch):
     """user request -> CognitiveBrief/context -> (decision/plan already
     covered elsewhere) -> goal progress update, as one coherent chain."""

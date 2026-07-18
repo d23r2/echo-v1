@@ -16,6 +16,7 @@ from app.db import get_db
 from app.models import (
     CognitiveConcept,
     DecisionCase,
+    Goal,
     OrchestrationRun,
     Plan,
     Simulation,
@@ -403,6 +404,8 @@ def update_option_ratings(decision_case_id: str, option_id: str, payload: schema
 def create_plan(payload: schemas.PlanCreate, db: Session = Depends(get_db)):
     if payload.decision_case_id and db.get(DecisionCase, payload.decision_case_id) is None:
         raise HTTPException(status_code=404, detail="Decision case not found")
+    if payload.goal_id and db.get(Goal, payload.goal_id) is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
     return plan_engine.create_plan(db, payload)
 
 
@@ -421,6 +424,8 @@ def get_plan(plan_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/plans/{plan_id}", response_model=schemas.PlanOut)
 def update_plan(plan_id: str, payload: schemas.PlanUpdate, db: Session = Depends(get_db)):
+    if "goal_id" in payload.model_fields_set and payload.goal_id and db.get(Goal, payload.goal_id) is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
     plan = plan_engine.update_plan(db, plan_id, payload)
     if plan is None:
         raise HTTPException(status_code=404, detail="Plan not found")

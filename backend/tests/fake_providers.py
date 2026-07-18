@@ -58,6 +58,7 @@ class FakeProvider(ModelProvider):
         # call — lets role-based-routing tests (LocalModelRouter) assert which
         # model name was actually requested without needing a real Ollama.
         self.last_model_requested: str | None = None
+        self.system_prompts: list[str] = []
 
     def available(self) -> tuple[bool, str | None]:
         return self._available, self._unavailable_reason
@@ -65,6 +66,7 @@ class FakeProvider(ModelProvider):
     def chat(self, system_prompt: str, messages: list[ChatMessage], model: str | None = None) -> ChatResult:
         self.chat_call_count += 1
         self.last_model_requested = model
+        self.system_prompts.append(system_prompt)
         if self._raises is not None:
             raise self._raises
         if self._chat_result is not None:
