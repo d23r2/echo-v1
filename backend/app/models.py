@@ -2134,6 +2134,11 @@ class CodeModificationProposal(Base):
     base_commit: Mapped[str | None] = mapped_column(String, nullable=True)
     active_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     closed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Supervised Maintenance Workspace v1 Phase 3 — loose reference (no FK,
+    # matching the tasks.goal_id/plans.goal_id convention) to the
+    # MaintenanceAnalysis this proposal originated from, if any. Nullable:
+    # a proposal can still be created directly, unrelated to any analysis.
+    analysis_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 

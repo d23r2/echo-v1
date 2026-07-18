@@ -77,6 +77,7 @@ def init_db() -> None:
     _ensure_column("human_approvals", "target_at_approval", "TEXT DEFAULT 'local-dev'")
     _ensure_column("human_approvals", "policy_fingerprint_at_approval", "TEXT DEFAULT ''")
     _ensure_column("human_approvals", "constitution_fingerprint_at_approval", "TEXT DEFAULT ''")
+    _ensure_column("code_modification_proposals", "analysis_id", "TEXT")
     _ensure_layer1_memory_columns()
     _ensure_layer2a_cognitive_columns()
     _seed_action_reliability_core()
@@ -229,7 +230,10 @@ def _ensure_layer1_memory_columns() -> None:
 # maintenance_findings, maintenance_audit_events), created by
 # Base.metadata.create_all() above with no _ensure_column() calls needed.
 # See docs/supervised_maintenance/architecture.md.
-CURRENT_SCHEMA_VERSION = 11
+# v12 (ECHO Supervised Maintenance Workspace v1, Phase 3): Proposal
+# generation — one additive column, code_modification_proposals.analysis_id
+# (loose reference, no FK, same convention as tasks.goal_id).
+CURRENT_SCHEMA_VERSION = 12
 
 
 def _ensure_schema_version() -> None:

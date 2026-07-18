@@ -161,6 +161,7 @@ PROTECTED_PATHS = frozenset(
         "backend/app/services/maintenance_code_access.py",
         "backend/app/services/maintenance_analysis.py",
         "backend/app/services/maintenance_policy.py",
+        "backend/app/services/maintenance_proposal.py",
         "backend/app/routers/supervised_maintenance.py",
         "docs/supervised_maintenance/protected_scope.md",
         "docs/supervised_maintenance/policy.md",
@@ -645,8 +646,13 @@ def ensure_defaults(db: Session) -> None:
 
 # --- Proposal lifecycle ---
 def create_proposal(
-    db: Session, *, title: str, description: str, rationale: str, proposed_by: str = "echo"
+    db: Session, *, title: str, description: str, rationale: str, proposed_by: str = "echo",
+    analysis_id: str | None = None,
 ) -> CodeModificationProposal:
+    """analysis_id is an optional, additive loose reference (Supervised
+    Maintenance Workspace v1 Phase 3) to the MaintenanceAnalysis this
+    proposal originated from — this function's own validation, permission,
+    and lifecycle behavior is otherwise completely unchanged from Part 2D."""
     _require_audit_available(db)
     permission = permission_center.check(db, "self_modification_propose")
     if not permission.allowed:
@@ -662,6 +668,7 @@ def create_proposal(
     proposal = CodeModificationProposal(
         title=title, description=description, rationale=rationale,
         proposed_by=proposed_by, status="draft", risk_level="low",
+        analysis_id=analysis_id,
     )
     db.add(proposal)
     db.commit()

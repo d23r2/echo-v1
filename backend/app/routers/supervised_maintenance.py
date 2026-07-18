@@ -159,6 +159,22 @@ def get_analysis(analysis_id: str, db: Session = Depends(get_db)):
     return _run(maintenance_analysis.get_analysis, _ANALYSIS_ERROR_STATUS, db, analysis_id)
 
 
+@router.post("/analyses/{analysis_id}/propose", response_model=schemas.SelfModProposalOut)
+def propose_from_analysis(analysis_id: str, payload: schemas.MaintenanceProposalFromAnalysisCreate, db: Session = Depends(get_db)):
+    from app.services import maintenance_proposal
+
+    error_status = {
+        maintenance_proposal.MaintenanceProposalPermissionError: 403,
+        maintenance_proposal.MaintenanceProposalStateError: 409,
+        maintenance_proposal.MaintenanceProposalError: 400,
+    }
+    return _run(
+        maintenance_proposal.create_proposal_from_analysis, error_status, db,
+        analysis_id=analysis_id, title=payload.title, description=payload.description,
+        rationale=payload.rationale, patch_text=payload.patch_text, proposed_by=payload.proposed_by,
+    )
+
+
 @router.get("/analyses/{analysis_id}/findings", response_model=list[schemas.MaintenanceFindingOut])
 def list_findings(analysis_id: str, db: Session = Depends(get_db)):
     return _run(maintenance_analysis.list_findings, _ANALYSIS_ERROR_STATUS, db, analysis_id)

@@ -2757,6 +2757,7 @@ class SelfModProposalOut(_UtcAssumingModel):
     base_commit: str | None
     active_revision_id: str | None
     closed_reason: str | None
+    analysis_id: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -2944,6 +2945,14 @@ class MaintenanceAnalysisCreate(BaseModel):
     objective: str = Field(min_length=1, max_length=500)
     requested_by: str = "echo"
     problem_statement: str = ""
+
+
+class MaintenanceProposalFromAnalysisCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=4000)
+    rationale: str = Field(min_length=1, max_length=8000)
+    patch_text: str = Field(min_length=1)
+    proposed_by: str = "echo"
 
 
 class MaintenanceAnalysisOut(_UtcAssumingModel):
