@@ -23,6 +23,7 @@ import ScheduleView from "./components/schedule/ScheduleView";
 import SelfImprovementView from "./components/SelfImprovementView";
 import SelfModificationView from "./components/self-modification/SelfModificationView";
 import SettingsView from "./components/settings/SettingsView";
+import SupervisedMaintenanceView from "./components/supervised-maintenance/SupervisedMaintenanceView";
 import TasksView from "./components/tasks/TasksView";
 import ToolCenterView from "./components/tools/ToolCenterView";
 
@@ -89,6 +90,7 @@ export default function App() {
           {view === "amendments" && <AmendmentsView />}
           {view === "self-improvement" && <SelfImprovementView />}
           {view === "self-modification" && <SelfModificationView />}
+          {view === "supervised-maintenance" && <SupervisedMaintenanceView />}
           {view === "settings" && <SettingsView />}
         </main>
       </div>

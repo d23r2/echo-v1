@@ -2923,3 +2923,151 @@ export interface IntelligenceOverviewOut {
 
 export const getIntelligenceOverview = () => request<IntelligenceOverviewOut>("/api/intelligence/overview");
 export const runIntelligenceEvaluations = () => request<EvaluationRunOut>("/api/intelligence/evaluations/run", { method: "POST" });
+
+// ---- ECHO Supervised Maintenance Workspace v1 ----
+
+export type CapabilityMode = "disabled" | "analyse_only" | "propose_only" | "sandbox_verify" | "human_approved_local_commit";
+
+export interface ApprovedRepository {
+  id: string;
+  display_name: string;
+  root_path_reference: string;
+  fingerprint: string;
+  approved_branches: string[];
+  permitted_read_paths: string[];
+  permitted_proposal_paths: string[];
+  blocked_file_patterns: string[];
+  capability_mode: CapabilityMode;
+  owner: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  last_verified_at: string | null;
+}
+
+export interface MaintenanceAnalysis {
+  id: string;
+  repository_id: string;
+  objective: string;
+  requested_by: string;
+  status: "draft" | "analysing" | "analysis_complete" | "cancelled";
+  problem_statement: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MaintenanceFinding {
+  id: string;
+  analysis_id: string;
+  epistemic_status: "verified" | "inferred" | "hypothesis" | "unknown";
+  description: string;
+  affected_files: string[];
+  evidence_reference: string;
+  created_at: string;
+}
+
+export interface MaintenanceFileEntry {
+  path: string;
+  size_bytes: number;
+  is_directory: boolean;
+}
+
+export interface MaintenanceFileContent {
+  path: string;
+  content: string;
+  sha256: string;
+}
+
+export interface MaintenanceSearchHit {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export interface MaintenanceAuditEvent {
+  id: string;
+  repository_id: string | null;
+  analysis_id: string | null;
+  event_type: string;
+  actor_role: string;
+  summary: string;
+  safe_context_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MaintenanceHealth {
+  supervised_maintenance_enabled: boolean;
+  supervised_analysis_enabled: boolean;
+  supervised_proposals_enabled: boolean;
+  supervised_sandbox_enabled: boolean;
+  supervised_local_commit_enabled: boolean;
+  supervised_maintenance_frontend_enabled: boolean;
+  registered_repository_count: number;
+  open_analysis_count: number;
+}
+
+export interface MaintenancePolicy {
+  protected_paths: string[];
+  protected_path_prefixes: string[];
+  protected_symbols: string[];
+  allowed_path_prefixes: string[];
+  secret_filename_patterns: string[];
+  capability_modes: CapabilityMode[];
+}
+
+const MAINT_BASE = "/api/governance/supervised-maintenance";
+
+export const getMaintenanceStatus = () => request<MaintenanceHealth>(`${MAINT_BASE}/status`);
+export const getMaintenancePolicy = () => request<MaintenancePolicy>(`${MAINT_BASE}/policy`);
+
+export const listMaintenanceRepositories = () => request<ApprovedRepository[]>(`${MAINT_BASE}/repositories`);
+export const registerMaintenanceRepository = (payload: { display_name: string; requested_by: string; approved_branches?: string[] }) =>
+  request<ApprovedRepository>(`${MAINT_BASE}/repositories`, { method: "POST", body: JSON.stringify(payload) });
+export const setMaintenanceCapabilityMode = (repositoryId: string, capabilityMode: CapabilityMode, requestedBy: string) =>
+  request<ApprovedRepository>(`${MAINT_BASE}/repositories/${repositoryId}/mode`, {
+    method: "POST",
+    body: JSON.stringify({ capability_mode: capabilityMode, requested_by: requestedBy }),
+  });
+export const verifyMaintenanceRepository = (repositoryId: string) =>
+  request<ApprovedRepository>(`${MAINT_BASE}/repositories/${repositoryId}/verify`, { method: "POST" });
+
+export const listMaintenanceFiles = (repositoryId: string, subpath = "") =>
+  request<MaintenanceFileEntry[]>(`${MAINT_BASE}/repositories/${repositoryId}/files?subpath=${encodeURIComponent(subpath)}`);
+export const readMaintenanceFile = (repositoryId: string, path: string) =>
+  request<MaintenanceFileContent>(`${MAINT_BASE}/repositories/${repositoryId}/file?path=${encodeURIComponent(path)}`);
+export const searchMaintenanceCode = (repositoryId: string, q: string, subpath = "") =>
+  request<MaintenanceSearchHit[]>(
+    `${MAINT_BASE}/repositories/${repositoryId}/search?q=${encodeURIComponent(q)}&subpath=${encodeURIComponent(subpath)}`
+  );
+export const getMaintenanceGitStatus = (repositoryId: string) =>
+  request<{ output: string }>(`${MAINT_BASE}/repositories/${repositoryId}/git-status`);
+export const getMaintenanceGitDiff = (repositoryId: string) =>
+  request<{ output: string }>(`${MAINT_BASE}/repositories/${repositoryId}/git-diff`);
+
+export const listMaintenanceAnalyses = (repositoryId?: string) =>
+  request<MaintenanceAnalysis[]>(`${MAINT_BASE}/analyses${repositoryId ? `?repository_id=${encodeURIComponent(repositoryId)}` : ""}`);
+export const createMaintenanceAnalysis = (payload: { repository_id: string; objective: string; requested_by?: string; problem_statement?: string }) =>
+  request<MaintenanceAnalysis>(`${MAINT_BASE}/analyses`, { method: "POST", body: JSON.stringify(payload) });
+export const getMaintenanceAnalysis = (analysisId: string) => request<MaintenanceAnalysis>(`${MAINT_BASE}/analyses/${analysisId}`);
+export const listMaintenanceFindings = (analysisId: string) =>
+  request<MaintenanceFinding[]>(`${MAINT_BASE}/analyses/${analysisId}/findings`);
+export const addMaintenanceFinding = (
+  analysisId: string,
+  payload: { epistemic_status: MaintenanceFinding["epistemic_status"]; description: string; affected_files?: string[]; evidence_reference?: string }
+) => request<MaintenanceFinding>(`${MAINT_BASE}/analyses/${analysisId}/findings`, { method: "POST", body: JSON.stringify(payload) });
+export const completeMaintenanceAnalysis = (analysisId: string) =>
+  request<MaintenanceAnalysis>(`${MAINT_BASE}/analyses/${analysisId}/complete`, { method: "POST" });
+export const cancelMaintenanceAnalysis = (analysisId: string, reason = "") =>
+  request<MaintenanceAnalysis>(`${MAINT_BASE}/analyses/${analysisId}/cancel?reason=${encodeURIComponent(reason)}`, { method: "POST" });
+export const proposeFromMaintenanceAnalysis = (
+  analysisId: string,
+  payload: { title: string; description: string; rationale: string; patch_text: string; proposed_by?: string }
+) => request<SelfModProposal>(`${MAINT_BASE}/analyses/${analysisId}/propose`, { method: "POST", body: JSON.stringify(payload) });
+
+export const listMaintenanceAudit = (params: { repository_id?: string; analysis_id?: string } = {}) => {
+  const query = new URLSearchParams();
+  if (params.repository_id) query.set("repository_id", params.repository_id);
+  if (params.analysis_id) query.set("analysis_id", params.analysis_id);
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request<MaintenanceAuditEvent[]>(`${MAINT_BASE}/audit${suffix}`);
+};
