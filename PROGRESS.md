@@ -2,6 +2,31 @@
 
 Last check-in: 2026-07-19
 
+## New since 2026-07-19 — ECHO Supervised Maintenance Workspace v1 (Phases 1-6)
+
+Built a read-only-first code analysis workspace that feeds the existing Layer 3A Part 2D self-
+modification pipeline rather than duplicating it — per the milestone's own explicit "do not create a
+second Permission Center, Audit system, Action System, Feature Flag service, or Governance Center"
+requirement. `CodeAccessService` gives Echo a contained, canonicalized, secret-safe read-only view of
+its own approved repository (which is always this backend's own running codebase — `register_repository()`
+never accepts a client-supplied path, eliminating path-injection by construction rather than
+validation); a capability-mode ladder (`disabled` → `analyse_only` → `propose_only` → `sandbox_verify`
+→ `human_approved_local_commit`) layers on top of the four independent Part 2D flags; and a thin
+`MaintenanceProposalService` wrapper calls the unmodified Part 2D `create_proposal()`/`submit_revision()`,
+tagging results with `analysis_id`. Twelve of fourteen requested components are reused unmodified or
+additively extended rather than rebuilt. A dedicated pipeline-reuse test proved the full 7-stage
+proposal → scope/compliance check → sandbox → approval → deploy → rollback flow needs zero special-
+casing for an analysis-originated proposal, and that critical-risk patches are still blocked before
+sandbox regardless of origin. Phase 6 added the human review frontend (repository registration,
+capability-mode controls, analysis lifecycle, read-only code browsing, findings, proposal generation,
+audit trail) and introduced a vitest + Testing Library frontend test framework, since none existed on
+`master`. Backend suite: **1627/1627 passed**; frontend typecheck/build clean; new frontend test suite
+4/4 passed. All maintenance feature flags default off. Phases 7 (local-commit reuse confirmation) and
+8 (adversarial hardening + final report) are next. See
+[docs/supervised_maintenance/architecture.md](docs/supervised_maintenance/architecture.md),
+[threat_model.md](docs/supervised_maintenance/threat_model.md), and
+[tasks/ACTIVE_TASK.md](tasks/ACTIVE_TASK.md) for full detail.
+
 ## New since 2026-07-19 — ECHO Layer 3A Part 2D: Supervised Self-Modification
 
 Implemented a fail-closed proposal → sandbox → human-approve → (optional, local-only) apply → rollback
