@@ -2134,6 +2134,128 @@ class PlanOut(_UtcAssumingModel):
 
 
 # ============================================================================
+# ECHO Layer 2D — Multi-Model Orchestrator and Tool Strategy Engine
+# ============================================================================
+
+StageProfile = Literal["simple", "standard", "deep"]
+OrchestrationStageName = Literal["understand", "retrieve", "plan", "tool", "reason", "critique", "repair", "style", "final"]
+OrchestrationRunStatus = Literal["completed", "failed", "stopped_budget", "stopped_loop"]
+PrivacyLevel = Literal["local_only", "cloud_ok"]
+FailureCategory = Literal[
+    "unavailable", "timeout", "malformed_output", "rate_limited", "quota_exceeded", "billing_required", "model_missing", "tool_failure", "unknown_error"
+]
+
+
+class OrchestrationRequest(BaseModel):
+    task_id: str | None = None
+    conversation_id: str | None = None
+    user_message: str
+    task_type: TaskCategory | None = None  # if omitted, classified deterministically from user_message
+    required_capabilities: list[str] = Field(default_factory=list)
+    privacy_level: PrivacyLevel = "local_only"
+    latency_budget_ms: int | None = None
+    token_budget: int | None = None
+    cost_budget: float | None = None
+    max_model_calls: int | None = None
+    cloud_allowed: bool | None = None  # explicit override of the category's policy, still gated by settings.cloud_fallback_enabled
+    cloud_confirmed: bool = False  # explicit user confirmation, required whenever the resolved policy's require_confirmation_for_cloud is true
+    streaming_required: bool = False
+    structured_output_required: bool = False
+
+
+class OrchestrationStagePlanItem(BaseModel):
+    stage: OrchestrationStageName
+    role: str | None  # fast|reasoning|coding|critic|writing|None (no model call at this stage)
+    purpose: str
+
+
+class OrchestrationPlanOut(BaseModel):
+    task_category: TaskCategory
+    stage_profile: StageProfile
+    stages: list[OrchestrationStagePlanItem] = Field(default_factory=list)
+    selected_models: list[str] = Field(default_factory=list)
+    selected_tools: list[str] = Field(default_factory=list)
+    fallback_chain: list[str] = Field(default_factory=list)
+    budgets: dict = Field(default_factory=dict)
+    confirmation_points: list[str] = Field(default_factory=list)
+    expected_outputs: list[str] = Field(default_factory=list)
+    stop_conditions: list[str] = Field(default_factory=list)
+    cloud_allowed: bool
+    routing_reason: str
+
+
+class OrchestrationStageResult(BaseModel):
+    stage: OrchestrationStageName
+    role: str | None
+    provider: str | None
+    model: str | None
+    duration_ms: float | None
+    status: Literal["completed", "skipped", "failed"]
+    detail: str | None = None  # short, compact, never raw chain-of-thought
+
+
+class OrchestrationRunOut(_UtcAssumingModel):
+    id: str
+    task_id: str | None
+    conversation_id: str | None
+    objective: str
+    task_category: TaskCategory
+    stage_profile_used: StageProfile
+    status: OrchestrationRunStatus
+    stages_json: list[OrchestrationStageResult]
+    tools_used_json: list[str]
+    total_model_calls: int
+    total_tokens_estimate: int
+    cloud_used: bool
+    stop_reason: str | None
+    answer: str | None = None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class OrchestrationPolicyOut(_UtcAssumingModel):
+    id: str
+    task_category: TaskCategory
+    stage_profile: StageProfile
+    cloud_allowed: bool
+    require_confirmation_for_cloud: bool
+    max_model_calls: int
+    token_budget: int | None
+    latency_budget_ms: int | None
+    skip_critic_for_low_risk: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class OrchestrationPolicyUpdate(BaseModel):
+    stage_profile: StageProfile | None = None
+    cloud_allowed: bool | None = None
+    require_confirmation_for_cloud: bool | None = None
+    max_model_calls: int | None = Field(default=None, ge=1, le=10)
+    token_budget: int | None = None
+    latency_budget_ms: int | None = None
+    skip_critic_for_low_risk: bool | None = None
+
+
+class ToolPlanRequest(BaseModel):
+    user_message: str
+    conversation_id: str | None = None
+
+
+class ToolPlanItemOut(BaseModel):
+    tool_name: str
+    purpose: str
+    expected_evidence: str
+    risk_level: str
+    requires_confirmation: bool
+
+
+class ToolPlanOut(BaseModel):
+    items: list[ToolPlanItemOut] = Field(default_factory=list)
+    routing_reason: str
+
+
+# ============================================================================
 # ECHO Operational Self-Model v1
 # ============================================================================
 

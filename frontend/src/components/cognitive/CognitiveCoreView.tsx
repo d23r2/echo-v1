@@ -9,12 +9,17 @@ import {
   DecisionCaseOut,
   DecisionHandoffOut,
   GraphNodeOut,
+  LocalModelRoleRecord,
   MaterialiseTasksOut,
+  OrchestrationPlanOut,
+  OrchestrationPolicyOut,
+  OrchestrationRunOut,
   PlanOut,
   PlanValidationOut,
   SimulationOut,
   SimulationScenarioOut,
   SkillPatternOut,
+  StageProfile,
   SystemAnalysisOut,
   SystemModelNodeOut,
   SystemModelOut,
@@ -36,11 +41,14 @@ import {
   getDecisionHandoff,
   getSystemAnalysis,
   getSystemCounterfactuals,
+  getSystemModelRoles,
   graphSearch,
   listCausalNotes,
   listCognitiveBriefs,
   listConcepts,
   listDecisions,
+  listOrchestrationPolicies,
+  listOrchestrationRuns,
   listPlans,
   listSimulations,
   listSkills,
@@ -48,17 +56,20 @@ import {
   listSystemNodes,
   listTaskUnderstandings,
   materialisePlanTasks,
+  previewOrchestration,
   reanalyseTaskUnderstanding,
   removeSystemNode,
   replanPlan,
+  runOrchestration,
   selectDecisionOption,
   updateCognitiveSettings,
   updateCriterionWeight,
   updateOptionRatings,
+  updateOrchestrationPolicy,
   validatePlan,
 } from "../../api/client";
 
-type Tab = "world" | "skills" | "causal" | "tasks" | "briefs" | "systems" | "simulations" | "decisions" | "plans" | "settings";
+type Tab = "world" | "skills" | "causal" | "tasks" | "briefs" | "systems" | "simulations" | "decisions" | "plans" | "routing" | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "world", label: "World Model" },
@@ -70,6 +81,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "simulations", label: "Simulations" },
   { id: "decisions", label: "Decisions" },
   { id: "plans", label: "Plans" },
+  { id: "routing", label: "Routing" },
   { id: "settings", label: "Settings" },
 ];
 
@@ -118,6 +130,7 @@ export default function CognitiveCoreView() {
       {tab === "simulations" && <SimulationsTab />}
       {tab === "decisions" && <DecisionsTab />}
       {tab === "plans" && <PlansTab />}
+      {tab === "routing" && <RoutingTab />}
       {tab === "settings" && <SettingsTab />}
     </div>
   );
@@ -1410,6 +1423,261 @@ function BriefsTab() {
           <pre className="mt-2 whitespace-pre-wrap text-xs text-zinc-400">{b.brief_text}</pre>
         </details>
       ))}
+    </div>
+  );
+}
+
+const STAGE_PROFILES: StageProfile[] = ["simple", "standard", "deep"];
+
+const RUN_STATUS_COLOR: Record<string, string> = {
+  completed: "text-emerald-400 border-emerald-900",
+  failed: "text-red-400 border-red-900",
+  stopped_budget: "text-amber-400 border-amber-900",
+  stopped_loop: "text-amber-400 border-amber-900",
+};
+
+function RoutingTab() {
+  const [policies, setPolicies] = useState<OrchestrationPolicyOut[]>([]);
+  const [roles, setRoles] = useState<LocalModelRoleRecord[]>([]);
+  const [runs, setRuns] = useState<OrchestrationRunOut[]>([]);
+  const [message, setMessage] = useState("");
+  const [plan, setPlan] = useState<OrchestrationPlanOut | null>(null);
+  const [run, setRun] = useState<OrchestrationRunOut | null>(null);
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"preview" | "run" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refresh() {
+    try {
+      const [p, r, ru] = await Promise.all([listOrchestrationPolicies(), getSystemModelRoles(), listOrchestrationRuns()]);
+      setPolicies(p);
+      setRoles(r.roles);
+      setRuns(ru);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load routing settings.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handlePolicyChange(policy: OrchestrationPolicyOut, patch: Partial<OrchestrationPolicyOut>) {
+    try {
+      await updateOrchestrationPolicy(policy.id, patch);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update policy.");
+    }
+  }
+
+  async function handlePreview() {
+    if (!message.trim()) return;
+    setBusy("preview");
+    setError(null);
+    try {
+      setPlan(await previewOrchestration({ user_message: message.trim() }));
+      setRun(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Preview failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRun() {
+    if (!message.trim()) return;
+    setBusy("run");
+    setError(null);
+    try {
+      const result = await runOrchestration({ user_message: message.trim() });
+      setRun(result);
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Run failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-xs text-zinc-500">
+        How ECHO picks which local model(s) to use, whether a request is worth staging (draft → critique → repair → style), and whether
+        cloud fallback is ever eligible. Policies are per task category — Preview shows the plan without calling any model; Run actually
+        executes it (still local-only unless a policy below explicitly allows cloud and you confirm it).
+      </p>
+      {error && <div className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">{error}</div>}
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <h3 className="mb-2 text-sm font-medium text-zinc-200">Preview &amp; run</h3>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder="Type a message to see how ECHO would route it..."
+          rows={2}
+          className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm"
+        />
+        <div className="mt-2 flex gap-2">
+          <button
+            onClick={() => void handlePreview()}
+            disabled={!message.trim() || busy !== null}
+            className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm font-medium text-zinc-200 hover:bg-zinc-800 disabled:opacity-50"
+          >
+            {busy === "preview" ? "Previewing…" : "Preview plan"}
+          </button>
+          <button
+            onClick={() => void handleRun()}
+            disabled={!message.trim() || busy !== null}
+            className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-zinc-950 disabled:opacity-50"
+          >
+            {busy === "run" ? "Running…" : "Run"}
+          </button>
+        </div>
+
+        {plan && !run && (
+          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-300">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-zinc-700 px-2 py-0.5 uppercase tracking-wide text-zinc-400">{plan.task_category}</span>
+              <span className="rounded-full border border-zinc-700 px-2 py-0.5 uppercase tracking-wide text-zinc-400">{plan.stage_profile}</span>
+              <span className={`rounded-full border px-2 py-0.5 uppercase tracking-wide ${plan.cloud_allowed ? "border-amber-900 text-amber-400" : "border-zinc-700 text-zinc-500"}`}>
+                cloud {plan.cloud_allowed ? "allowed" : "not allowed"}
+              </span>
+            </div>
+            <p className="text-zinc-400">{plan.routing_reason}</p>
+            <div className="mt-2 flex flex-wrap gap-1">
+              {plan.stages.map((s, i) => (
+                <span key={i} className="rounded-md bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300">
+                  {s.stage}
+                  {s.role ? ` (${s.role})` : ""}
+                </span>
+              ))}
+            </div>
+            {plan.selected_tools.length > 0 && <p className="mt-2 text-zinc-500">Tools: {plan.selected_tools.join(", ")}</p>}
+            <p className="mt-2 text-zinc-500">
+              Budget: max {plan.budgets.max_model_calls} call(s)
+              {plan.budgets.token_budget ? `, ${plan.budgets.token_budget} tokens` : ""}
+              {plan.budgets.latency_budget_ms ? `, ${plan.budgets.latency_budget_ms}ms` : ""}
+            </p>
+          </div>
+        )}
+
+        {run && <RunDetail run={run} />}
+      </div>
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <h3 className="mb-2 text-sm font-medium text-zinc-200">Policies by task category</h3>
+        <div className="flex flex-col divide-y divide-zinc-800/60">
+          {policies.map((policy) => (
+            <div key={policy.id} className="flex flex-wrap items-center gap-3 py-2 text-xs">
+              <span className="w-28 shrink-0 text-zinc-300">{policy.task_category}</span>
+              <select
+                value={policy.stage_profile}
+                onChange={(e) => void handlePolicyChange(policy, { stage_profile: e.target.value as StageProfile })}
+                className="rounded-md border border-zinc-700 bg-zinc-950 px-2 py-1 text-zinc-200"
+              >
+                {STAGE_PROFILES.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+              <label className="flex items-center gap-1 text-zinc-400">
+                <input type="checkbox" checked={policy.cloud_allowed} onChange={(e) => void handlePolicyChange(policy, { cloud_allowed: e.target.checked })} />
+                cloud allowed
+              </label>
+              <label className="flex items-center gap-1 text-zinc-400">
+                <input
+                  type="checkbox"
+                  checked={policy.require_confirmation_for_cloud}
+                  onChange={(e) => void handlePolicyChange(policy, { require_confirmation_for_cloud: e.target.checked })}
+                />
+                confirm before cloud
+              </label>
+              <label className="flex items-center gap-1 text-zinc-400">
+                max calls
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={policy.max_model_calls}
+                  onChange={(e) => void handlePolicyChange(policy, { max_model_calls: Number(e.target.value) })}
+                  className="w-14 rounded-md border border-zinc-700 bg-zinc-950 px-1.5 py-1 text-zinc-200"
+                />
+              </label>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <h3 className="mb-2 text-sm font-medium text-zinc-200">Local model roles</h3>
+        <div className="flex flex-wrap gap-2">
+          {roles.map((r) => (
+            <div key={r.role} className="rounded-lg border border-zinc-800 bg-zinc-950/60 px-2.5 py-1.5 text-xs">
+              <span className="font-medium text-zinc-200">{r.role}</span>
+              <span className="ml-1.5 text-zinc-500">{r.configured_model || "default model"}</span>
+              {r.falls_back_to_default && <span className="ml-1.5 text-zinc-600">(falls back)</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-3">
+        <h3 className="mb-2 text-sm font-medium text-zinc-200">Recent runs</h3>
+        {runs.length === 0 && <p className="text-sm text-zinc-500">No orchestration runs yet.</p>}
+        <div className="flex flex-col gap-2">
+          {runs.map((r) => (
+            <div key={r.id} className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" onClick={() => setExpandedRunId(expandedRunId === r.id ? null : r.id)}>
+                <span className="text-sm text-zinc-200">{r.objective}</span>
+                <div className="flex items-center gap-2">
+                  <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide ${RUN_STATUS_COLOR[r.status] || "text-zinc-400 border-zinc-700"}`}>{r.status}</span>
+                  <span className="text-xs text-zinc-500">{expandedRunId === r.id ? "▲" : "▼"}</span>
+                </div>
+              </button>
+              {expandedRunId === r.id && <RunDetail run={r} />}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RunDetail({ run }: { run: OrchestrationRunOut }) {
+  return (
+    <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-300">
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-zinc-700 px-2 py-0.5 uppercase tracking-wide text-zinc-400">{run.task_category}</span>
+        <span className="rounded-full border border-zinc-700 px-2 py-0.5 uppercase tracking-wide text-zinc-400">{run.stage_profile_used}</span>
+        <span className={`rounded-full border px-2 py-0.5 uppercase tracking-wide ${RUN_STATUS_COLOR[run.status] || "text-zinc-400 border-zinc-700"}`}>{run.status}</span>
+        {run.cloud_used && <span className="rounded-full border border-amber-900 px-2 py-0.5 uppercase tracking-wide text-amber-400">cloud used</span>}
+      </div>
+      {run.answer && <p className="mb-2 whitespace-pre-wrap text-zinc-200">{run.answer}</p>}
+      {run.stop_reason && <p className="mb-2 text-amber-400">Stopped: {run.stop_reason}</p>}
+      <div className="flex flex-col gap-1">
+        {run.stages_json.map((s, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2 rounded-md bg-zinc-900 px-2 py-1">
+            <span className="w-20 shrink-0 text-zinc-300">{s.stage}</span>
+            {s.role && <span className="text-zinc-500">{s.role}</span>}
+            {s.provider && (
+              <span className="text-zinc-500">
+                via {s.provider}
+                {s.model ? ` (${s.model})` : ""}
+              </span>
+            )}
+            {s.duration_ms != null && <span className="text-zinc-600">{Math.round(s.duration_ms)}ms</span>}
+            <span className={s.status === "failed" ? "text-red-400" : s.status === "skipped" ? "text-zinc-600" : "text-emerald-400"}>{s.status}</span>
+            {s.detail && <span className="text-zinc-600">— {s.detail}</span>}
+          </div>
+        ))}
+      </div>
+      <p className="mt-2 text-zinc-500">
+        {run.total_model_calls} model call(s), ~{run.total_tokens_estimate} tokens
+        {run.tools_used_json.length > 0 ? `, tools: ${run.tools_used_json.join(", ")}` : ""}
+      </p>
     </div>
   );
 }

@@ -2390,3 +2390,135 @@ export interface SystemVersionOut {
 
 export const getInfraSystemStatus = () => request<InfraSystemStatusOut>("/api/system/status");
 export const getSystemVersion = () => request<SystemVersionOut>("/api/system/version");
+
+// ECHO Layer 2D — Multi-Model Orchestrator and Tool Strategy Engine
+
+export type StageProfile = "simple" | "standard" | "deep";
+export type OrchestrationStageName = "understand" | "retrieve" | "plan" | "tool" | "reason" | "critique" | "repair" | "style" | "final";
+export type OrchestrationRunStatus = "completed" | "failed" | "stopped_budget" | "stopped_loop";
+export type PrivacyLevel = "local_only" | "cloud_ok";
+
+export interface OrchestrationRequestPayload {
+  task_id?: string;
+  conversation_id?: string;
+  user_message: string;
+  task_type?: TaskCategory;
+  required_capabilities?: string[];
+  privacy_level?: PrivacyLevel;
+  latency_budget_ms?: number;
+  token_budget?: number;
+  cost_budget?: number;
+  max_model_calls?: number;
+  cloud_allowed?: boolean;
+  cloud_confirmed?: boolean;
+  streaming_required?: boolean;
+  structured_output_required?: boolean;
+}
+
+export interface OrchestrationStagePlanItem {
+  stage: OrchestrationStageName;
+  role: string | null;
+  purpose: string;
+}
+
+export interface OrchestrationPlanOut {
+  task_category: TaskCategory;
+  stage_profile: StageProfile;
+  stages: OrchestrationStagePlanItem[];
+  selected_models: string[];
+  selected_tools: string[];
+  fallback_chain: string[];
+  budgets: Record<string, number | null>;
+  confirmation_points: string[];
+  expected_outputs: string[];
+  stop_conditions: string[];
+  cloud_allowed: boolean;
+  routing_reason: string;
+}
+
+export interface OrchestrationStageResult {
+  stage: OrchestrationStageName;
+  role: string | null;
+  provider: string | null;
+  model: string | null;
+  duration_ms: number | null;
+  status: "completed" | "skipped" | "failed";
+  detail: string | null;
+}
+
+export interface OrchestrationRunOut {
+  id: string;
+  task_id: string | null;
+  conversation_id: string | null;
+  objective: string;
+  task_category: TaskCategory;
+  stage_profile_used: StageProfile;
+  status: OrchestrationRunStatus;
+  stages_json: OrchestrationStageResult[];
+  tools_used_json: string[];
+  total_model_calls: number;
+  total_tokens_estimate: number;
+  cloud_used: boolean;
+  stop_reason: string | null;
+  answer: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface OrchestrationPolicyOut {
+  id: string;
+  task_category: TaskCategory;
+  stage_profile: StageProfile;
+  cloud_allowed: boolean;
+  require_confirmation_for_cloud: boolean;
+  max_model_calls: number;
+  token_budget: number | null;
+  latency_budget_ms: number | null;
+  skip_critic_for_low_risk: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrchestrationPolicyUpdatePayload {
+  stage_profile?: StageProfile;
+  cloud_allowed?: boolean;
+  require_confirmation_for_cloud?: boolean;
+  max_model_calls?: number;
+  token_budget?: number | null;
+  latency_budget_ms?: number | null;
+  skip_critic_for_low_risk?: boolean;
+}
+
+export interface ToolPlanItemOut {
+  tool_name: string;
+  purpose: string;
+  expected_evidence: string;
+  risk_level: string;
+  requires_confirmation: boolean;
+}
+
+export interface ToolPlanOut {
+  items: ToolPlanItemOut[];
+  routing_reason: string;
+}
+
+export interface LocalModelRoleRecord {
+  role: string;
+  configured_model: string | null;
+  falls_back_to_default: boolean;
+  capabilities: string[];
+}
+
+export const previewOrchestration = (payload: OrchestrationRequestPayload) =>
+  request<OrchestrationPlanOut>("/api/intelligence/orchestration/preview", { method: "POST", body: JSON.stringify(payload) });
+export const runOrchestration = (payload: OrchestrationRequestPayload) =>
+  request<OrchestrationRunOut>("/api/intelligence/orchestration/run", { method: "POST", body: JSON.stringify(payload) });
+export const getOrchestrationRun = (id: string) => request<OrchestrationRunOut>(`/api/intelligence/orchestration/runs/${id}`);
+export const listOrchestrationRuns = (taskId?: string) =>
+  request<OrchestrationRunOut[]>(`/api/intelligence/orchestration/runs${taskId ? `?task_id=${taskId}` : ""}`);
+export const listOrchestrationPolicies = () => request<OrchestrationPolicyOut[]>("/api/intelligence/orchestration/policies");
+export const updateOrchestrationPolicy = (id: string, payload: OrchestrationPolicyUpdatePayload) =>
+  request<OrchestrationPolicyOut>(`/api/intelligence/orchestration/policies/${id}`, { method: "PATCH", body: JSON.stringify(payload) });
+export const planTools = (userMessage: string, conversationId?: string) =>
+  request<ToolPlanOut>("/api/intelligence/tools/plan", { method: "POST", body: JSON.stringify({ user_message: userMessage, conversation_id: conversationId }) });
+export const getSystemModelRoles = () => request<{ roles: LocalModelRoleRecord[] }>("/api/system/models/roles");

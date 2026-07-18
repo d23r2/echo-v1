@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Iterator
 
 from sqlalchemy.orm import Session
@@ -74,8 +75,12 @@ _PROVIDERS_FAILED_MESSAGE = (
 _OLLAMA_FALLBACK_NOTE = "Cloud providers were unavailable or quota-limited, so Echo replied using Ollama."
 
 
-def _track_success(db: Session | None, provider: ModelProvider) -> None:
+def _track_success(db: Session | None, provider: ModelProvider, elapsed_ms: float | None = None) -> None:
     metrics.increment("model_calls_total", provider=provider.name, outcome="success")
+    if elapsed_ms is not None:
+        # ECHO Layer 2D — feeds providers/registry.py's measured_avg_latency_ms;
+        # a plain read of this counter, no new instrumentation path.
+        metrics.record_duration("model_call_duration_ms", elapsed_ms, provider=provider.name)
     if db is not None and provider.name in _USAGE_TRACKED_PROVIDERS:
         usage.record_request(db, provider.name)
 
@@ -184,8 +189,9 @@ class ModelRouter:
                     logger.info("auto mode: skipping %s, still in cooldown", provider.name)
                     continue
                 try:
+                    call_start = time.monotonic()
                     result = provider.chat(system_prompt, messages)
-                    _track_success(db, provider)
+                    _track_success(db, provider, elapsed_ms=(time.monotonic() - call_start) * 1000)
                     fallback_note = _build_fallback_note(provider, rate_limited_this_turn, cloud_failed_this_turn)
                     return result, provider.name, fallback_note
                 except Exception as exc:
@@ -222,8 +228,9 @@ class ModelRouter:
                     "or wait a bit before retrying."
                 )
         try:
+            call_start = time.monotonic()
             result = provider.chat(system_prompt, messages)
-            _track_success(db, provider)
+            _track_success(db, provider, elapsed_ms=(time.monotonic() - call_start) * 1000)
             return result, provider.name, None
         except Exception as exc:
             logger.warning("pinned provider %s failed: %s", provider.name, exc)
@@ -284,6 +291,7 @@ class ModelRouter:
                     continue
 
             gen = provider.stream_chat(system_prompt, messages)
+            stream_start = time.monotonic()
             try:
                 first_chunk = next(gen)
             except StopIteration:
@@ -305,7 +313,9 @@ class ModelRouter:
                 last_error = exc
                 continue
 
-            _track_success(db, provider)
+            # Time-to-first-chunk, not total stream duration — the more
+            # useful "how fast did this feel" latency signal for streaming.
+            _track_success(db, provider, elapsed_ms=(time.monotonic() - stream_start) * 1000)
             fallback_note = _build_fallback_note(provider, rate_limited_this_turn, cloud_failed_this_turn)
             if first_chunk:
                 yield first_chunk, provider, fallback_note

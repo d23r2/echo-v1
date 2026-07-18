@@ -177,6 +177,15 @@ def system_models():
     }
 
 
+@router.get("/api/system/models/roles")
+def system_model_roles():
+    """ECHO Layer 2D — capability-enriched role list; GET /api/system/models
+    above already embeds the bare role->model mapping, this is the fuller
+    Phase 1 capability view (used by Settings > Intelligence Routing)."""
+    settings = get_settings()
+    return {"roles": [r.__dict__ for r in build_local_model_roles(settings)]}
+
+
 @router.post("/api/system/providers/{provider_id}/check")
 def check_provider(provider_id: str):
     provider = _model_router.get_provider(provider_id)

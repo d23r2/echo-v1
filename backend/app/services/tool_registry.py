@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
-from app.models import ToolDefinition, ToolRun, _now
+from app.models import Project, Task, ToolDefinition, ToolRun, _now
 from app.services import action_system, permission_center
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,30 @@ def _camera_capture_placeholder(db: Session, input: dict) -> dict:
 
 def _voice_input_placeholder(db: Session, input: dict) -> dict:
     return {"available": False, "reason": "Voice input runs entirely in the browser (Web Speech API) — there is nothing for the backend to do here. This tool exists as a registry placeholder for a future server-side STT adapter."}
+
+
+def _handle_project_search(db: Session, input: dict) -> dict:
+    """ECHO Layer 2D — fills a real gap the Tool Strategy Engine needs
+    (context_router.py's "projects" ContextSource had no matching tool
+    before this): a plain, read-only project lookup, same query-shape as
+    the other read tools above."""
+    query = (input.get("query") or "").strip()
+    q = db.query(Project).filter(Project.status != "archived")
+    if query:
+        q = q.filter(Project.title.ilike(f"%{query}%"))
+    projects = q.order_by(Project.last_touched_at.desc()).limit(10).all()
+    return {"projects": [{"id": p.id, "title": p.title, "status": p.status, "priority": p.priority} for p in projects]}
+
+
+def _handle_task_search(db: Session, input: dict) -> dict:
+    """ECHO Layer 2D — same rationale as _handle_project_search() above,
+    for the "tasks" ContextSource."""
+    query = (input.get("query") or "").strip()
+    q = db.query(Task).filter(Task.status != "done")
+    if query:
+        q = q.filter(Task.title.ilike(f"%{query}%"))
+    tasks = q.order_by(Task.sort_order.asc()).limit(10).all()
+    return {"tasks": [{"id": t.id, "title": t.title, "status": t.status, "due_at": t.due_at.isoformat() if t.due_at else None} for t in tasks]}
 
 
 TOOLS: dict[str, ToolSpec] = {
@@ -97,6 +121,8 @@ TOOLS: dict[str, ToolSpec] = {
             _voice_input_placeholder,
             permission_key="voice_input",
         ),
+        ToolSpec("project_search", "Project search", "Search active projects by title.", "project", _handle_project_search, input_schema={"query": "str"}),
+        ToolSpec("task_search", "Task search", "Search open tasks by title.", "task", _handle_task_search, input_schema={"query": "str"}),
     ]
 }
 

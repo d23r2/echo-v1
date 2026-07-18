@@ -12,9 +12,10 @@ from sqlalchemy.orm import Session
 
 from app import schemas
 from app.db import get_db
-from app.models import CognitiveConcept, DecisionCase, Simulation, TaskUnderstanding
-from app.services import cognitive_core, plan_engine
+from app.models import CognitiveConcept, DecisionCase, OrchestrationRun, Simulation, TaskUnderstanding
+from app.services import cognitive_core, plan_engine, tool_strategy
 from app.services import decision_engine as dec_engine
+from app.services import orchestration_engine as oe
 from app.services import simulation_engine as sim_engine
 from app.services import systems_thinking as st
 from app.services import task_understanding_v2 as tuv2
@@ -500,3 +501,52 @@ def add_plan_resource(plan_id: str, payload: dict, db: Session = Depends(get_db)
     if req is None:
         raise HTTPException(status_code=404, detail="Plan not found")
     return req
+
+
+# ============================================================================
+# ECHO Layer 2D — Multi-Model Orchestrator and Tool Strategy Engine
+# ============================================================================
+
+
+@router.post("/orchestration/preview", response_model=schemas.OrchestrationPlanOut)
+def preview_orchestration(payload: schemas.OrchestrationRequest, db: Session = Depends(get_db)):
+    """Pure policy decision — never calls a model or runs a tool."""
+    return oe.build_plan(db, payload)
+
+
+@router.post("/orchestration/run", response_model=schemas.OrchestrationRunOut)
+def run_orchestration(payload: schemas.OrchestrationRequest, db: Session = Depends(get_db)):
+    return oe.run_orchestration(db, payload)
+
+
+@router.get("/orchestration/runs/{run_id}", response_model=schemas.OrchestrationRunOut)
+def get_orchestration_run(run_id: str, db: Session = Depends(get_db)):
+    run = db.get(OrchestrationRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Orchestration run not found")
+    return run
+
+
+@router.get("/orchestration/runs", response_model=list[schemas.OrchestrationRunOut])
+def list_orchestration_runs(task_id: str | None = None, db: Session = Depends(get_db)):
+    return oe.list_runs(db, task_id=task_id)
+
+
+@router.get("/orchestration/policies", response_model=list[schemas.OrchestrationPolicyOut])
+def list_orchestration_policies(db: Session = Depends(get_db)):
+    return oe.list_policies(db)
+
+
+@router.patch("/orchestration/policies/{policy_id}", response_model=schemas.OrchestrationPolicyOut)
+def update_orchestration_policy(policy_id: str, payload: schemas.OrchestrationPolicyUpdate, db: Session = Depends(get_db)):
+    policy = oe.update_policy(db, policy_id, payload)
+    if policy is None:
+        raise HTTPException(status_code=404, detail="Orchestration policy not found")
+    return policy
+
+
+@router.post("/tools/plan", response_model=schemas.ToolPlanOut)
+def plan_tools(payload: schemas.ToolPlanRequest):
+    """Preview-only — never executes a tool. Real execution stays behind
+    /api/tools/{tool_name}/run, unchanged (Phase 5)."""
+    return tool_strategy.build_tool_plan(payload.user_message, payload.conversation_id)

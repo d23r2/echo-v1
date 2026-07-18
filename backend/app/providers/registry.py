@@ -8,26 +8,70 @@ all of which already exist and are already tested (see
 test_router_fallback.py, test_provider_cooldown.py). This module only adds
 metadata (category, capabilities, priority) that's static per provider and
 formats it for GET /api/system/providers / /api/system/models.
+
+ECHO Layer 2D adds capability/speed/privacy/context-size tags plus measured
+health metrics (avg latency, failure rate) read from the existing
+app/core/metrics.py counters — still no new instrumentation path, just a
+read of what ModelRouter.chat()/LocalModelRouter.call() already record.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
 from app import usage
 from app.config import Settings
+from app.core import metrics
 from app.router import ModelRouter
+
+# ECHO Layer 2D — the capability vocabulary Phase 1 asks for. A provider's
+# capabilities are a static, honest declaration of what that model family is
+# actually good at — not a measured score (measured signal is latency/
+# failure-rate, tracked separately below).
+Capability = str  # planning|extraction|classification|coding|reasoning|critique|writing|summarization|vision|embeddings|tool_calling|json_reliability
+SpeedClass = str  # fast|medium|slow
+PrivacyClass = str  # local|cloud
 
 # Static capability metadata — doesn't change at runtime, so it's plain data
 # here rather than something each ModelProvider subclass would need its own
 # new abstract methods for.
 _PROVIDER_META: dict[str, dict] = {
-    "anthropic": dict(category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=1),
-    "openai": dict(category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=2),
-    "gemini": dict(category="cloud_llm", requires_api_key=True, is_paid=False, supports_streaming=True, supports_tools=False, supports_vision=True, priority=3),
-    "grok": dict(category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=4),
-    "azure": dict(category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=5),
-    "ollama": dict(category="local_llm", requires_api_key=False, is_paid=False, supports_streaming=True, supports_tools=False, supports_vision=False, priority=0),
+    "anthropic": dict(
+        category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=1,
+        capabilities=["planning", "reasoning", "coding", "critique", "writing", "summarization", "json_reliability"], speed_class="medium", privacy_class="cloud", context_size=200000,
+    ),
+    "openai": dict(
+        category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=2,
+        capabilities=["planning", "reasoning", "coding", "critique", "writing", "summarization", "json_reliability"], speed_class="medium", privacy_class="cloud", context_size=128000,
+    ),
+    "gemini": dict(
+        category="cloud_llm", requires_api_key=True, is_paid=False, supports_streaming=True, supports_tools=False, supports_vision=True, priority=3,
+        capabilities=["reasoning", "coding", "writing", "summarization", "vision", "classification"], speed_class="fast", privacy_class="cloud", context_size=1000000,
+    ),
+    "grok": dict(
+        category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=4,
+        capabilities=["reasoning", "coding", "writing", "summarization"], speed_class="medium", privacy_class="cloud", context_size=128000,
+    ),
+    "azure": dict(
+        category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=True, supports_tools=False, supports_vision=False, priority=5,
+        capabilities=["planning", "reasoning", "coding", "critique", "writing", "summarization", "json_reliability"], speed_class="medium", privacy_class="cloud", context_size=128000,
+    ),
+    "ollama": dict(
+        category="local_llm", requires_api_key=False, is_paid=False, supports_streaming=True, supports_tools=False, supports_vision=False, priority=0,
+        capabilities=["planning", "extraction", "classification", "coding", "reasoning", "critique", "writing", "summarization"], speed_class="medium", privacy_class="local", context_size=8192,
+    ),
+}
+
+# ECHO Layer 2D — the "typical capabilities" a local model *role* is used
+# for (distinct from a provider's overall capabilities above) — matches
+# local_intelligence_engine.py's actual usage of each role exactly, so this
+# is a description of existing behavior, not a new policy.
+_ROLE_CAPABILITIES: dict[str, list[str]] = {
+    "fast": ["extraction", "classification", "writing"],
+    "reasoning": ["planning", "reasoning"],
+    "coding": ["coding"],
+    "critic": ["critique", "json_reliability"],
+    "writing": ["writing", "summarization"],
 }
 
 _SEARCH_PROVIDERS: list[dict] = [
@@ -58,6 +102,14 @@ class ProviderRecord:
     cooldown_active: bool = False
     last_error_category: str | None = None
     reason: str | None = None
+    # ECHO Layer 2D
+    capabilities: list[str] = field(default_factory=list)
+    speed_class: str = "medium"
+    privacy_class: str = "cloud"
+    context_size: int = 8192
+    measured_avg_latency_ms: float | None = None
+    measured_failure_rate: float | None = None
+    measured_sample_count: int = 0
 
 
 @dataclass
@@ -65,6 +117,32 @@ class LocalModelRoleRecord:
     role: str
     configured_model: str | None
     falls_back_to_default: bool
+    # ECHO Layer 2D
+    capabilities: list[str] = field(default_factory=list)
+
+
+def _health_metrics(provider_name: str) -> tuple[float | None, float | None, int]:
+    """Reads the existing app/core/metrics.py counters ModelRouter.chat()/
+    LocalModelRouter.call() already record — no new instrumentation path,
+    just a summary read. Returns (avg_latency_ms, failure_rate, sample_count)
+    — all None/0 when nothing has been recorded yet (e.g. right after
+    startup, or in a fresh test process)."""
+    snap = metrics.snapshot()
+    counters = snap["counters"]
+    durations = snap["durations"]
+
+    success = counters.get(f"model_calls_total[outcome=success,provider={provider_name}]", 0)
+    success += counters.get(f"model_calls_total[outcome=success_fallback,provider={provider_name}]", 0)
+    failure = counters.get(f"model_calls_total[outcome=failure,provider={provider_name}]", 0)
+    total = success + failure
+    failure_rate = (failure / total) if total > 0 else None
+
+    duration_key = f"model_call_duration_ms[provider={provider_name}]"
+    duration_summary = durations.get(duration_key)
+    avg_latency = duration_summary["avg_ms"] if duration_summary else None
+    sample_count = duration_summary["count"] if duration_summary else 0
+
+    return avg_latency, failure_rate, sample_count
 
 
 def build_provider_registry(settings: Settings, router: ModelRouter, db: Session | None = None) -> list[ProviderRecord]:
@@ -74,7 +152,11 @@ def build_provider_registry(settings: Settings, router: ModelRouter, db: Session
     records: list[ProviderRecord] = []
     for status in router.statuses():
         name = status["name"]
-        meta = _PROVIDER_META.get(name, dict(category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=False, supports_tools=False, supports_vision=False, priority=99))
+        meta = _PROVIDER_META.get(
+            name,
+            dict(category="cloud_llm", requires_api_key=True, is_paid=True, supports_streaming=False, supports_tools=False, supports_vision=False, priority=99,
+                 capabilities=[], speed_class="medium", privacy_class="cloud", context_size=8192),
+        )
         available = bool(status["available"])
         reason = status.get("reason")
         configured = available or not (reason and "not set" in (reason or "").lower())
@@ -99,6 +181,8 @@ def build_provider_registry(settings: Settings, router: ModelRouter, db: Session
         else:
             health = "offline"
 
+        avg_latency, failure_rate, sample_count = _health_metrics(name)
+
         records.append(
             ProviderRecord(
                 provider_id=name,
@@ -117,6 +201,13 @@ def build_provider_registry(settings: Settings, router: ModelRouter, db: Session
                 cooldown_active=cooldown_active,
                 last_error_category=last_error_category,
                 reason=reason,
+                capabilities=list(meta.get("capabilities", [])),
+                speed_class=meta.get("speed_class", "medium"),
+                privacy_class=meta.get("privacy_class", "cloud"),
+                context_size=meta.get("context_size", 8192),
+                measured_avg_latency_ms=avg_latency,
+                measured_failure_rate=failure_rate,
+                measured_sample_count=sample_count,
             )
         )
 
@@ -165,6 +256,7 @@ def build_local_model_roles(settings: Settings) -> list[LocalModelRoleRecord]:
                 role=role,
                 configured_model=configured or settings.ollama_model,
                 falls_back_to_default=configured is None,
+                capabilities=list(_ROLE_CAPABILITIES.get(role, [])),
             )
         )
     return records

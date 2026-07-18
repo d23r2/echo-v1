@@ -2,6 +2,53 @@
 
 Last check-in: 2026-07-18
 
+## New since 2026-07-18 (later) — ECHO Layer 2D: Multi-Model Orchestrator and Tool Strategy Engine
+
+1233 backend tests passing (57 new), frontend build/typecheck clean, live-verified in a real browser
+against an isolated temporary backend (Preview showed a correct 7-stage `deep` plan for a debugging
+message with zero model calls; Run against real Ollama answered a low-stakes message end-to-end with
+the correct 1-call `simple` envelope; the run appeared in Recent runs and expanded correctly; a
+policy checkbox toggle round-tripped through a real PATCH). Deliberately not a rewrite of chat
+generation — `run_orchestration()` delegates the actual drafting/critiquing to the already-tested
+`LocalIntelligenceEngine`/`LocalModelRouter`, and the Tool Strategy Engine wraps the existing
+`context_router.classify_context()` rather than re-deriving source selection. See
+[ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_ARCHITECTURE.md](../ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_ARCHITECTURE.md),
+[ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_REPORT.md](../ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_REPORT.md),
+and
+[ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_SMOKE_TEST.md](../ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_SMOKE_TEST.md).
+
+- **New: capability registry (Phase 1)** — `providers/registry.py` extended with honest, static
+  `capabilities`/`speed_class`/`privacy_class`/`context_size` tags (never a measured score) plus
+  real `measured_avg_latency_ms`/`measured_failure_rate`/`measured_sample_count` read from existing
+  `metrics` counters — correctly `None`/`0` until something has actually run.
+- **New: OrchestrationPolicy / OrchestrationRun + policy engine** — one policy row per Layer 2A task
+  category (stage profile, cloud eligibility, confirmation requirement, call/token/latency budgets),
+  editable via PATCH; `classify_task_category()` chains three already-tested classifiers rather than
+  re-deriving a new mapping.
+- **New: typed stage pipeline (Phase 3)** — `build_plan()` is a pure policy decision (no model call);
+  `run_orchestration()` executes it, translating the underlying engine's own step vocabulary through
+  an explicit allow-list rather than coercing metadata entries into an invalid stage name (a real gap
+  caught before any test was written).
+  Bounded structured-output repair (deterministic, no extra model call) closes a second
+  self-identified gap the same way.
+- **New: Tool Strategy Engine (Phase 4)** — wraps the existing `context_router.classify_context()`,
+  maps sources onto real `tool_registry` tools, honestly omits sources with no matching tool. Two
+  small new tools (`project_search`, `task_search`) close a real gap rather than inventing one.
+- **New: cloud privacy gating** — five independent gates (global flag, request privacy level,
+  policy/request cloud-allowed, intent allowlist, confirmation requirement), each tested in
+  isolation; local-only privacy blocks cloud even when every other override says yes.
+- **New: budget + loop prevention (Phase 6-7)** — a tight call budget downgrades the stage profile at
+  plan time (the underlying engine call can't be safely interrupted mid-pipeline); a hard 6-call
+  ceiling can't be raised by any policy or request value.
+- **New: `/api/intelligence/orchestration/*` and `/tools/plan`, `/api/system/models/roles`** —
+  additive alongside the untouched Layer 2A/2B/2C `/api/intelligence/*` endpoints.
+- **Upgraded: Cognitive Core page** — new Routing tab (Preview & Run panel with the Advanced run
+  view, an editable per-category policy table, a local-model-roles reference panel, and an
+  expandable Recent runs list) — live-verified end-to-end against real Ollama.
+- Database schema bumped to v6 (two new tables, purely additive — no existing table gained a
+  column). **Per the milestone's own sequencing instruction, Layer 2E has not been started** — it
+  begins only after this report is reviewed.
+
 ## New since 2026-07-18 — ECHO Layer 2C: Decision Engine and Planning Engine
 
 1176 backend tests passing (61 new), frontend build/typecheck clean, live-verified in a real

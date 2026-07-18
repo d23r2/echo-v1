@@ -9,6 +9,7 @@ to pull five separate Ollama models for this to work.
 
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from typing import Literal
 
@@ -107,8 +108,10 @@ class LocalModelRouter:
             )
         try:
             try:
+                call_start = time.monotonic()
                 result = self.provider.chat(system_prompt, messages, model=model)
                 metrics.increment("model_calls_total", provider="ollama", outcome="success")
+                metrics.record_duration("model_call_duration_ms", (time.monotonic() - call_start) * 1000, provider="ollama")
                 return LocalModelCallResult(
                     ok=True, text=result.text, role=role, model_requested=model, model_used=model,
                     fallback_used=False, error=None, chat_result=result,
@@ -123,8 +126,10 @@ class LocalModelRouter:
                         fallback_used=False, error="Local model call failed.",
                     )
                 try:
+                    fallback_start = time.monotonic()
                     result = self.provider.chat(system_prompt, messages, model=default_model)
                     metrics.increment("model_calls_total", provider="ollama", outcome="success_fallback")
+                    metrics.record_duration("model_call_duration_ms", (time.monotonic() - fallback_start) * 1000, provider="ollama")
                     return LocalModelCallResult(
                         ok=True, text=result.text, role=role, model_requested=model, model_used=default_model,
                         fallback_used=True, error=f"Model for role '{role}' unavailable — used the default model instead.",

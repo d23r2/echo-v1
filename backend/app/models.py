@@ -1499,6 +1499,69 @@ class PlanRevision(Base):
 
 
 # ============================================================================
+# ECHO Layer 2D — Multi-Model Orchestrator and Tool Strategy Engine.
+#
+# Deliberately NOT a rewrite of chat generation: OrchestrationPolicy/
+# OrchestrationRun sit on top of the existing ModelRouter (cloud fallback
+# chain, cooldown, error classification), LocalModelRouter (role-based
+# Ollama routing, bounded concurrency), and tool_registry/action_system
+# (permission-gated execution) — see services/orchestration_engine.py and
+# services/tool_strategy.py. This layer's own job is the *policy decision*
+# (which stages, which roles, is cloud allowed, what are the budgets) as one
+# inspectable table instead of scattered if/else, plus budget/loop
+# bookkeeping across a multi-stage run — both genuinely new.
+# ============================================================================
+
+
+class OrchestrationPolicy(Base):
+    """One editable routing policy per Layer 2A task_category (seeded with
+    a safe, local-first default for every category — see
+    orchestration_engine.ensure_default_policies()). PATCHable via
+    /api/intelligence/orchestration/policies/{id}."""
+
+    __tablename__ = "orchestration_policies"
+    __table_args__ = (UniqueConstraint("task_category", name="uq_orchestration_policy_task_category"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    task_category: Mapped[str] = mapped_column(String)  # matches schemas.TaskCategory
+    stage_profile: Mapped[str] = mapped_column(String, default="simple")  # simple|standard|deep
+    cloud_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    require_confirmation_for_cloud: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_model_calls: Mapped[int] = mapped_column(Integer, default=1)
+    token_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_budget_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    skip_critic_for_low_risk: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class OrchestrationRun(Base):
+    """One executed (or previewed-only) orchestration. objective is a short,
+    compact snapshot for developer-mode display — never the full raw prompt
+    or a chain-of-thought dump (see build_run_summary())."""
+
+    __tablename__ = "orchestration_runs"
+    __table_args__ = (Index("ix_orchestration_runs_status", "status"), Index("ix_orchestration_runs_task_id", "task_id"))
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    conversation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    objective: Mapped[str] = mapped_column(String)  # truncated snapshot, not the raw prompt
+    task_category: Mapped[str] = mapped_column(String, default="mixed")
+    stage_profile_used: Mapped[str] = mapped_column(String, default="simple")
+    status: Mapped[str] = mapped_column(String, default="completed")  # completed|failed|stopped_budget|stopped_loop
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stages_json: Mapped[list] = mapped_column(JSON, default=list)
+    tools_used_json: Mapped[list] = mapped_column(JSON, default=list)
+    total_model_calls: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens_estimate: Mapped[int] = mapped_column(Integer, default=0)
+    cloud_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    stop_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# ============================================================================
 # ECHO Operational Self-Model v1 — an honest, explicitly non-conscious record
 # of ECHO's own operating state for one turn (goal/mode/confidence/risks/
 # limits/next action), distinct from Atlas (facts about the user) and

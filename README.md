@@ -342,6 +342,22 @@ Decisions / Plans. See
 [ECHO_LAYER_2C_DECISION_PLANNING_ARCHITECTURE.md](ECHO_LAYER_2C_DECISION_PLANNING_ARCHITECTURE.md)
 and [ECHO_LAYER_2C_DECISION_PLANNING_REPORT.md](ECHO_LAYER_2C_DECISION_PLANNING_REPORT.md).
 
+## Multi-Model Orchestrator and Tool Strategy Engine (Layer 2D)
+
+A policy-driven routing layer over generation and tool selection that already exist — never a
+second draft/critic/repair implementation. Given a message, it decides the task category, how
+staged the answer should be (a single fast local call vs. a full draft → critique → repair → style
+pipeline), which local model role(s) that implies, whether cloud is even eligible (off by default,
+gated by an explicit privacy level, a per-category policy, an intent allowlist, and — when
+required — explicit confirmation), and which read-only tools are relevant — all before making a
+single model or tool call. Execution delegates to the existing `LocalIntelligenceEngine`/
+`LocalModelRouter`/`context_router` primitives and returns a typed, per-stage envelope (never raw
+prompts or chain-of-thought). A hard 6-call ceiling and a deterministic, non-model-call
+structured-output repair both prevent runaway or malformed behavior. Explore it under Advanced →
+Knowledge & Memory → Cognitive Core → Routing. See
+[ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_ARCHITECTURE.md](ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_ARCHITECTURE.md)
+and [ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_REPORT.md](ECHO_LAYER_2D_ORCHESTRATION_TOOL_STRATEGY_REPORT.md).
+
 ## Multi-device
 
 The frontend is a fully responsive web app — the same build works on desktop and mobile

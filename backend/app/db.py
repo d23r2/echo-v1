@@ -192,7 +192,11 @@ def _ensure_layer1_memory_columns() -> None:
 # plan_milestones, plan_dependencies, plan_resource_requirements, plan_risks,
 # plan_revisions), created by Base.metadata.create_all() above with no
 # _ensure_column() calls needed since nothing existing gained a column.
-CURRENT_SCHEMA_VERSION = 5
+# v6 (ECHO Layer 2D): Multi-Model Orchestrator and Tool Strategy Engine — new
+# tables only (orchestration_policies, orchestration_runs), created by
+# Base.metadata.create_all() above with no _ensure_column() calls needed
+# since nothing existing gained a column.
+CURRENT_SCHEMA_VERSION = 6
 
 
 def _ensure_schema_version() -> None:
