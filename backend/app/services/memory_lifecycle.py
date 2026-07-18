@@ -40,6 +40,7 @@ def activate(db: Session, entry: AtlasEntry) -> AtlasEntry:
     entry.outdated = False
     db.commit()
     db.refresh(entry)
+    _invalidate_persona_if_preference(entry, "preference_activated")
     return entry
 
 
@@ -56,6 +57,7 @@ def mark_verified(db: Session, entry: AtlasEntry) -> AtlasEntry:
     entry.review_state = "reviewed"
     db.commit()
     db.refresh(entry)
+    _invalidate_persona_if_preference(entry, "preference_verified")
     return entry
 
 
@@ -64,6 +66,7 @@ def mark_outdated(db: Session, entry: AtlasEntry) -> AtlasEntry:
     entry.verification_status = "outdated"
     db.commit()
     db.refresh(entry)
+    _invalidate_persona_if_preference(entry, "preference_outdated")
     return entry
 
 
@@ -76,6 +79,7 @@ def archive(db: Session, entry: AtlasEntry) -> AtlasEntry:
     entry.outdated = True
     db.commit()
     db.refresh(entry)
+    _invalidate_persona_if_preference(entry, "preference_archived")
     return entry
 
 
@@ -85,6 +89,7 @@ def restore(db: Session, entry: AtlasEntry) -> AtlasEntry:
     entry.review_state = "none"
     db.commit()
     db.refresh(entry)
+    _invalidate_persona_if_preference(entry, "preference_restored")
     return entry
 
 
@@ -93,6 +98,15 @@ def supersede(db: Session, old: AtlasEntry, new: AtlasEntry) -> None:
     old.outdated = True
     new.supersedes_memory_id = old.id
     db.commit()
+    _invalidate_persona_if_preference(old, "preference_superseded")
+
+
+def _invalidate_persona_if_preference(entry: AtlasEntry, reason: str) -> None:
+    if entry.category != "preference":
+        return
+    from app.services import persona_service
+
+    persona_service.invalidate_persona_cache(reason=reason)
 
 
 def run_maintenance(db: Session) -> dict:
@@ -109,6 +123,7 @@ def run_maintenance(db: Session) -> dict:
     checked = 0
     expired = 0
     needs_review = 0
+    expired_preference = False
 
     entries = db.query(AtlasEntry).filter(AtlasEntry.status == "active").all()
     for entry in entries:
@@ -118,6 +133,7 @@ def run_maintenance(db: Session) -> dict:
             entry.status = "archived"
             entry.outdated = True
             expired += 1
+            expired_preference = expired_preference or entry.category == "preference"
             continue
 
         interval_days = _REVIEW_INTERVAL_DAYS.get(entry.category)
@@ -132,4 +148,8 @@ def run_maintenance(db: Session) -> dict:
             needs_review += 1
 
     db.commit()
+    if expired_preference:
+        from app.services import persona_service
+
+        persona_service.invalidate_persona_cache(reason="preference_expired")
     return {"checked": checked, "expired": expired, "needs_review": needs_review, "run_at": now.isoformat()}

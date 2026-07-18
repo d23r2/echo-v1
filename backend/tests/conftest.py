@@ -101,6 +101,20 @@ def _isolate_runtime_identity_cache():
     identity_runtime.reset_runtime_state_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _isolate_persona_runtime_cache():
+    """Part 2C caches only normalized, immutable preference signals.
+
+    Tests use independent SQLite files, so the process cache must not carry a
+    tester profile or accepted preference from one file into the next.
+    """
+    from app.services import persona_service
+
+    persona_service.reset_runtime_state_for_tests()
+    yield
+    persona_service.reset_runtime_state_for_tests()
+
+
 @pytest.fixture()
 def db_session():
     """A fresh, isolated SQLite database for a single test. Each test gets its

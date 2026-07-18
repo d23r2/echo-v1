@@ -119,6 +119,14 @@ def list_feature_flags(settings: Settings, db: Session | None = None) -> list[Fe
     )
     flags.append(
         _flag(
+            "adaptive_persona",
+            "Adaptive communication persona",
+            settings.persona_engine_v2_enabled,
+            restart_required=True,
+        )
+    )
+    flags.append(
+        _flag(
             "operational_self_model",
             "Operational Self-Model",
             True,  # actual on/off is the InterfaceSettings DB row, checked by callers with db access

@@ -358,11 +358,11 @@ def test_rituals_can_be_enabled_and_disabled(db_session):
 
 
 # ============================================================================
-# Prompt builder — overlay inclusion, ordering, compactness
+# Prompt builder — normalized communication persona inclusion, ordering, compactness
 # ============================================================================
 
 
-def test_prompt_includes_human_persona_overlay(db_session):
+def test_prompt_includes_normalized_communication_persona(db_session):
     conv = Conversation(title="Prompt test", tester_id="default")
     db_session.add(conv)
     db_session.commit()
@@ -372,10 +372,11 @@ def test_prompt_includes_human_persona_overlay(db_session):
     prompt, *_ = persona.build_system_prompt(
         db_session, "hello", 0, conversation_id=conv.id, tester_id="default", conversation=conv
     )
-    assert "HUMAN PERSONA LAYER" in prompt
+    assert "[COMMUNICATION PERSONA" in prompt
+    assert "HUMAN PERSONA LAYER" not in prompt
 
 
-def test_prompt_keeps_constitution_before_character_code_before_overlay(db_session):
+def test_prompt_keeps_constitution_before_character_code_before_persona(db_session):
     conv = Conversation(title="Order test", tester_id="default")
     db_session.add(conv)
     db_session.commit()
@@ -388,12 +389,12 @@ def test_prompt_keeps_constitution_before_character_code_before_overlay(db_sessi
     constitution_idx = prompt.find("RANKED CORE VALUES")
     code_idx = prompt.find("ECHO CHARACTER CODE")
     behavior_idx = prompt.find("ECHO BEHAVIOR DIRECTIVES")
-    overlay_idx = prompt.find("HUMAN PERSONA LAYER")
-    assert constitution_idx != -1 and code_idx != -1 and behavior_idx != -1 and overlay_idx != -1
-    assert constitution_idx < code_idx < behavior_idx < overlay_idx
+    persona_idx = prompt.find("[COMMUNICATION PERSONA")
+    assert constitution_idx != -1 and code_idx != -1 and behavior_idx != -1 and persona_idx != -1
+    assert constitution_idx < code_idx < behavior_idx < persona_idx
 
 
-def test_prompt_overlay_is_compact(db_session):
+def test_prompt_persona_brief_is_compact(db_session):
     """Not a raw database dump — a few short lines, not thousands of
     characters of JSON."""
     conv = Conversation(title="Compact test", tester_id="default")
@@ -405,14 +406,15 @@ def test_prompt_overlay_is_compact(db_session):
     prompt, *_ = persona.build_system_prompt(
         db_session, "hello", 0, conversation_id=conv.id, tester_id="default", conversation=conv
     )
-    start = prompt.find("HUMAN PERSONA LAYER")
-    end = prompt.find("CURRENT DATE/TIME")
-    overlay = prompt[start:end]
-    assert len(overlay) < 2000
-    assert "{" not in overlay  # no raw JSON/dict leaking through
+    start = prompt.find("[COMMUNICATION PERSONA")
+    end = prompt.find("[END COMMUNICATION PERSONA]") + len("[END COMMUNICATION PERSONA]")
+    persona_brief = prompt[start:end]
+    assert 0 <= start < end
+    assert len(persona_brief) < 2000
+    assert "{" not in persona_brief  # no raw JSON/dict leaking through
 
 
-def test_session_style_override_affects_overlay_not_permanent_profile(db_session):
+def test_session_style_override_affects_persona_brief_not_permanent_profile(db_session):
     conv = Conversation(title="Session override test", tester_id="default")
     conv.session_style_override = {"length": "short"}
     db_session.add(conv)
@@ -428,7 +430,7 @@ def test_session_style_override_affects_overlay_not_permanent_profile(db_session
         tester_id="default",
         conversation=conv,
     )
-    assert "Response length: short" in prompt
+    assert "Detail: concise" in prompt
 
     # A fresh conversation for the same tester does not inherit the override.
     fresh_settings = human_persona.get_or_create_persona_settings(db_session, "default")
@@ -439,7 +441,7 @@ def test_session_style_override_affects_overlay_not_permanent_profile(db_session
     prompt2, *_ = persona.build_system_prompt(
         db_session, "hello", 0, conversation_id=conv2.id, tester_id="default", conversation=conv2
     )
-    assert "Response length: short" not in prompt2
+    assert "Detail: concise" not in prompt2
 
 
 def test_unsafe_style_preference_cannot_change_character_code(db_session):
@@ -463,10 +465,9 @@ def test_unsafe_style_preference_cannot_change_character_code(db_session):
     assert "Character Code cannot be relaxed" in prompt or "cannot be relaxed by a user preference" in prompt
 
 
-def test_prompt_never_reveals_itself_as_a_prompt_block_name(db_session):
-    """The overlay must not read like a literal system-prompt dump — it's
-    plain instructive English, not something that looks like a leaked
-    internal block if a model ever echoed a fragment."""
+def test_prompt_persona_brief_never_contains_database_or_code_dump(db_session):
+    """The normalized brief may have a trust-boundary marker, but it must
+    never contain database syntax, code fences, or raw storage structure."""
     conv = Conversation(title="No leak test", tester_id="default")
     db_session.add(conv)
     db_session.commit()
@@ -476,11 +477,12 @@ def test_prompt_never_reveals_itself_as_a_prompt_block_name(db_session):
     prompt, *_ = persona.build_system_prompt(
         db_session, "hello", 0, conversation_id=conv.id, tester_id="default", conversation=conv
     )
-    start = prompt.find("HUMAN PERSONA LAYER")
-    end = prompt.find("CURRENT DATE/TIME")
-    overlay = prompt[start:end]
-    assert "SELECT " not in overlay.upper()
-    assert "```" not in overlay
+    start = prompt.find("[COMMUNICATION PERSONA")
+    end = prompt.find("[END COMMUNICATION PERSONA]") + len("[END COMMUNICATION PERSONA]")
+    persona_brief = prompt[start:end]
+    assert 0 <= start < end
+    assert "SELECT " not in persona_brief.upper()
+    assert "```" not in persona_brief
 
 
 # ============================================================================

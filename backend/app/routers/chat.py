@@ -32,7 +32,8 @@ from app.providers import gemini_provider
 from app.providers.base import ChatMessage, ChatResult
 from app.router import NoProviderAvailableError, ProviderUnavailableError
 from app.router import router as model_router
-from app.services import identity_context, memory_privacy
+from app.services import identity_context, memory_privacy, persona_service
+from app.services.intent_classifier import classify_intent
 from app.tester import get_tester_id
 from app.web_search import GatherResult
 
@@ -44,6 +45,34 @@ _ROLE_MAP = {"user": "user", "echo": "assistant"}
 
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _resolve_turn_persona(
+    db: Session,
+    message: str,
+    tester_id: str,
+    conversation: Conversation,
+) -> persona_service.ResolvedPersona | None:
+    if not get_settings().persona_engine_v2_enabled:
+        return None
+    intent = classify_intent(message, conversation.id).intent
+    return persona_service.resolve_persona(
+        db,
+        message,
+        tester_id=tester_id,
+        context_type=intent,
+        conversation=conversation,
+    )
+
+
+def _enforce_turn_persona(
+    result: ChatResult,
+    resolved: persona_service.ResolvedPersona | None,
+) -> None:
+    if resolved is None:
+        return
+    validation = persona_service.enforce_response_style(result.text, resolved)
+    result.text = validation.text
 
 _WELCOME_PROMPT_WITH_MEMORIES = """You are Echo, a warm, precise AI with persistent memory. The \
 user just reopened the app after being away. Below are a few things you remember about them \
@@ -506,6 +535,7 @@ def send_chat_message(
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
+    resolved_persona = _resolve_turn_persona(db, payload.message, tester_id, conversation)
     system_prompt, citations, nudge_reason, conversation_snippets, gather_result = persona.build_system_prompt(
         db,
         payload.message,
@@ -515,6 +545,7 @@ def send_chat_message(
         conversation_id=conversation.id,
         tester_id=tester_id,
         conversation=conversation,
+        resolved_persona=resolved_persona,
     )
     history.append(ChatMessage(role="user", content=payload.message))
 
@@ -526,6 +557,8 @@ def send_chat_message(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _enforce_turn_persona(result, resolved_persona)
 
     memory_update = _extract_memory(db, payload.message, result, conversation_id=conversation.id)
     snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
@@ -633,6 +666,7 @@ def send_chat_message_stream(
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(payload.message)
+    resolved_persona = _resolve_turn_persona(db, payload.message, tester_id, conversation)
     system_prompt, citations, nudge_reason, conversation_snippets, gather_result = persona.build_system_prompt(
         db,
         payload.message,
@@ -642,6 +676,7 @@ def send_chat_message_stream(
         conversation_id=conversation.id,
         tester_id=tester_id,
         conversation=conversation,
+        resolved_persona=resolved_persona,
     )
     history.append(ChatMessage(role="user", content=payload.message))
 
@@ -773,6 +808,7 @@ async def send_chat_message_with_files(
     prior_user_messages = [m.content for m in conversation.messages if m.role == "user"]
 
     explicit_remember = memory_extraction.is_explicit_remember_request(message)
+    resolved_persona = _resolve_turn_persona(db, message, tester_id, conversation)
     system_prompt, citations, nudge_reason, conversation_snippets, gather_result = persona.build_system_prompt(
         db,
         message,
@@ -782,6 +818,7 @@ async def send_chat_message_with_files(
         conversation_id=conversation.id,
         tester_id=tester_id,
         conversation=conversation,
+        resolved_persona=resolved_persona,
     )
 
     if uploads:
@@ -885,6 +922,8 @@ async def send_chat_message_with_files(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _enforce_turn_persona(result, resolved_persona)
 
     _extract_memory(db, message, result, conversation_id=conversation.id)
     snippets_out = [schemas.ConversationSnippetOut.model_validate(s) for s in conversation_snippets]
@@ -1077,7 +1116,9 @@ def search_conversations(q: str = Query(""), db: Session = Depends(get_db)):
 
 
 @router.get("/chat/welcome", response_model=schemas.WelcomeResponse)
-def get_welcome_greeting(db: Session = Depends(get_db)):
+def get_welcome_greeting(
+    db: Session = Depends(get_db), tester_id: str = Depends(get_tester_id)
+):
     memories = atlas.list_entries(db, limit=3)
     # No separate "title" field on Atlas entries — truncate content as a stand-in,
     # matching the same truncation convention used for conversation titles above.
@@ -1090,8 +1131,19 @@ def get_welcome_greeting(db: Session = Depends(get_db)):
         system_prompt = _WELCOME_PROMPT_EMPTY
 
     identity_section, _identity_brief = identity_context.build_identity_prompt_section(db, "general_chat")
-    if identity_section:
-        system_prompt = f"{identity_section}\n\n{system_prompt}"
+    persona_section, _persona_brief, resolved_persona = (
+        persona_service.build_persona_prompt_section(
+            db,
+            "Greet me.",
+            tester_id=tester_id,
+            context_type="general_chat",
+        )
+    )
+    trusted_context = "\n\n".join(
+        section for section in (identity_section, persona_section) if section
+    )
+    if trusted_context:
+        system_prompt = f"{trusted_context}\n\n{system_prompt}"
 
     try:
         result, _provider_used, _fallback_note = model_router.chat(
@@ -1100,8 +1152,13 @@ def get_welcome_greeting(db: Session = Depends(get_db)):
     except (NoProviderAvailableError, ProviderUnavailableError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    greeting = result.text
+    if resolved_persona is not None:
+        greeting = persona_service.validate_response_style(
+            greeting, resolved_persona
+        ).text
     return schemas.WelcomeResponse(
-        greeting=result.text,
+        greeting=greeting,
         referenced_memories=referenced if memories else [],
     )
 

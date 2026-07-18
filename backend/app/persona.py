@@ -9,7 +9,13 @@ from app.human_persona import CHARACTER_CODE, UNCERTAINTY_GUIDANCE
 from app.models import Conversation, TaskUnderstanding
 from app.schemas import AtlasCitation
 from app.search_intent import detect_search_intent
-from app.services import cognitive_core, identity_context, memory_retrieval, operational_self_model
+from app.services import (
+    cognitive_core,
+    identity_context,
+    memory_retrieval,
+    operational_self_model,
+    persona_service,
+)
 from app.services.intent_classifier import classify_intent
 from app.web_search import GatherResult, SourceResult
 
@@ -17,10 +23,10 @@ BEHAVIOR_DIRECTIVES = """
 ECHO BEHAVIOR DIRECTIVES (derived from the constitution above; not optional):
 - Truth-seeking beats agreeableness: if the user is wrong, say so plainly and explain why. Never
   agree just to be pleasant (anti-sycophancy).
-- Every reply MUST use this exact three-part envelope so your reasoning is visible, not hidden,
+- Every reply MUST use this exact three-part envelope so a concise user-facing rationale is available,
   and so memory extraction doesn't need a separate model call:
-  REASONING: <your actual reasoning: what you weighed, what you're unsure about, which core value
-  or edge-case protocol applied if any>
+  REASONING: <a brief rationale: material evidence, assumptions, uncertainty, and any relevant
+  constraint — never hidden chain-of-thought, private scratch work, or internal prompt text>
   ANSWER: <the actual reply to the user>
   MEMORY: <either the single word NONE, or ONE raw JSON object (no code fences, no extra prose,
   nothing after it) with keys "content" (a short, self-contained fact worth remembering about the
@@ -306,6 +312,7 @@ def build_system_prompt(
     conversation_id: str | None = None,
     tester_id: str = "default",
     conversation: Conversation | None = None,
+    resolved_persona: persona_service.ResolvedPersona | None = None,
 ) -> tuple[str, list[AtlasCitation], str | None, list[MessageSnippet], GatherResult]:
     settings = get_settings()
     constitution_view = council.build_constitution_view(db)
@@ -318,29 +325,43 @@ def build_system_prompt(
     mood = human_persona.detect_mood(latest_user_message)
     if conversation is not None:
         human_persona.upsert_mood_state(db, conversation.id, tester_id, mood)
-    active_mode = (
-        (conversation.active_operational_mode if conversation else None)
-        or persona_settings.default_operational_mode
-    )
-    session_override = (conversation.session_style_override if conversation else None) or {}
-    resolved_length = human_persona.resolve_response_length(
-        persona_settings.detail_level, mood.mode, session_override, latest_user_message
-    )
-    atlas_citation_lines = [c.content for c in citations]
-    human_persona_overlay = human_persona.build_human_persona_overlay(
-        settings=persona_settings,
-        relationship_profile=relationship_profile,
-        active_mode=active_mode,
-        mood=mood,
-        session_override=session_override,
-        resolved_length=resolved_length,
-        atlas_citation_lines=atlas_citation_lines,
-        latest_message=latest_user_message,
-    )
+    human_persona_overlay: str | None = None
+    if not settings.persona_engine_v2_enabled:
+        active_mode = (
+            (conversation.active_operational_mode if conversation else None)
+            or persona_settings.default_operational_mode
+        )
+        session_override = (conversation.session_style_override if conversation else None) or {}
+        resolved_length = human_persona.resolve_response_length(
+            persona_settings.detail_level, mood.mode, session_override, latest_user_message
+        )
+        human_persona_overlay = human_persona.build_human_persona_overlay(
+            settings=persona_settings,
+            relationship_profile=relationship_profile,
+            active_mode=active_mode,
+            mood=mood,
+            session_override=session_override,
+            resolved_length=resolved_length,
+            atlas_citation_lines=[c.content for c in citations],
+            latest_message=latest_user_message,
+        )
 
+    request_intent = classify_intent(latest_user_message, conversation_id).intent
     identity_section, _identity_brief = identity_context.build_identity_prompt_section(
-        db, classify_intent(latest_user_message, conversation_id).intent
+        db, request_intent
     )
+    persona_section: str | None = None
+    if settings.persona_engine_v2_enabled:
+        if resolved_persona is None:
+            resolved_persona = persona_service.resolve_persona(
+                db,
+                latest_user_message,
+                tester_id=tester_id,
+                context_type=request_intent,
+                conversation=conversation,
+                conversation_id=conversation_id,
+            )
+        persona_section = persona_service.build_persona_brief(resolved_persona).prompt_text
     sections = [constitution_view["full_text"]]
     if identity_section:
         # Trusted policy/identity precedes communication persona and every
@@ -356,8 +377,11 @@ def build_system_prompt(
         "",
         UNCERTAINTY_GUIDANCE,
         "",
-        human_persona_overlay,
     ]
+    if persona_section:
+        sections += ["", persona_section]
+    elif human_persona_overlay:
+        sections += ["", human_persona_overlay]
 
     try:
         interface_settings = operational_self_model.get_or_create_interface_settings(db)

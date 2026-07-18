@@ -131,7 +131,7 @@ def _handle_summarize_file(db: Session, input: dict) -> dict:
     from app.config import get_settings
     from app.models import LibraryItem
     from app.providers.base import ChatMessage
-    from app.services import identity_context
+    from app.services import identity_context, persona_service
     from app.services.local_model_router import LocalModelRouter
 
     item_id = input.get("library_item_id")
@@ -157,9 +157,19 @@ def _handle_summarize_file(db: Session, input: dict) -> dict:
     identity_section, _identity_brief = identity_context.build_identity_prompt_section(
         db, "document_analysis"
     )
+    persona_section, _persona_brief, resolved_persona = (
+        persona_service.build_persona_prompt_section(
+            db,
+            "Summarize this document.",
+            context_type="document_analysis",
+        )
+    )
     system_prompt = "Summarize the following document in 3-5 concise sentences. No preamble, no internal notes."
-    if identity_section:
-        system_prompt = f"{identity_section}\n\n{system_prompt}"
+    trusted_context = "\n\n".join(
+        section for section in (identity_section, persona_section) if section
+    )
+    if trusted_context:
+        system_prompt = f"{trusted_context}\n\n{system_prompt}"
     result = router.call(
         "fast",
         system_prompt,
@@ -167,7 +177,12 @@ def _handle_summarize_file(db: Session, input: dict) -> dict:
     )
     if not result.ok:
         return {"library_item_id": item.id, "title": item.title, "summary": None, "note": "Local model unavailable — couldn't generate a summary right now."}
-    return {"library_item_id": item.id, "title": item.title, "summary": result.text.strip()}
+    summary_text = result.text
+    if resolved_persona is not None:
+        summary_text = persona_service.validate_response_style(
+            summary_text, resolved_persona
+        ).text
+    return {"library_item_id": item.id, "title": item.title, "summary": summary_text.strip()}
 
 
 def _handle_search_web(db: Session, input: dict) -> dict:

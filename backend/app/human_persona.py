@@ -110,6 +110,9 @@ def update_persona_settings(db: Session, tester_id: str, payload: "schemas.Perso
         setattr(settings, field, value)
     db.commit()
     db.refresh(settings)
+    from app.services import persona_service
+
+    persona_service.invalidate_persona_cache(tester_id, reason="settings_changed")
     return settings
 
 
@@ -150,11 +153,18 @@ def update_relationship_profile(
     db: Session, tester_id: str, payload: "schemas.RelationshipProfileUpdate"
 ) -> RelationshipProfile:
     profile = get_or_create_relationship_profile(db, tester_id)
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    from app.services import persona_service
+
+    for value in updates.values():
+        if isinstance(value, str) or value is None:
+            persona_service.validate_relationship_text(value)
+    for field, value in updates.items():
         setattr(profile, field, value)
     profile.version += 1
     db.commit()
     db.refresh(profile)
+    persona_service.invalidate_persona_cache(tester_id, reason="relationship_changed")
     return profile
 
 

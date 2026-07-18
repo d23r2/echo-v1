@@ -17,6 +17,14 @@ from app.config import get_settings
 
 _COLLECTION_NAME = "atlas"
 
+
+def _invalidate_persona_if_preference(*entries: models.AtlasEntry, reason: str) -> None:
+    if not any(entry.category == "preference" for entry in entries):
+        return
+    from app.services import persona_service
+
+    persona_service.invalidate_persona_cache(reason=reason)
+
 # ECHO Layer 1 — maps the legacy `memory_type` taxonomy (fact|preference|mood|
 # goal|fear|capability|project|relationship|event) to the new `category`
 # taxonomy (profile|preference|project|task|episodic|semantic|skill|
@@ -94,10 +102,12 @@ def create_entry(db: Session, data: schemas.AtlasEntryCreate) -> models.AtlasEnt
         db.delete(entry)
         db.commit()
         raise
+    _invalidate_persona_if_preference(entry, reason="preference_created")
     return entry
 
 
 def update_entry(db: Session, entry: models.AtlasEntry, data: schemas.AtlasEntryUpdate) -> models.AtlasEntry:
+    was_preference = entry.category == "preference"
     updates = data.model_dump(exclude_unset=True)
     for field, value in updates.items():
         setattr(entry, field, value)
@@ -105,6 +115,8 @@ def update_entry(db: Session, entry: models.AtlasEntry, data: schemas.AtlasEntry
     db.refresh(entry)
     if "content" in updates or "epistemic_status" in updates:
         _upsert_chroma(entry)
+    if was_preference or entry.category == "preference":
+        _invalidate_persona_if_preference(entry, reason="preference_updated")
     return entry
 
 
@@ -121,11 +133,13 @@ def merge_entries(
     db.refresh(keep)
     _upsert_chroma(keep)
     delete_entry(db, remove)
+    _invalidate_persona_if_preference(keep, remove, reason="preference_merged")
     return keep
 
 
 def delete_entry(db: Session, entry: models.AtlasEntry) -> None:
     entry_id = entry.id
+    was_preference = entry.category == "preference"
     # ECHO Layer 1 (Phase 17, rule 18) — deleting a memory must safely
     # deactivate its relationships, not leave dangling MemoryRelationship
     # rows pointing at an id that no longer exists. Deactivate (not delete)
@@ -140,6 +154,10 @@ def delete_entry(db: Session, entry: models.AtlasEntry) -> None:
         _get_collection().delete(ids=[entry_id])
     except Exception:
         pass
+    if was_preference:
+        from app.services import persona_service
+
+        persona_service.invalidate_persona_cache(reason="preference_deleted")
 
 
 def list_entries(

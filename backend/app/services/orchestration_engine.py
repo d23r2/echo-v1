@@ -25,7 +25,7 @@ from app.config import get_settings
 from app.models import OrchestrationPolicy, OrchestrationRun, _now
 from app.provider_errors import classify_provider_error
 from app.providers.base import ChatMessage
-from app.services import identity_context, tool_strategy
+from app.services import identity_context, persona_service, tool_strategy
 from app.services.cognitive_core import _task_type_for
 from app.services.intent_classifier import IntentClassification, classify_intent
 from app.services.local_intelligence_engine import LocalIntelligenceEngine
@@ -347,9 +347,23 @@ def run_orchestration(db: Session, request: schemas.OrchestrationRequest) -> Orc
         identity_section, _identity_brief = identity_context.build_identity_prompt_section(
             db, plan.task_category
         )
+        persona_section, _persona_brief, resolved_persona = (
+            persona_service.build_persona_prompt_section(
+                db,
+                request.user_message,
+                tester_id=request.tester_id,
+                context_type=plan.task_category,
+                conversation_id=request.conversation_id,
+            )
+        )
         simple_prompt = "You are Echo, a helpful assistant. Answer directly and concisely."
-        if identity_section:
-            simple_prompt = f"{identity_section}\n\nYou are ECHO. Answer directly and concisely."
+        trusted_context = "\n\n".join(
+            section for section in (identity_section, persona_section) if section
+        )
+        if trusted_context:
+            simple_prompt = (
+                f"{trusted_context}\n\nYou are ECHO. Answer directly and concisely."
+            )
         result = local_router.call(
             role,
             simple_prompt,
@@ -358,8 +372,13 @@ def run_orchestration(db: Session, request: schemas.OrchestrationRequest) -> Orc
         duration_ms = (time.monotonic() - call_start) * 1000
         calls_made += 1
         if result.ok:
-            answer_text = result.text
-            tokens_estimate += max(len(result.text) // 4, 0)
+            if resolved_persona is not None:
+                answer_text = persona_service.validate_response_style(
+                    result.text, resolved_persona
+                ).text
+            else:
+                answer_text = result.text
+            tokens_estimate += max(len(answer_text) // 4, 0)
             stage_results.append({"stage": "final", "role": role, "provider": "ollama", "model": result.model_used, "duration_ms": round(duration_ms, 1), "status": "completed", "detail": None})
         else:
             status = "failed"
@@ -378,6 +397,7 @@ def run_orchestration(db: Session, request: schemas.OrchestrationRequest) -> Orc
         engine_result = engine.generate_response(
             request.user_message,
             conversation_id=request.conversation_id,
+            tester_id=request.tester_id,
             identity_context_type=plan.task_category,
             allow_cloud_fallback=plan.cloud_allowed,
             mode=mode,

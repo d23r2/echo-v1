@@ -16,7 +16,14 @@ from collections import Counter
 from app import schemas
 from app.config import get_settings
 from app.models import ContextSelectionMetric, DecisionCase, Goal, Plan, SystemModel, TaskUnderstanding
-from app.services import context_gatherer, goal_engine, identity_context, identity_runtime, skill_library
+from app.services import (
+    context_gatherer,
+    goal_engine,
+    identity_context,
+    identity_runtime,
+    persona_service,
+    skill_library,
+)
 from app.services.cognitive_core import get_cognitive_brief_for_message
 from app.services.intent_classifier import classify_intent
 from app.services.permission_center import list_permissions
@@ -46,6 +53,7 @@ _COMPRESSION_ORDER = [
     # Mandatory trusted system context is accounted for last and is never
     # dropped. If a caller supplies an impossibly small budget, lower-trust
     # context is removed first and the safety-floor overage is reported.
+    "persona_context",
     "identity_context",
 ]
 
@@ -174,8 +182,21 @@ def select_context(db, request: schemas.ContextRequest) -> schemas.ContextBundle
         if identity_snapshot is not None
         else None
     )
+    persona_resolved = None
+    persona_brief = None
+    if settings.persona_engine_v2_enabled:
+        persona_resolved = persona_service.resolve_persona(
+            db,
+            request.user_message,
+            tester_id=request.tester_id,
+            context_type=intent.intent,
+            conversation_id=request.conversation_id,
+            project_id=request.project_id,
+        )
+        persona_brief = persona_service.build_persona_brief(persona_resolved)
     bundle = schemas.ContextBundle(
         identity_context=identity_brief.prompt_text if identity_brief else None,
+        persona_context=persona_brief.prompt_text if persona_brief else None,
         cognitive_brief=brief.brief_text if brief else None,
         success_criteria=list(task_understanding.success_criteria_json or []) if task_understanding else [],
         has_missing_knowledge=bool(task_understanding and task_understanding.unknowns_json),
@@ -205,6 +226,12 @@ def select_context(db, request: schemas.ContextRequest) -> schemas.ContextBundle
         bundle._identity_validation_status = identity_snapshot.validation_status
         bundle._identity_context_type = identity_brief.context_type
         bundle._identity_brief_size = identity_brief.size_chars
+    if persona_resolved is not None and persona_brief is not None:
+        bundle._persona_fingerprint = persona_resolved.fingerprint
+        bundle._persona_fallback_used = persona_resolved.fallback_used
+        bundle._persona_context_type = persona_resolved.context_type
+        bundle._persona_brief_size = persona_brief.size_chars
+        bundle._resolved_persona = persona_resolved
 
     for required_type in request.required_context_types:
         if required_type not in _CONTENT_FIELDS:
@@ -285,9 +312,9 @@ def _apply_budget(bundle: schemas.ContextBundle, budget_chars: int) -> None:
         field_chars = _field_chars(bundle, field)
         if field_chars == 0:
             continue
-        if field == "identity_context":
+        if field in {"identity_context", "persona_context"}:
             bundle.excluded_context_summary.append(
-                "identity_context: mandatory safety floor retained beyond requested budget"
+                f"{field}: trusted runtime context retained beyond requested budget"
             )
             continue
         if isinstance(value, list) and value:
@@ -310,6 +337,7 @@ def preview_context(db, request: schemas.ContextRequest) -> schemas.ContextSelec
     included: list[str] = []
     for field in (
         "identity_context",
+        "persona_context",
         "cognitive_brief",
         "memory_brief",
         "conversation_brief",

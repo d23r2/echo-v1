@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app import human_persona, schemas
 from app.config import get_settings
 from app.providers.base import ChatMessage
-from app.services import cognitive_core, context_selector
+from app.services import cognitive_core, context_selector, persona_service
 from app.services import identity_context as identity_context_builder
 from app.services.context_gatherer import GatheredContext, gather_context
 from app.services.intent_classifier import IntentClassification, classify_intent
@@ -128,6 +128,8 @@ def _context_bundle_to_gathered(bundle: schemas.ContextBundle) -> GatheredContex
     metadata — nothing is reconstructed from display strings."""
     return GatheredContext(
         identity_context=bundle.identity_context,
+        persona_context=bundle.persona_context,
+        resolved_persona=bundle._resolved_persona,
         memory_context=[bundle.memory_brief] if bundle.memory_brief else [],
         conversation_context=[bundle.conversation_brief] if bundle.conversation_brief else [],
         goal_context=[bundle.goal_context] if bundle.goal_context else [],
@@ -143,6 +145,13 @@ def _context_bundle_to_gathered(bundle: schemas.ContextBundle) -> GatheredContex
         warnings=[bundle.uncertainty_summary] if bundle.uncertainty_summary else [],
         atlas_citations=list(bundle._atlas_citations),
         gather_result=bundle._gather_result,
+    )
+
+
+def _trusted_persona_context(context: GatheredContext) -> str:
+    """Canonical trusted-prefix order shared by draft/critic/repair passes."""
+    return "\n\n".join(
+        part for part in (context.identity_context, context.persona_context) if part
     )
 
 
@@ -177,6 +186,8 @@ def _build_draft_system_prompt(
     parts = []
     if identity_section:
         parts += [identity_section, ""]
+    if context.persona_context:
+        parts += [context.persona_context, ""]
     parts += [
         human_persona.CHARACTER_CODE,
         "",
@@ -185,9 +196,12 @@ def _build_draft_system_prompt(
         _SOURCE_RULES,
         "Do not include any internal notes, JSON, or debug text in your answer — plain natural-language reply only.",
     ]
-    overlay = _persona_compact_overlay(db, tester_id)
-    if overlay:
-        parts.append(overlay)
+    # Feature-flag rollback keeps the legacy compact overlay intact. The new
+    # PersonaBrief above is the only Part 2C serializer when enabled.
+    if not get_settings().persona_engine_v2_enabled:
+        overlay = _persona_compact_overlay(db, tester_id)
+        if overlay:
+            parts.append(overlay)
     if cognitive_brief_text:
         # ECHO Cognitive Core v1 — internal planning notes only, never
         # repeated verbatim to the user (Phase 13 rules 3/4).
@@ -365,8 +379,9 @@ class LocalIntelligenceEngine:
         prompt = _CRITIC_PROMPT_TEMPLATE.format(
             message=message, draft=draft, context=_context_block(context), answer_style=intent.answer_style, success_criteria_block=success_criteria_block
         )
-        if context.identity_context:
-            prompt = f"{context.identity_context}\n\n{prompt}"
+        trusted = _trusted_persona_context(context)
+        if trusted:
+            prompt = f"{trusted}\n\n{prompt}"
         result = self.model_router.call("critic", prompt, [ChatMessage(role="user", content="Evaluate the draft.")])
         if not result.ok:
             return None
@@ -382,17 +397,24 @@ class LocalIntelligenceEngine:
             answer_style_instruction=_ANSWER_STYLE_INSTRUCTION.get(intent.answer_style, ""),
             source_rules=_SOURCE_RULES,
         )
-        if context.identity_context:
-            prompt = f"{context.identity_context}\n\n{prompt}"
+        trusted = _trusted_persona_context(context)
+        if trusted:
+            prompt = f"{trusted}\n\n{prompt}"
         result = self.model_router.call("reasoning", prompt, [ChatMessage(role="user", content=message)])
         if not result.ok or not result.text.strip():
             return None
         return result.text.strip()
 
-    def _run_style_shorten(self, draft: str, identity_section: str | None = None) -> str | None:
+    def _run_style_shorten(
+        self,
+        draft: str,
+        identity_section: str | None = None,
+        persona_section: str | None = None,
+    ) -> str | None:
         prompt = _STYLE_SHORTEN_PROMPT_TEMPLATE.format(draft=draft)
-        if identity_section:
-            prompt = f"{identity_section}\n\n{prompt}"
+        trusted = "\n\n".join(part for part in (identity_section, persona_section) if part)
+        if trusted:
+            prompt = f"{trusted}\n\n{prompt}"
         result = self.model_router.call("writing", prompt, [ChatMessage(role="user", content="Shorten this.")])
         if not result.ok or not result.text.strip():
             return None
@@ -476,6 +498,7 @@ class LocalIntelligenceEngine:
                     conversation_id=conversation_id,
                     project_id=active_project_id,
                     goal_id=goal_id,
+                    tester_id=tester_id,
                 ),
             )
             context = _context_bundle_to_gathered(bundle)
@@ -506,6 +529,25 @@ class LocalIntelligenceEngine:
                     self.db, identity_context_type or intent.intent
                 )
             )
+
+        resolved_persona = (
+            context.resolved_persona
+            if isinstance(context.resolved_persona, persona_service.ResolvedPersona)
+            else None
+        )
+        if resolved_persona is None:
+            persona_section, _persona_brief, resolved_persona = (
+                persona_service.build_persona_prompt_section(
+                    self.db,
+                    user_message,
+                    tester_id=tester_id,
+                    context_type=identity_context_type or intent.intent,
+                    conversation_id=conversation_id,
+                    project_id=active_project_id,
+                )
+            )
+            if persona_section:
+                context.persona_context = persona_section
 
         # Step 3: model role
         role = _select_role(intent, quality_mode)
@@ -576,7 +618,11 @@ class LocalIntelligenceEngine:
             intent.answer_style == "short" and len(answer) > 400
         )
         if needs_shortening:
-            shortened = self._run_style_shorten(answer, context.identity_context)
+            shortened = self._run_style_shorten(
+                answer,
+                context.identity_context,
+                context.persona_context,
+            )
             if shortened:
                 answer = shortened
                 pipeline_steps.append("style:shortened")
@@ -610,6 +656,14 @@ class LocalIntelligenceEngine:
                 else:
                     gate_reason = "cloud_attempt_failed"
 
+        style_validation_codes: list[str] = []
+        if resolved_persona is not None:
+            validation = persona_service.enforce_response_style(answer, resolved_persona)
+            answer = validation.text
+            style_validation_codes = [item.code for item in validation.violations]
+            if validation.status != "pass":
+                pipeline_steps.append(f"persona_validation:{validation.status}")
+
         via_names = list(context.source_display_names)
 
         return EngineResult(
@@ -632,5 +686,6 @@ class LocalIntelligenceEngine:
                 "critic": critic_diag,
                 "cloud_gate_reason": gate_reason,
                 "local_model_fallback_used": draft.fallback_used,
+                "persona_style_validation": style_validation_codes,
             },
         )

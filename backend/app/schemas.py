@@ -944,9 +944,9 @@ class PersonaSettingsUpdate(BaseModel):
     truthfulness/privacy/safety" rule at the schema level, not just by
     convention."""
 
-    preferred_name: str | None = None
-    allowed_nicknames: list[str] | None = None
-    disliked_names: list[str] | None = None
+    preferred_name: str | None = Field(None, max_length=80)
+    allowed_nicknames: list[str] | None = Field(None, max_length=20)
+    disliked_names: list[str] | None = Field(None, max_length=20)
     formality_level: int | None = Field(None, ge=0, le=5)
     emoji_level: int | None = Field(None, ge=0, le=5)
     asks_followup_questions: FollowupFrequency | None = None
@@ -967,6 +967,16 @@ class PersonaSettingsUpdate(BaseModel):
     voice_mode: VoiceMode | None = None
     tts_enabled: bool | None = None
 
+    @field_validator("allowed_nicknames", "disliked_names")
+    @classmethod
+    def validate_persona_name_lists(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [item.strip() for item in value if item.strip()]
+        if any(len(item) > 80 for item in cleaned):
+            raise ValueError("Names and nicknames must be 80 characters or fewer.")
+        return list(dict.fromkeys(cleaned))
+
 
 class RelationshipProfileOut(BaseModel):
     tester_id: str
@@ -984,12 +994,44 @@ class RelationshipProfileOut(BaseModel):
 
 
 class RelationshipProfileUpdate(BaseModel):
-    relationship_summary: str | None = None
-    working_style_summary: str | None = None
-    trust_notes: str | None = None
-    support_preferences: str | None = None
-    communication_preferences: str | None = None
-    project_preferences: str | None = None
+    relationship_summary: str | None = Field(None, max_length=2000)
+    working_style_summary: str | None = Field(None, max_length=2000)
+    trust_notes: str | None = Field(None, max_length=2000)
+    support_preferences: str | None = Field(None, max_length=2000)
+    communication_preferences: str | None = Field(None, max_length=2000)
+    project_preferences: str | None = Field(None, max_length=2000)
+
+
+class PersonaRuntimeOut(BaseModel):
+    context_type: str
+    tone: str
+    verbosity: str
+    technical_depth: str
+    explanation_order: str
+    response_structure: str
+    humour_level: str
+    sarcasm_level: str
+    emoji_level: str
+    recommendation_style: str
+    correction_style: str
+    proactivity: str
+    cognitive_load: str
+    relationship_role: str
+    voice_first: bool
+    minimal_typing: bool
+    one_step_at_a_time: bool
+    fallback_used: bool
+    suppressed_preference_count: int
+    brief_size_chars: int
+    brief_truncated: bool
+    resolution_version: str
+
+
+class PersonaHealthOut(BaseModel):
+    status: Literal["healthy", "degraded"]
+    fallback_used: bool
+    last_error_type: str | None = None
+    last_resolution_ms: float
 
 
 class ConversationMoodStateOut(BaseModel):
@@ -2156,6 +2198,7 @@ FailureCategory = Literal[
 class OrchestrationRequest(BaseModel):
     task_id: str | None = None
     conversation_id: str | None = None
+    tester_id: str = Field(default="default", exclude=True)
     user_message: str
     task_type: TaskCategory | None = None  # if omitted, classified deterministically from user_message
     required_capabilities: list[str] = Field(default_factory=list)
@@ -2442,6 +2485,9 @@ class ContextRequest(BaseModel):
     project_id: str | None = None
     goal_id: str | None = None
     conversation_id: str | None = None
+    # Lightweight local tester scope, matching ChatRequest/X-Tester-Id. This
+    # is not authentication and is used only for persona preference lookup.
+    tester_id: str = "default"
     required_context_types: list[str] = Field(default_factory=list)
     privacy_level: PrivacyLevel = "local_only"
     freshness_requirement: ContextFreshness = "any"
@@ -2455,6 +2501,9 @@ class ContextBundle(BaseModel):
     # runtime prompt section and identity diagnostics are not exposed as
     # caller-visible context data.
     identity_context: str | None = Field(default=None, exclude=True)
+    # High-priority normalized communication context. Raw settings/memory are
+    # never stored here; excluded from caller-facing serialization.
+    persona_context: str | None = Field(default=None, exclude=True)
     cognitive_brief: str | None = None
     success_criteria: list[str] = Field(default_factory=list)
     has_missing_knowledge: bool = False
@@ -2492,6 +2541,11 @@ class ContextBundle(BaseModel):
     _identity_validation_status: str | None = PrivateAttr(default=None)
     _identity_context_type: str | None = PrivateAttr(default=None)
     _identity_brief_size: int = PrivateAttr(default=0)
+    _persona_fingerprint: str | None = PrivateAttr(default=None)
+    _persona_fallback_used: bool = PrivateAttr(default=False)
+    _persona_context_type: str | None = PrivateAttr(default=None)
+    _persona_brief_size: int = PrivateAttr(default=0)
+    _resolved_persona: object | None = PrivateAttr(default=None)
 
 
 class ContextSelectionPreviewOut(BaseModel):

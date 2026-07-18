@@ -37,6 +37,7 @@ from app.services import orchestration_engine as oe
 from app.services import simulation_engine as sim_engine
 from app.services import systems_thinking as st
 from app.services import task_understanding_v2 as tuv2
+from app.tester import get_tester_id
 
 router = APIRouter(prefix="/api/intelligence", tags=["intelligence"])
 
@@ -531,14 +532,24 @@ def add_plan_resource(plan_id: str, payload: dict, db: Session = Depends(get_db)
 
 
 @router.post("/orchestration/preview", response_model=schemas.OrchestrationPlanOut)
-def preview_orchestration(payload: schemas.OrchestrationRequest, db: Session = Depends(get_db)):
+def preview_orchestration(
+    payload: schemas.OrchestrationRequest,
+    db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
+):
     """Pure policy decision — never calls a model or runs a tool."""
-    return oe.build_plan(db, payload)
+    return oe.build_plan(db, payload.model_copy(update={"tester_id": tester_id}))
 
 
 @router.post("/orchestration/run", response_model=schemas.OrchestrationRunOut)
-def run_orchestration(payload: schemas.OrchestrationRequest, db: Session = Depends(get_db)):
-    return oe.run_orchestration(db, payload)
+def run_orchestration(
+    payload: schemas.OrchestrationRequest,
+    db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
+):
+    return oe.run_orchestration(
+        db, payload.model_copy(update={"tester_id": tester_id})
+    )
 
 
 @router.get("/orchestration/runs/{run_id}", response_model=schemas.OrchestrationRunOut)
@@ -580,18 +591,30 @@ def plan_tools(payload: schemas.ToolPlanRequest):
 
 
 @router.post("/context/select", response_model=schemas.ContextBundle)
-def select_context(payload: schemas.ContextRequest, db: Session = Depends(get_db)):
+def select_context(
+    payload: schemas.ContextRequest,
+    db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
+):
     """The full typed bundle — developer-facing (excluded_context_summary is
     internal diagnostic detail, not hidden reasoning about the answer
     itself). The UI-facing view is /context/preview below."""
-    return context_selector.select_context(db, payload)
+    return context_selector.select_context(
+        db, payload.model_copy(update={"tester_id": tester_id})
+    )
 
 
 @router.post("/context/preview", response_model=schemas.ContextSelectionPreviewOut)
-def preview_context(payload: schemas.ContextRequest, db: Session = Depends(get_db)):
+def preview_context(
+    payload: schemas.ContextRequest,
+    db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
+):
     """What the UI actually shows — categories and sources, never raw
     content (Phase 7's explicit rule)."""
-    return context_selector.preview_context(db, payload)
+    return context_selector.preview_context(
+        db, payload.model_copy(update={"tester_id": tester_id})
+    )
 
 
 @router.post("/goals/review", response_model=schemas.GoalReviewOut)

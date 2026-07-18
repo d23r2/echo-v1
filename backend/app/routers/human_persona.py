@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app import human_persona, schemas
 from app.db import get_db
 from app.models import Conversation, ConversationMoodState, ConversationThreadState
+from app.services import persona_service
 from app.tester import get_tester_id
 
 router = APIRouter(prefix="/api", tags=["human-persona"])
@@ -42,6 +43,7 @@ def reset_persona_settings(db: Session = Depends(get_db), tester_id: str = Depen
     existing = human_persona.get_or_create_persona_settings(db, tester_id)
     db.delete(existing)
     db.commit()
+    persona_service.invalidate_persona_cache(tester_id, reason="settings_reset")
     return human_persona.get_or_create_persona_settings(db, tester_id)
 
 
@@ -56,7 +58,47 @@ def update_relationship_profile(
     db: Session = Depends(get_db),
     tester_id: str = Depends(get_tester_id),
 ):
-    return human_persona.update_relationship_profile(db, tester_id, payload)
+    try:
+        return human_persona.update_relationship_profile(db, tester_id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/persona/runtime", response_model=schemas.PersonaRuntimeOut)
+def get_persona_runtime(
+    context_type: str = Query("general_chat"),
+    conversation_id: str | None = Query(None),
+    db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
+):
+    """Safe resolved-style inspection. No raw memory, prompt, ids, scores,
+    conflict trace, fingerprint, or hidden reasoning is returned."""
+    conversation = _tester_conversation(db, conversation_id, tester_id) if conversation_id else None
+    resolved = persona_service.resolve_persona(
+        db,
+        "",
+        tester_id=tester_id,
+        context_type=context_type,
+        conversation=conversation,
+    )
+    brief = persona_service.build_persona_brief(resolved)
+    return persona_service.get_safe_persona_runtime(resolved, brief)
+
+
+@router.post("/persona/runtime/refresh", response_model=schemas.PersonaRuntimeOut)
+def refresh_persona_runtime(
+    db: Session = Depends(get_db),
+    tester_id: str = Depends(get_tester_id),
+):
+    persona_service.invalidate_persona_cache(tester_id, reason="api_refresh")
+    resolved = persona_service.resolve_persona(db, "", tester_id=tester_id)
+    brief = persona_service.build_persona_brief(resolved)
+    return persona_service.get_safe_persona_runtime(resolved, brief)
+
+
+@router.get("/persona/health", response_model=schemas.PersonaHealthOut)
+def get_persona_health():
+    return persona_service.get_safe_persona_diagnostics()
 
 
 @router.get("/rituals", response_model=list[schemas.PersonalRitualOut])

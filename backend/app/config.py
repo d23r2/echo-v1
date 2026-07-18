@@ -285,6 +285,13 @@ class Settings(BaseSettings):
     core_identity_v1_enabled: bool = True
     core_identity_cache_ttl_seconds: int = 300
 
+    # --- ECHO Layer 3A Part 2C: adaptive communication persona ---
+    # Uses the existing PersonaSettings/RelationshipProfile/Atlas preference
+    # stores.  Disabling this restores the legacy Human Persona prompt overlay
+    # without changing or deleting any persisted preference data.
+    persona_engine_v2_enabled: bool = True
+    persona_cache_ttl_seconds: int = 300
+
     # --- Observability ---
     metrics_enabled: bool = True
     request_logging_enabled: bool = True
@@ -314,6 +321,11 @@ class Settings(BaseSettings):
             problems.append(
                 "core_identity_cache_ttl_seconds cannot be negative, got "
                 f"{self.core_identity_cache_ttl_seconds}"
+            )
+        if self.persona_cache_ttl_seconds < 0:
+            problems.append(
+                "persona_cache_ttl_seconds cannot be negative, got "
+                f"{self.persona_cache_ttl_seconds}"
             )
         return problems
 

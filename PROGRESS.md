@@ -2,6 +2,23 @@
 
 Last check-in: 2026-07-18
 
+## New since 2026-07-18 — ECHO Layer 3A Part 2C: Adaptive Persona Engine
+
+Implemented a provider-neutral, immutable persona resolver and bounded `PersonaBrief` using the
+existing Human Persona settings and reviewed Atlas preferences. The engine separates communication
+style from Core Identity, applies explicit precedence and expiry rules, protects accessibility and
+voice-first needs, normalizes the relationship model, filters secret/sensitive inferred traits,
+caches only safe normalized inputs, and adds deterministic dependency/false-consciousness/prompt-
+leakage response guards. The same trusted brief now reaches ordinary chat, Local Intelligence,
+orchestration, provider fallback/retry, document summaries, and Context Selection v2; a feature flag
+retains the legacy rollback path. All 58 dedicated tests pass, Ruff/compile/focused mypy pass, and
+fresh-database/startup verification is clean. The final combined worktree is YELLOW because
+simultaneous self-modification work advanced schema v8 to v9 without updating one identity test and
+imports a not-yet-created frontend `SelfModificationView`; details and proof are in
+[ECHO_LAYER_3A_PART2C_PERSONA_ENGINE_REPORT.md](ECHO_LAYER_3A_PART2C_PERSONA_ENGINE_REPORT.md), with
+the design in
+[ECHO_LAYER_3A_PART2C_PERSONA_ENGINE_ARCHITECTURE.md](ECHO_LAYER_3A_PART2C_PERSONA_ENGINE_ARCHITECTURE.md).
+
 ## New since 2026-07-18 — ECHO Layer 3A Part 2B: Identity Runtime and Prompt Integration
 
 Implemented the runtime boundary on top of Part 2A: validated frozen identity snapshots, stable
@@ -766,9 +783,10 @@ not just a scaffold.
 - Static import-resolution check passed (no broken relative imports, 2026-07-09).
 
 ## Gaps / next up (working priority order)
-1. Review and begin Layer 3A Part 2C: Persona Engine, Communication Style, Relationship Model,
-   Accessibility Adaptation, and User Preference Integration. Keep operational identity, global
-   safety invariants, and user-specific preferences as separate sources.
+1. Reconcile the simultaneous self-modification work's stale schema-v8 identity assertion and
+   missing `SelfModificationView`, then review Part 2C and begin Layer 3A Part 2D API and integration
+   hardening. Keep operational identity, global safety invariants, and user-specific preferences as
+   separate sources.
 2. Polish pass: loading/error states, mobile responsiveness check, empty-state copy.
    (Partially underway — mobile hamburger drawer landed 2026-07-11, sidebar redesign +
    new Search/Library/Schedule pages landed 2026-07-13 — but not complete.)

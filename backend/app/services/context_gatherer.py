@@ -41,6 +41,12 @@ class GatheredContext:
     # rendered inside the untrusted CONTEXT block. Local prompt composition
     # places it before all retrieved/user-controlled material.
     identity_context: str | None = None
+    # Part 2C normalized communication guidance. Like identity_context this
+    # is rendered before the untrusted CONTEXT block and excluded by as_dict.
+    persona_context: str | None = None
+    # Internal immutable Part 2C value used by response validation. It is
+    # never serialized or copied into a prompt directly.
+    resolved_persona: object | None = None
     memory_context: list[str] = field(default_factory=list)
     project_context: list[str] = field(default_factory=list)
     task_context: list[str] = field(default_factory=list)

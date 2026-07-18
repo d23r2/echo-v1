@@ -52,6 +52,20 @@ const RITUAL_LABELS: Record<RitualType, string> = {
   study_session_start: "Study session start",
 };
 
+const HUMOUR_LABELS = ["Off", "Very low", "Restrained", "Moderate", "Playful", "High"];
+const SARCASM_LABELS = ["Off", "Very low", "Dry", "Light", "Moderate", "High"];
+const PROACTIVITY_LABELS = ["Reactive", "Low", "Balanced", "Proactive", "Highly proactive"];
+const FORMALITY_LABELS = ["Very casual", "Casual", "Neutral", "Professional", "Formal", "Very formal"];
+const EMOJI_LABELS = ["None", "Rare", "Low", "Moderate", "Frequent", "High"];
+const RECOMMENDATION_LABELS = [
+  "Only when asked",
+  "Rare",
+  "When useful",
+  "Clear when relevant",
+  "Proactive",
+  "Direct when it matters",
+];
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
@@ -62,7 +76,17 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function Slider({ value, onChange, max = 5 }: { value: number; onChange: (v: number) => void; max?: number }) {
+function Slider({
+  value,
+  onChange,
+  max = 5,
+  valueLabel,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  max?: number;
+  valueLabel: string;
+}) {
   return (
     <div className="flex items-center gap-3">
       <input
@@ -73,7 +97,7 @@ function Slider({ value, onChange, max = 5 }: { value: number; onChange: (v: num
         onChange={(e) => onChange(Number(e.target.value))}
         className="w-full accent-accent"
       />
-      <span className="w-6 text-right text-sm text-zinc-400">{value}</span>
+      <span className="min-w-28 text-right text-sm text-zinc-300">{valueLabel}</span>
     </div>
   );
 }
@@ -249,11 +273,19 @@ export default function PersonalityView() {
       </Section>
 
       <Section title="Human-like Style">
-        <Field label={`Humour (${settings.humour_level}/5)`}>
-          <Slider value={settings.humour_level} onChange={(v) => void patch({ humour_level: v })} />
+        <Field label="Humour" hint="Automatically removed for serious or sensitive topics.">
+          <Slider
+            value={settings.humour_level}
+            valueLabel={HUMOUR_LABELS[settings.humour_level]}
+            onChange={(v) => void patch({ humour_level: v })}
+          />
         </Field>
-        <Field label={`Sarcasm / dry wit (${settings.sarcasm_level}/5)`}>
-          <Slider value={settings.sarcasm_level} onChange={(v) => void patch({ sarcasm_level: v })} />
+        <Field label="Sarcasm / dry wit">
+          <Slider
+            value={settings.sarcasm_level}
+            valueLabel={SARCASM_LABELS[settings.sarcasm_level]}
+            onChange={(v) => void patch({ sarcasm_level: v })}
+          />
         </Field>
         <label className="flex items-center gap-2 text-sm text-zinc-300">
           <input
@@ -297,8 +329,13 @@ export default function PersonalityView() {
             <option value="exhaustive">Exhaustive</option>
           </select>
         </Field>
-        <Field label={`Proactivity (${settings.proactivity_level}/4)`} hint="How often ECHO offers a next-step suggestion. Never more than one per reply.">
-          <Slider value={settings.proactivity_level} onChange={(v) => void patch({ proactivity_level: v })} max={4} />
+        <Field label="Proactivity" hint="How often ECHO offers a next-step suggestion. Never implies permission to act.">
+          <Slider
+            value={settings.proactivity_level}
+            valueLabel={PROACTIVITY_LABELS[settings.proactivity_level]}
+            onChange={(v) => void patch({ proactivity_level: v })}
+            max={4}
+          />
         </Field>
       </Section>
 
@@ -325,11 +362,19 @@ export default function PersonalityView() {
             className={inputClass}
           />
         </Field>
-        <Field label={`Formality (${settings.formality_level}/5)`}>
-          <Slider value={settings.formality_level} onChange={(v) => void patch({ formality_level: v })} />
+        <Field label="Formality">
+          <Slider
+            value={settings.formality_level}
+            valueLabel={FORMALITY_LABELS[settings.formality_level]}
+            onChange={(v) => void patch({ formality_level: v })}
+          />
         </Field>
-        <Field label={`Emoji (${settings.emoji_level}/5)`}>
-          <Slider value={settings.emoji_level} onChange={(v) => void patch({ emoji_level: v })} />
+        <Field label="Emoji use">
+          <Slider
+            value={settings.emoji_level}
+            valueLabel={EMOJI_LABELS[settings.emoji_level]}
+            onChange={(v) => void patch({ emoji_level: v })}
+          />
         </Field>
         <Field label="Follow-up questions">
           <select
@@ -380,8 +425,12 @@ export default function PersonalityView() {
       </Section>
 
       <Section title="Opinion Style">
-        <Field label={`How readily ECHO gives recommendations (${settings.recommendation_strength}/5)`}>
-          <Slider value={settings.recommendation_strength} onChange={(v) => void patch({ recommendation_strength: v })} />
+        <Field label="Recommendation style" hint="Recommendations never imply permission to take an action.">
+          <Slider
+            value={settings.recommendation_strength}
+            valueLabel={RECOMMENDATION_LABELS[settings.recommendation_strength]}
+            onChange={(v) => void patch({ recommendation_strength: v })}
+          />
         </Field>
         <Field label="Disagreement style">
           <select
@@ -398,7 +447,7 @@ export default function PersonalityView() {
 
       <Section
         title="Relationship Memory"
-        description="How ECHO remembers working with you specifically. Directly editable — never silently written from chat."
+        description="Optional collaboration preferences only. They cannot make ECHO claim feelings, dependency, consciousness, or blind agreement, and are never silently written from chat."
       >
         {!editingRelationship ? (
           <>
