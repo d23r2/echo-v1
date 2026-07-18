@@ -2,6 +2,28 @@
 
 Last check-in: 2026-07-18
 
+## New since 2026-07-18 (yet even later) — ECHO Layer 3A Part 1: Core Identity and Moral Compass — Architecture Audit
+
+**Audit and design only — no production code, no schema changes, no commit.** Five parallel research
+passes plus direct code reads confirmed the repository already has a live, tested (47/47) Constitution
+and Guardian Council governance system (`backend/app/constitution.py`, `council.py`) — ranked
+`CORE_VALUES`, 5 immutable `VALUE_INVARIANTS`, a deterministic amendment classifier — that's already
+the first section of every system prompt across every provider. `CLAUDE.md`'s description of this as
+not-yet-built is stale (predates Layer 0). The real gap: this Constitution reaches exactly one call
+path (ordinary chat via `persona.build_system_prompt()`) and is confirmed absent from the Multi-Model
+Orchestrator's `simple` stage-profile, welcome-message prompts, and the entire Decision/Planning/Goal
+pipeline — closing that reach gap is Part 2's top priority. A second, smaller pre-existing gap was
+found: `chat_actions.py`'s chat-typed create commands bypass the Permission Center entirely. Full
+25-item threat model, an 8-tier precedence model (modeled on the Constitution's own amendment-classifier
+pattern), a 9-entity domain model (two of the brief's suggested entities — `UserValueRevision`,
+`PolicyDefinition` — were rejected in favor of reusing `MemoryRevision` and the existing Constitution/
+`OrchestrationPolicy`, respectively), a 5-migration additive schema plan (v7→v12), and a Parts 2-5
+sequencing plan. Baseline: 1296/1296 backend tests, clean lint/typecheck/build. **Final status: GREEN**
+— ready for Part 2 once reviewed. See
+[ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md](../ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md)
+and
+[ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_REPORT.md](../ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_REPORT.md).
+
 ## New since 2026-07-18 (even later) — ECHO Layer 2E: Goal Manager, Context Selection v2, and Intelligence Center
 
 **Final Layer 2 milestone.** 1296 backend tests passing (63 new), frontend build/typecheck clean,
