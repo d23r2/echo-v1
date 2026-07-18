@@ -176,6 +176,48 @@ def list_feature_flags(settings: Settings, db: Session | None = None) -> list[Fe
     flags.append(_flag("windows_support", "Windows app", True, source="default", user_facing=False))
     flags.append(_flag("developer_mode", "Developer mode", settings.developer_mode, developer_only=True))
     flags.append(_flag("advanced_navigation", "Advanced navigation", True, source="runtime_setting"))
+    flags.append(
+        _flag(
+            "supervised_self_modification",
+            "Supervised self-modification",
+            settings.supervised_self_modification_enabled,
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
+            "self_modification_sandbox",
+            "Self-modification sandbox execution",
+            settings.self_modification_sandbox_enabled,
+            dependency_ok=settings.supervised_self_modification_enabled,
+            unavailable_reason=None if settings.supervised_self_modification_enabled else "requires supervised_self_modification",
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
+            "self_modification_deployment",
+            "Self-modification local-branch deployment",
+            settings.self_modification_deployment_enabled,
+            dependency_ok=settings.supervised_self_modification_enabled and settings.self_modification_sandbox_enabled,
+            unavailable_reason=None
+            if (settings.supervised_self_modification_enabled and settings.self_modification_sandbox_enabled)
+            else "requires supervised_self_modification and self_modification_sandbox",
+            restart_required=True,
+            developer_only=True,
+        )
+    )
+    flags.append(
+        _flag(
+            "self_modification_frontend",
+            "Self-modification governance UI",
+            settings.self_modification_frontend_enabled,
+            restart_required=True,
+            developer_only=True,
+        )
+    )
 
     return flags
 

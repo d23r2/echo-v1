@@ -21,6 +21,7 @@ import ProjectsView from "./components/projects/ProjectsView";
 import ReleaseManagerView from "./components/releases/ReleaseManagerView";
 import ScheduleView from "./components/schedule/ScheduleView";
 import SelfImprovementView from "./components/SelfImprovementView";
+import SelfModificationView from "./components/self-modification/SelfModificationView";
 import SettingsView from "./components/settings/SettingsView";
 import TasksView from "./components/tasks/TasksView";
 import ToolCenterView from "./components/tools/ToolCenterView";
@@ -87,6 +88,7 @@ export default function App() {
           {view === "constitution" && <ConstitutionView />}
           {view === "amendments" && <AmendmentsView />}
           {view === "self-improvement" && <SelfImprovementView />}
+          {view === "self-modification" && <SelfModificationView />}
           {view === "settings" && <SettingsView />}
         </main>
       </div>

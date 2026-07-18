@@ -122,6 +122,42 @@ DEFAULT_PERMISSIONS: list[dict] = [
         "risk_level": "destructive",
         "description": "Archiving or deleting a project, task, knowledge item, or memory. Always soft-archive, never a hard delete, regardless of this setting.",
     },
+    {
+        "key": "self_modification_propose",
+        "level": "allowed",
+        "risk_level": "low",
+        "description": "Drafting a supervised self-modification proposal or submitting a patch revision for review. Creates database rows only — no file on disk is touched by this step.",
+    },
+    {
+        "key": "self_modification_sandbox_run",
+        "level": "ask_first",
+        "risk_level": "high",
+        "description": "Running a self-modification proposal's patch and verification checks inside an isolated git worktree sandbox. Also requires SELF_MODIFICATION_SANDBOX_ENABLED.",
+    },
+    {
+        "key": "self_modification_approve",
+        "level": "ask_first",
+        "risk_level": "high",
+        "description": "Recording an explicit simulated-human review decision for one exact patch hash. Approval wording is verified again by the self-modification governance service.",
+    },
+    {
+        "key": "self_modification_deploy",
+        "level": "disabled",
+        "risk_level": "destructive",
+        "description": "Applying an approved self-modification patch to an isolated local branch. Disabled by default — also requires SELF_MODIFICATION_DEPLOYMENT_ENABLED, which is off by default and out of scope for production deployment entirely.",
+    },
+    {
+        "key": "self_modification_rollback",
+        "level": "allowed",
+        "risk_level": "high",
+        "description": "Removing a self-modification deployment worktree and its isolated local branch. Remains available while the kill switch is active.",
+    },
+    {
+        "key": "self_modification_kill_switch",
+        "level": "ask_first",
+        "risk_level": "destructive",
+        "description": "Activating or resetting the self-modification emergency stop. Reset is Founder-only and requires a reason; role labels are simulated in this single-user app.",
+    },
 ]
 
 _DEFAULTS_BY_KEY = {p["key"]: p for p in DEFAULT_PERMISSIONS}

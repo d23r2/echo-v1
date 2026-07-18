@@ -194,7 +194,9 @@ def test_existing_chat_action_endpoints_still_reachable():
     with TestClient(app) as client:
         response = client.get("/api/system/version")
         assert response.status_code == 200
-        assert response.json()["schema_version"] == 8
+        from app.db import CURRENT_SCHEMA_VERSION
+
+        assert response.json()["schema_version"] == CURRENT_SCHEMA_VERSION
 
 
 def test_existing_goals_endpoint_still_works():

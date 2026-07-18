@@ -292,6 +292,28 @@ class Settings(BaseSettings):
     persona_engine_v2_enabled: bool = True
     persona_cache_ttl_seconds: int = 300
 
+    # --- ECHO Layer 3A Part 2D: Supervised Self-Modification ---
+    # All four default OFF (unlike Part 2A/2C above) — this milestone adds a
+    # workflow that can, if fully enabled, apply a patch to an isolated local
+    # git branch. That is a materially different risk category from "new
+    # tables nothing reads yet", so every layer of it opts in explicitly:
+    #   - supervised_self_modification_enabled gates execution and approval.
+    #     Proposal authoring, deterministic checks, and read-only review remain
+    #     available while off so a review package can be prepared safely.
+    #   - self_modification_sandbox_enabled separately gates actually running
+    #     subprocess verification inside a sandbox worktree.
+    #   - self_modification_deployment_enabled separately gates the final
+    #     apply-to-local-branch step. Production deployment is out of scope
+    #     for this milestone entirely — there is no flag that reaches it.
+    #   - self_modification_frontend_enabled gates the review UI, left off
+    #     until the backend has been independently verified.
+    supervised_self_modification_enabled: bool = False
+    self_modification_sandbox_enabled: bool = False
+    self_modification_deployment_enabled: bool = False
+    self_modification_frontend_enabled: bool = False
+    self_modification_approval_expiry_hours: int = 24
+    self_modification_sandbox_image: str = "echo-selfmod-sandbox:local"
+
     # --- Observability ---
     metrics_enabled: bool = True
     request_logging_enabled: bool = True

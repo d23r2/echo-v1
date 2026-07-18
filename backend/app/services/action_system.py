@@ -324,6 +324,66 @@ def _handle_delete_archive_data(db: Session, input: dict) -> dict:
     return {"kind": kind, "id": item_id, "archived": True}
 
 
+def _handle_selfmod_propose(db: Session, input: dict) -> dict:
+    """Model-callable only for proposal metadata; never accepts/applies a patch."""
+    from app.services import self_modification_governance as governance
+
+    proposal = governance.create_proposal(
+        db,
+        title=input.get("title") or "",
+        description=input.get("description") or "",
+        rationale=input.get("rationale") or "",
+        proposed_by="echo",
+    )
+    return {"proposal_id": proposal.id, "status": proposal.status}
+
+
+def _handle_selfmod_sandbox(db: Session, input: dict) -> dict:
+    from app.services import self_modification_governance as governance
+
+    proposal_id = input.get("proposal_id")
+    if not proposal_id:
+        raise ValueError("A proposal_id is required.")
+    execution = governance.run_sandbox(db, proposal_id, confirmed=True)
+    return {"proposal_id": proposal_id, "execution_id": execution.id, "status": execution.status}
+
+
+def _handle_selfmod_request_review(db: Session, input: dict) -> dict:
+    from app.services import self_modification_governance as governance
+
+    proposal_id = input.get("proposal_id")
+    if not proposal_id:
+        raise ValueError("A proposal_id is required.")
+    proposal = governance.request_review(db, proposal_id)
+    return {"proposal_id": proposal.id, "status": proposal.status}
+
+
+def _handle_selfmod_deploy(db: Session, input: dict) -> dict:
+    from app.services import self_modification_governance as governance
+
+    proposal_id = input.get("proposal_id")
+    if not proposal_id:
+        raise ValueError("A proposal_id is required.")
+    attempt = governance.deploy(db, proposal_id, confirmed=True)
+    return {
+        "proposal_id": proposal_id,
+        "deployment_attempt_id": attempt.id,
+        "status": attempt.status,
+        "branch_name": attempt.branch_name,
+    }
+
+
+def _handle_selfmod_rollback(db: Session, input: dict) -> dict:
+    from app.services import self_modification_governance as governance
+
+    proposal_id = input.get("proposal_id")
+    reason = (input.get("reason") or "").strip()
+    if not proposal_id or not reason:
+        raise ValueError("proposal_id and reason are required.")
+    event = governance.rollback(db, proposal_id, reason=reason)
+    return {"proposal_id": proposal_id, "rollback_event_id": event.id, "status": event.status}
+
+
 # ============================================================================
 # Registry
 # ============================================================================
@@ -362,6 +422,50 @@ ACTIONS: dict[str, ActionSpec] = {
             _handle_delete_archive_data,
             requires_confirmation=True,
             permission_key="delete_archive_data",
+        ),
+        ActionSpec(
+            "self_modification_propose",
+            "Create a proposal record with structured engineering rationale; never applies code.",
+            "governance",
+            "low",
+            _handle_selfmod_propose,
+            permission_key="self_modification_propose",
+        ),
+        ActionSpec(
+            "self_modification_sandbox_run",
+            "Run the active exact patch through the isolated, allowlisted sandbox checks.",
+            "governance",
+            "high",
+            _handle_selfmod_sandbox,
+            requires_confirmation=True,
+            permission_key="self_modification_sandbox_run",
+        ),
+        ActionSpec(
+            "self_modification_request_review",
+            "Move a sandbox-passed proposal to explicit human review.",
+            "governance",
+            "medium",
+            _handle_selfmod_request_review,
+            requires_confirmation=True,
+            permission_key="self_modification_propose",
+        ),
+        ActionSpec(
+            "self_modification_deploy",
+            "Apply an approved exact patch only to a new isolated local branch; never merge or push.",
+            "governance",
+            "destructive",
+            _handle_selfmod_deploy,
+            requires_confirmation=True,
+            permission_key="self_modification_deploy",
+        ),
+        ActionSpec(
+            "self_modification_rollback",
+            "Remove the isolated local deployment worktree and branch.",
+            "governance",
+            "high",
+            _handle_selfmod_rollback,
+            requires_confirmation=True,
+            permission_key="self_modification_rollback",
         ),
     ]
 }

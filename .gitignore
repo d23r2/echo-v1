@@ -49,6 +49,11 @@ frontend/src-tauri/target/release/bundle/
 frontend/.vite/
 backend/data/backups/
 
+# ECHO Layer 3A Part 2D — self-modification sandbox/deploy git worktrees.
+# Created and torn down by self_modification_sandbox.py; never meant to be
+# committed or to show up as noise in `git status`.
+.self_mod_sandboxes/
+
 # Review/export bundles — never meant to be committed
 *.zip
 

@@ -493,6 +493,201 @@ export interface FeatureAvailability {
 
 export const getFeatureAvailability = () => request<FeatureAvailability>("/api/features");
 
+// ---- Layer 3A Part 2D: supervised self-modification governance ----
+export type SelfModRisk = "low" | "moderate" | "high" | "critical";
+
+export interface SelfModProposal {
+  id: string;
+  title: string;
+  description: string;
+  rationale: string;
+  proposed_by: string;
+  status: string;
+  risk_level: SelfModRisk;
+  target_branch: string;
+  base_commit: string | null;
+  active_revision_id: string | null;
+  closed_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SelfModRevision {
+  id: string;
+  proposal_id: string;
+  revision_number: number;
+  patch_text: string;
+  patch_hash: string;
+  changed_paths: string[];
+  scope_check_status: string;
+  scope_check_notes: string | null;
+  compliance_check_status: string;
+  compliance_check_notes: string | null;
+  created_at: string;
+}
+
+export interface SelfModImpact {
+  summary: string;
+  affected_subsystems: string[];
+  risk_level: SelfModRisk;
+  touches_protected_paths: boolean;
+  touches_protected_symbols: boolean;
+}
+
+export interface SelfModCheckEvidence {
+  command: string;
+  phase?: "baseline" | "patched";
+  status: string;
+  exit_code: number | null;
+  stdout_summary: string;
+  stderr_summary: string;
+  timestamp: string;
+}
+
+export interface SelfModSandboxExecution {
+  id: string;
+  revision_id: string;
+  status: string;
+  workspace_path: string | null;
+  sandbox_type: string;
+  runner_image: string | null;
+  network_disabled: boolean;
+  started_at: string | null;
+  completed_at: string | null;
+  summary: string | null;
+  created_at: string;
+}
+
+export interface SelfModVerification {
+  id: string;
+  sandbox_execution_id: string;
+  checks_json: SelfModCheckEvidence[];
+  status: string;
+  summary: string;
+  created_at: string;
+}
+
+export interface SelfModApproval {
+  id: string;
+  revision_id: string;
+  approver_role: string;
+  decision: "approved" | "rejected";
+  patch_hash_at_approval: string;
+  target_at_approval: string;
+  test_evidence_summary: string;
+  acknowledgement_text: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface SelfModAuditEvent {
+  id: string;
+  event_type: string;
+  actor_role: string;
+  summary: string;
+  safe_context_json: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface SelfModHealth {
+  supervised_self_modification_enabled: boolean;
+  self_modification_sandbox_enabled: boolean;
+  self_modification_deployment_enabled: boolean;
+  self_modification_frontend_enabled: boolean;
+  kill_switch_active: boolean;
+  open_proposal_count: number;
+  awaiting_review_count: number;
+  sandbox_runner: string;
+  sandbox_runner_available: boolean;
+  network_isolation_enforced: boolean;
+  sandbox_image: string;
+}
+
+export interface SelfModKillSwitch {
+  active: boolean;
+  activated_at: string | null;
+  activated_by: string | null;
+  reason: string | null;
+  reset_at: string | null;
+  reset_by: string | null;
+}
+
+export interface SelfModPolicy {
+  allowed_path_prefixes: string[];
+  dependency_paths: string[];
+  protected_paths: string[];
+  protected_path_prefixes: string[];
+  protected_symbols: string[];
+  risk_levels: SelfModRisk[];
+  critical_proposals_blocked: boolean;
+  approval_expiry_hours: number;
+}
+
+export const getSelfModHealth = () => request<SelfModHealth>("/api/self-modification/health");
+export const getSelfModPolicy = () => request<SelfModPolicy>("/api/self-modification/policy");
+export const getSelfModKillSwitch = () => request<SelfModKillSwitch>("/api/self-modification/kill-switch");
+export const listSelfModProposals = () => request<SelfModProposal[]>("/api/self-modification");
+export const createSelfModProposal = (payload: {
+  title: string;
+  description: string;
+  rationale: string;
+  proposed_by?: string;
+}) => request<SelfModProposal>("/api/self-modification", { method: "POST", body: JSON.stringify(payload) });
+export const listSelfModRevisions = (proposalId: string) =>
+  request<SelfModRevision[]>(`/api/self-modification/${proposalId}/revisions`);
+export const submitSelfModRevision = (proposalId: string, patchText: string) =>
+  request<SelfModRevision>(`/api/self-modification/${proposalId}/revisions`, {
+    method: "POST",
+    body: JSON.stringify({ patch_text: patchText }),
+  });
+export const runSelfModScopeCheck = (revisionId: string) =>
+  request<SelfModRevision>(`/api/self-modification/revisions/${revisionId}/scope-check`, { method: "POST" });
+export const runSelfModComplianceCheck = (revisionId: string) =>
+  request<SelfModRevision>(`/api/self-modification/revisions/${revisionId}/compliance-check`, { method: "POST" });
+export const getSelfModImpact = (revisionId: string) =>
+  request<SelfModImpact | null>(`/api/self-modification/revisions/${revisionId}/impact-assessment`);
+export const markSelfModReady = (proposalId: string) =>
+  request<SelfModProposal>(`/api/self-modification/${proposalId}/ready-for-sandbox`, { method: "POST" });
+export const runSelfModSandbox = (proposalId: string, actorRole: string) =>
+  request<SelfModSandboxExecution>(`/api/self-modification/${proposalId}/sandbox`, {
+    method: "POST",
+    body: JSON.stringify({ confirmed: true, actor_role: actorRole }),
+  });
+export const listSelfModSandboxExecutions = (proposalId: string) =>
+  request<SelfModSandboxExecution[]>(`/api/self-modification/${proposalId}/sandbox-executions`);
+export const getSelfModVerification = (executionId: string) =>
+  request<SelfModVerification | null>(`/api/self-modification/sandbox-executions/${executionId}/verification`);
+export const requestSelfModReview = (proposalId: string) =>
+  request<SelfModProposal>(`/api/self-modification/${proposalId}/request-review`, { method: "POST" });
+export const decideSelfModProposal = (
+  proposalId: string,
+  payload: { approver_role: string; decision: "approved" | "rejected"; test_evidence_summary: string; acknowledgement_text?: string }
+) => request<SelfModApproval>(`/api/self-modification/${proposalId}/approve`, {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
+export const listSelfModApprovals = (proposalId: string) =>
+  request<SelfModApproval[]>(`/api/self-modification/${proposalId}/approvals`);
+export const deploySelfModProposal = (proposalId: string, actorRole: string) =>
+  request(`/api/self-modification/${proposalId}/deploy`, {
+    method: "POST",
+    body: JSON.stringify({ confirmed: true, actor_role: actorRole }),
+  });
+export const rollbackSelfModProposal = (proposalId: string, reason: string) =>
+  request(`/api/self-modification/${proposalId}/rollback?reason=${encodeURIComponent(reason)}`, { method: "POST" });
+export const listSelfModAudit = (proposalId: string) =>
+  request<SelfModAuditEvent[]>(`/api/self-modification/${proposalId}/audit`);
+export const activateSelfModKillSwitch = (activatedBy: string, reason: string) =>
+  request<SelfModKillSwitch>("/api/self-modification/kill-switch/activate", {
+    method: "POST",
+    body: JSON.stringify({ activated_by: activatedBy, reason }),
+  });
+export const resetSelfModKillSwitch = (reason: string) =>
+  request<SelfModKillSwitch>("/api/self-modification/kill-switch/reset", {
+    method: "POST",
+    body: JSON.stringify({ activated_by: "founder", reason }),
+  });
+
 export interface ConversationSearchResult {
   conversation_id: string;
   title: string;

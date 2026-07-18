@@ -1,6 +1,26 @@
 # ECHO (formerly God Tear AI Brain) — Progress Log
 
-Last check-in: 2026-07-18
+Last check-in: 2026-07-19
+
+## New since 2026-07-19 — ECHO Layer 3A Part 2D: Supervised Self-Modification
+
+Implemented a fail-closed proposal → sandbox → human-approve → (optional, local-only) apply → rollback
+workflow, letting Echo draft and evaluate an exact code patch without ever approving, merging, or
+deploying it itself. Claude Code built the initial domain model (11 new tables, schema v10), the
+governance service, a git-worktree sandbox, and the router/test suite; Codex then continued that same
+uncommitted work with real security hardening — a Docker execution boundary (`--network none`,
+`--cap-drop ALL`, non-root, a fixed no-shell command dispatcher with a from-scratch environment),
+default-deny path allowlisting plus protected-symbol detection, patch secret/test-weakening scanning,
+self-approval prevention, and deploy-time re-verification against five independent snapshotted
+fingerprints (hash, base commit, target, scope, and both the scope-policy and Constitution
+fingerprints) — and built the review frontend. Claude Code then independently re-verified the combined
+result, found and fixed three real issues surfaced only by running the full suite (a stale hardcoded
+schema-version assertion, an unrelated Part 2C persona test, and a missing `"governance"` action
+category in a response schema), and confirmed live against a real disposable repository that
+deployment and rollback never touch the primary working tree. Full suite: **1588/1588 passed**, Ruff
+clean, frontend typecheck/build clean. All four feature flags default off; nothing was committed. See
+[ECHO_LAYER_3A_PART2D_SELF_MODIFICATION_ARCHITECTURE.md](ECHO_LAYER_3A_PART2D_SELF_MODIFICATION_ARCHITECTURE.md)
+and [ECHO_LAYER_3A_PART2D_SELF_MODIFICATION_REPORT.md](ECHO_LAYER_3A_PART2D_SELF_MODIFICATION_REPORT.md).
 
 ## New since 2026-07-18 — ECHO Layer 3A Part 2C: Adaptive Persona Engine
 

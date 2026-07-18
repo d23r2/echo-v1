@@ -23,6 +23,7 @@ export type View =
   | "constitution"
   | "amendments"
   | "self-improvement"
+  | "self-modification"
   | "settings";
 
 // ECHO Interface Simplification v1 — the default sidebar shows only these 6
@@ -74,6 +75,7 @@ export const ADVANCED_NAV_GROUPS: { label: string; items: { id: View; label: str
     items: [
       { id: "constitution", label: "Constitution", icon: "📜" },
       { id: "amendments", label: "Amendments", icon: "⚖️" },
+      { id: "self-modification", label: "Self-Modification", icon: "🧬" },
     ],
   },
 ];

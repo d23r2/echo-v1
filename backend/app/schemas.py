@@ -1142,7 +1142,8 @@ class _UtcAssumingModel(BaseModel):
 RiskLevel = Literal["low", "medium", "high", "destructive"]
 ActionRunStatus = Literal["pending", "approved", "running", "completed", "failed", "cancelled"]
 ActionCategory = Literal[
-    "memory", "task", "project", "schedule", "library", "web", "file", "report", "release", "system", "voice", "camera"
+    "memory", "task", "project", "schedule", "library", "web", "file", "report", "release", "system", "voice", "camera",
+    "governance",
 ]
 
 
@@ -2710,4 +2711,195 @@ class IdentityActivationResult(BaseModel):
     previous_active_id: str | None
     profile_key: str
     version_number: int
-    activated_at: datetime
+
+
+# ---- ECHO Layer 3A Part 2D: Supervised Self-Modification ----
+SelfModRiskLevel = Literal["low", "moderate", "high", "critical"]
+SelfModProposalStatus = Literal[
+    "draft", "scope_check_failed", "compliance_check_failed", "revision_required",
+    "ready_for_sandbox", "sandbox_running", "sandbox_failed", "sandbox_passed",
+    "awaiting_human_review", "approved", "rejected", "approval_expired",
+    "deployment_queued", "deploying", "deployed", "post_deployment_failed",
+    "rollback_required", "rolling_back", "rolled_back", "closed", "cancelled",
+]
+SelfModCheckStatus = Literal["pending", "passed", "failed"]
+SelfModComplianceStatus = Literal["pending", "passed", "failed", "needs_human_review"]
+SelfModSandboxStatus = Literal["pending", "running", "passed", "failed", "error"]
+SelfModDeploymentStatus = Literal["queued", "running", "deployed", "failed"]
+SelfModRollbackStatus = Literal["pending", "running", "completed", "failed"]
+
+
+class SelfModProposalCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=160)
+    description: str = Field(min_length=1, max_length=4000)
+    rationale: str = Field(min_length=1, max_length=12000)
+    proposed_by: Literal["echo", "founder", "guardian_a", "guardian_b", "guardian_c", "verifier"] = "echo"
+
+
+class SelfModRevisionCreate(BaseModel):
+    patch_text: str = Field(min_length=1, max_length=512_000)
+
+
+class SelfModOperationConfirmation(BaseModel):
+    confirmed: Literal[True]
+    actor_role: Literal["founder", "guardian_a", "guardian_b", "guardian_c", "verifier"]
+
+
+class SelfModProposalOut(_UtcAssumingModel):
+    id: str
+    title: str
+    description: str
+    rationale: str
+    proposed_by: str
+    status: SelfModProposalStatus
+    risk_level: SelfModRiskLevel
+    target_branch: str
+    base_commit: str | None
+    active_revision_id: str | None
+    closed_reason: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class SelfModRevisionOut(_UtcAssumingModel):
+    id: str
+    proposal_id: str
+    revision_number: int
+    patch_text: str
+    patch_hash: str
+    changed_paths: list[str]
+    scope_check_status: SelfModCheckStatus
+    scope_check_notes: str | None
+    compliance_check_status: SelfModComplianceStatus
+    compliance_check_notes: str | None
+    created_at: datetime
+
+
+class SelfModImpactAssessmentOut(_UtcAssumingModel):
+    id: str
+    revision_id: str
+    summary: str
+    affected_subsystems: list[str]
+    risk_level: SelfModRiskLevel
+    touches_protected_paths: bool
+    touches_protected_symbols: bool
+    created_at: datetime
+
+
+class SelfModComplianceCheckOut(_UtcAssumingModel):
+    id: str
+    revision_id: str
+    status: Literal["allowed", "blocked", "needs_human_review"]
+    implicated_invariants: list[str]
+    reasons: list[str]
+    created_at: datetime
+
+
+class SelfModSandboxExecutionOut(_UtcAssumingModel):
+    id: str
+    revision_id: str
+    status: SelfModSandboxStatus
+    workspace_path: str | None
+    sandbox_type: str
+    runner_image: str | None
+    network_disabled: bool
+    started_at: datetime | None
+    completed_at: datetime | None
+    summary: str | None
+    created_at: datetime
+
+
+class SelfModVerificationRunOut(_UtcAssumingModel):
+    id: str
+    sandbox_execution_id: str
+    checks_json: list[dict]
+    status: Literal["passed", "failed", "unavailable"]
+    summary: str
+    created_at: datetime
+
+
+class SelfModApprovalCreate(BaseModel):
+    approver_role: Literal["founder", "guardian_a", "guardian_b", "guardian_c", "verifier"]
+    decision: Literal["approved", "rejected"]
+    test_evidence_summary: str = ""
+    acknowledgement_text: str | None = None
+
+
+class SelfModApprovalOut(_UtcAssumingModel):
+    id: str
+    revision_id: str
+    approver_role: str
+    decision: Literal["approved", "rejected"]
+    patch_hash_at_approval: str
+    base_commit_at_approval: str | None
+    target_at_approval: str
+    scope_at_approval: list[str]
+    policy_fingerprint_at_approval: str
+    constitution_fingerprint_at_approval: str
+    test_evidence_summary: str
+    acknowledgement_text: str | None
+    expires_at: datetime
+    created_at: datetime
+
+
+class SelfModDeploymentAttemptOut(_UtcAssumingModel):
+    id: str
+    revision_id: str
+    approval_id: str
+    status: SelfModDeploymentStatus
+    target: str
+    branch_name: str | None
+    worktree_path: str | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    notes: str | None
+    created_at: datetime
+
+
+class SelfModRollbackEventOut(_UtcAssumingModel):
+    id: str
+    deployment_attempt_id: str
+    status: SelfModRollbackStatus
+    reason: str
+    restored_reference: str | None
+    created_at: datetime
+    completed_at: datetime | None
+
+
+class SelfModAuditEventOut(_UtcAssumingModel):
+    id: str
+    proposal_id: str | None
+    revision_id: str | None
+    event_type: str
+    actor_role: str
+    summary: str
+    safe_context_json: dict
+    created_at: datetime
+
+
+class SelfModKillSwitchOut(BaseModel):
+    active: bool
+    activated_at: datetime | None
+    activated_by: str | None
+    reason: str | None
+    reset_at: datetime | None
+    reset_by: str | None
+
+
+class SelfModKillSwitchActivate(BaseModel):
+    activated_by: Literal["founder", "guardian_a", "guardian_b", "guardian_c", "verifier"]
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class SelfModHealthOut(BaseModel):
+    supervised_self_modification_enabled: bool
+    self_modification_sandbox_enabled: bool
+    self_modification_deployment_enabled: bool
+    self_modification_frontend_enabled: bool
+    kill_switch_active: bool
+    open_proposal_count: int
+    awaiting_review_count: int
+    sandbox_runner: str
+    sandbox_runner_available: bool
+    network_isolation_enforced: bool
+    sandbox_image: str

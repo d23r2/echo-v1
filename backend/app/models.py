@@ -2077,3 +2077,301 @@ class IdentityCommitment(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
     identity_profile: Mapped["AssistantIdentityProfile"] = relationship(back_populates="commitments")
+
+
+# --- ECHO Layer 3A Part 2D: Supervised Self-Modification ---
+#
+# This is a separate, purpose-built domain model from SelfImprovementRequest
+# (see self_improvement.py/self_improvement_verify.py, Layer 0) which remains
+# untouched and still strictly read-only (git status/diff + pytest/ruff/mypy
+# against the live working tree, never applies a patch). These tables back
+# the actual propose -> sandbox -> verify -> human-approve -> (locally) apply
+# workflow. Deployment always targets an isolated git worktree on a fresh
+# `echo/self-modification/<proposal-id>/<revision-number>` branch — never the
+# checked-out working tree or an existing branch — so this system can never
+# touch in-progress work sitting in the primary repo.
+#
+# risk_level here is deliberately its own vocabulary (low|moderate|high|
+# critical), analogous to but distinct from ActionSpec/ToolSpec's
+# low|medium|high|destructive scale: it answers "how risky is this *patch*"
+# (does it touch protected paths/symbols), not "how risky is running this
+# *predefined action*". CRITICAL proposals are blocked from this workflow
+# entirely and must go through the real Guardian Council amendment process.
+
+
+class CodeModificationProposal(Base):
+    __tablename__ = "code_modification_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'scope_check_failed', 'compliance_check_failed', "
+            "'revision_required', 'ready_for_sandbox', 'sandbox_running', "
+            "'sandbox_failed', 'sandbox_passed', 'awaiting_human_review', 'approved', "
+            "'rejected', 'approval_expired', 'deployment_queued', 'deploying', "
+            "'deployed', 'post_deployment_failed', 'rollback_required', "
+            "'rolling_back', 'rolled_back', 'closed', 'cancelled')",
+            name="ck_code_modification_proposal_status",
+        ),
+        CheckConstraint(
+            "risk_level IN ('low', 'moderate', 'high', 'critical')",
+            name="ck_code_modification_proposal_risk_level",
+        ),
+        Index("ix_code_modification_proposals_status", "status"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String)
+    description: Mapped[str] = mapped_column(Text)
+    # Structured engineering rationale — mandatory on every proposal, never
+    # hidden chain-of-thought; this is the human-readable "why" reviewers see.
+    rationale: Mapped[str] = mapped_column(Text)
+    # Simulated role label, same convention as SelfImprovementRequest/council.py
+    # — this app has no real multi-user auth (see PermissionSetting docstring).
+    proposed_by: Mapped[str] = mapped_column(String, default="founder")
+    status: Mapped[str] = mapped_column(String, default="draft")
+    risk_level: Mapped[str] = mapped_column(String, default="low")
+    # Local-development-branch apply only in this milestone — never "main"/"master".
+    target_branch: Mapped[str] = mapped_column(String, default="local-dev")
+    base_commit: Mapped[str | None] = mapped_column(String, nullable=True)
+    active_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    closed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class CodeModificationRevision(Base):
+    """One row per patch version submitted for a proposal. A new revision is
+    created every time the patch text changes — this invalidates any prior
+    HumanApproval, which is bound to an exact revision_id/patch_hash."""
+
+    __tablename__ = "code_modification_revisions"
+    __table_args__ = (
+        CheckConstraint(
+            "scope_check_status IN ('pending', 'passed', 'failed')",
+            name="ck_code_modification_revision_scope_status",
+        ),
+        CheckConstraint(
+            "compliance_check_status IN ('pending', 'passed', 'failed', 'needs_human_review')",
+            name="ck_code_modification_revision_compliance_status",
+        ),
+        Index("ix_code_modification_revisions_proposal_id", "proposal_id"),
+        UniqueConstraint("proposal_id", "revision_number", name="uq_code_modification_revision_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("code_modification_proposals.id"))
+    revision_number: Mapped[int] = mapped_column(Integer, default=1)
+    # Unified diff text as submitted — never applied anywhere until sandboxed.
+    patch_text: Mapped[str] = mapped_column(Text)
+    # sha256 of patch_text, always computed server-side — never trusted from the client.
+    patch_hash: Mapped[str] = mapped_column(String, index=True)
+    changed_paths: Mapped[list] = mapped_column(JSON, default=list)
+    scope_check_status: Mapped[str] = mapped_column(String, default="pending")
+    scope_check_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compliance_check_status: Mapped[str] = mapped_column(String, default="pending")
+    compliance_check_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ModificationImpactAssessment(Base):
+    __tablename__ = "modification_impact_assessments"
+    __table_args__ = (Index("ix_modification_impact_assessments_revision_id", "revision_id"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("code_modification_revisions.id"))
+    summary: Mapped[str] = mapped_column(Text)
+    affected_subsystems: Mapped[list] = mapped_column(JSON, default=list)
+    risk_level: Mapped[str] = mapped_column(String, default="low")
+    touches_protected_paths: Mapped[bool] = mapped_column(Boolean, default=False)
+    touches_protected_symbols: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ConstitutionalComplianceCheck(Base):
+    """Wraps constitution.classify_amendment_text() (prose-level, reused
+    unmodified) plus a structural protected-path/symbol check — the real
+    Guardian Council amendment process is the actual authority for anything
+    that resolves 'blocked' here; this table just records the pre-check."""
+
+    __tablename__ = "constitutional_compliance_checks"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('allowed', 'blocked', 'needs_human_review')",
+            name="ck_constitutional_compliance_check_status",
+        ),
+        Index("ix_constitutional_compliance_checks_revision_id", "revision_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("code_modification_revisions.id"))
+    status: Mapped[str] = mapped_column(String)
+    implicated_invariants: Mapped[list] = mapped_column(JSON, default=list)
+    reasons: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SandboxExecution(Base):
+    __tablename__ = "sandbox_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'passed', 'failed', 'error')",
+            name="ck_sandbox_execution_status",
+        ),
+        Index("ix_sandbox_executions_revision_id", "revision_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("code_modification_revisions.id"))
+    status: Mapped[str] = mapped_column(String, default="pending")
+    workspace_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sandbox_type: Mapped[str] = mapped_column(String, default="docker_worktree")
+    runner_image: Mapped[str | None] = mapped_column(String, nullable=True)
+    # True only when the Docker runner actually uses --network none. Never a
+    # policy-only declaration.
+    network_disabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class VerificationRun(Base):
+    """Mirrors self_improvement_verify.CheckResult's shape for checks_json —
+    exit codes are captured verbatim from subprocess and never altered."""
+
+    __tablename__ = "verification_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('passed', 'failed', 'unavailable')",
+            name="ck_verification_run_status",
+        ),
+        Index("ix_verification_runs_sandbox_execution_id", "sandbox_execution_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    sandbox_execution_id: Mapped[str] = mapped_column(ForeignKey("sandbox_executions.id"))
+    checks_json: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class HumanApproval(Base):
+    """Bound to an exact revision/patch hash/base commit/scope snapshot —
+    invalidated by any later patch, base, or scope change (enforced at the
+    deployment gate by re-comparing against the live revision row, not by
+    mutating this row after the fact)."""
+
+    __tablename__ = "human_approvals"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('approved', 'rejected')",
+            name="ck_human_approval_decision",
+        ),
+        Index("ix_human_approvals_revision_id", "revision_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("code_modification_revisions.id"))
+    approver_role: Mapped[str] = mapped_column(String)
+    decision: Mapped[str] = mapped_column(String)
+    patch_hash_at_approval: Mapped[str] = mapped_column(String)
+    base_commit_at_approval: Mapped[str | None] = mapped_column(String, nullable=True)
+    target_at_approval: Mapped[str] = mapped_column(String, default="local-dev")
+    scope_at_approval: Mapped[list] = mapped_column(JSON, default=list)
+    policy_fingerprint_at_approval: Mapped[str] = mapped_column(String, default="")
+    constitution_fingerprint_at_approval: Mapped[str] = mapped_column(String, default="")
+    test_evidence_summary: Mapped[str] = mapped_column(Text, default="")
+    # Typed confirmation phrase required for elevated-risk approvals
+    # (e.g. "APPROVE EXACT PATCH <hash>") — an alert-fatigue safeguard.
+    acknowledgement_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DeploymentAttempt(Base):
+    __tablename__ = "deployment_attempts"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'deployed', 'failed')",
+            name="ck_deployment_attempt_status",
+        ),
+        Index("ix_deployment_attempts_revision_id", "revision_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    revision_id: Mapped[str] = mapped_column(ForeignKey("code_modification_revisions.id"))
+    approval_id: Mapped[str] = mapped_column(ForeignKey("human_approvals.id"))
+    status: Mapped[str] = mapped_column(String, default="queued")
+    target: Mapped[str] = mapped_column(String, default="local-dev")
+    branch_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    worktree_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class RollbackEvent(Base):
+    __tablename__ = "rollback_events"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'running', 'completed', 'failed')",
+            name="ck_rollback_event_status",
+        ),
+        Index("ix_rollback_events_deployment_attempt_id", "deployment_attempt_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    deployment_attempt_id: Mapped[str] = mapped_column(ForeignKey("deployment_attempts.id"))
+    status: Mapped[str] = mapped_column(String, default="pending")
+    reason: Mapped[str] = mapped_column(Text)
+    restored_reference: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SelfModificationAuditEvent(Base):
+    """Dedicated audit trail for this subsystem specifically — the repo has
+    no consolidated general-purpose audit log (confirmed by a fresh audit
+    pass across models.py; every existing log-shaped table is subsystem-
+    scoped, e.g. ActionRun/ToolRun/MemoryConsolidationEvent), so this follows
+    that same established convention rather than inventing a shared table.
+    NOTE: honest limitation — there is no tamper-evident/hash-chaining
+    mechanism anywhere in this codebase and this table does not add one;
+    see the architecture doc's threat model for what that gap means."""
+
+    __tablename__ = "self_modification_audit_events"
+    __table_args__ = (
+        Index("ix_self_modification_audit_events_proposal_id", "proposal_id"),
+        Index("ix_self_modification_audit_events_created_at", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    proposal_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    event_type: Mapped[str] = mapped_column(String)
+    actor_role: Mapped[str] = mapped_column(String, default="system")
+    summary: Mapped[str] = mapped_column(Text)
+    # Pre-sanitized structured context only (ids, hashes, statuses, counts) —
+    # never raw patch text or exception tracebacks, matching ActionRun's
+    # input_json/result_json discipline.
+    safe_context_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SelfModificationKillSwitch(Base):
+    """Singleton row (id is always the literal 'singleton'). Immediately
+    disables new sandbox runs/approvals/deployments when active; read/audit/
+    rollback access is never gated by this. Protected from modification
+    through the self-modification workflow itself — see the protected-paths
+    policy in self_modification_governance.py."""
+
+    __tablename__ = "self_modification_kill_switch"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: "singleton")
+    active: Mapped[bool] = mapped_column(Boolean, default=False)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reset_by: Mapped[str | None] = mapped_column(String, nullable=True)

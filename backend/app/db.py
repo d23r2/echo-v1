@@ -72,11 +72,17 @@ def init_db() -> None:
     # ECHO Layer 2E — goal_id loose-reference columns on two pre-existing tables.
     _ensure_column("tasks", "goal_id", "TEXT")
     _ensure_column("plans", "goal_id", "TEXT")
+    _ensure_column("sandbox_executions", "sandbox_type", "TEXT DEFAULT 'docker_worktree'")
+    _ensure_column("sandbox_executions", "runner_image", "TEXT")
+    _ensure_column("human_approvals", "target_at_approval", "TEXT DEFAULT 'local-dev'")
+    _ensure_column("human_approvals", "policy_fingerprint_at_approval", "TEXT DEFAULT ''")
+    _ensure_column("human_approvals", "constitution_fingerprint_at_approval", "TEXT DEFAULT ''")
     _ensure_layer1_memory_columns()
     _ensure_layer2a_cognitive_columns()
     _seed_action_reliability_core()
     _seed_cognitive_core()
     _seed_core_identity()
+    _seed_self_modification_governance()
     _ensure_schema_version()
 
 
@@ -209,7 +215,15 @@ def _ensure_layer1_memory_columns() -> None:
 # Base.metadata.create_all() above with no _ensure_column() calls needed
 # since nothing existing gained a column. See
 # ECHO_LAYER_3A_CORE_IDENTITY_MORAL_COMPASS_ARCHITECTURE.md section 11.
-CURRENT_SCHEMA_VERSION = 8
+# v9 (ECHO Layer 3A Part 2D): Supervised Self-Modification — new tables
+# (code_modification_proposals, code_modification_revisions,
+# modification_impact_assessments, constitutional_compliance_checks,
+# sandbox_executions, verification_runs, human_approvals,
+# deployment_attempts, rollback_events, self_modification_audit_events,
+# self_modification_kill_switch), created by Base.metadata.create_all()
+# v10 hardens approval invalidation and records the actual sandbox boundary;
+# additive columns are installed above for databases that saw the partial v9.
+CURRENT_SCHEMA_VERSION = 10
 
 
 def _ensure_schema_version() -> None:
@@ -268,6 +282,19 @@ def _seed_core_identity() -> None:
 
     with SessionLocal() as db:
         identity_service.ensure_default_identity(db)
+
+
+def _seed_self_modification_governance() -> None:
+    """ECHO Layer 3A Part 2D — same delegation pattern as
+    _seed_action_reliability_core(): idempotent, seeds new
+    self_modification_* permission_center keys plus the kill-switch
+    singleton row. Runs unconditionally (unlike _seed_core_identity) since
+    seeding inert rows is safe even when the subsystem's feature flags are
+    off — nothing reads them until a flag is explicitly enabled."""
+    from app.services import self_modification_governance
+
+    with SessionLocal() as db:
+        self_modification_governance.ensure_defaults(db)
 
 
 def _ensure_atlas_memory_type_column() -> None:
