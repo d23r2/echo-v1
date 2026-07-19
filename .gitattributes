@@ -1,0 +1,24 @@
+# Normalize line endings for all text files on commit; Git still checks
+# files out using each platform's native convention (CRLF on Windows via
+# core.autocrlf), but the blobs stored in the repo are always LF. This
+# repo has repeatedly hit whole-file-rewrite diff noise from files whose
+# line endings didn't match this convention when committed from a
+# different environment (see PROGRESS.md's 2026-07-16 through 2026-07-19
+# check-in notes) — this file makes the policy explicit and repo-tracked
+# instead of depending on each contributor's local core.autocrlf value.
+* text=auto
+
+# Never convert line endings for genuinely binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.db binary
+*.sqlite binary
+*.zip binary

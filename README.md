@@ -113,7 +113,7 @@ npm install
 cp .env.example .env
 npm run dev
 ```
-App at http://localhost:5173
+App at http://localhost:5174
 
 If no API keys are set and Ollama isn't running, chat requests return a clear 503
 explaining that no provider is available, instead of crashing.

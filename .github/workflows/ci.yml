@@ -1,11 +1,9 @@
 # ECHO Layer 0 — Continuous Integration Foundation v1
 #
-# IMPORTANT: this workflow file was created as part of the ECHO Layer 0
-# Infrastructure Foundation milestone but has NOT been pushed to GitHub.
-# d23r2/echo-v1 is a public repository — do not push this (or anything
-# else) without explicit user approval; see the milestone's rule 13 and the
-# repo's own commit-guidance convention. It's committed locally so it's
-# reviewable and diffable, exactly like every other file in this milestone.
+# This workflow has been on origin/master since ec2ac484 and runs on every
+# push/PR to master/main. It only lints, tests, typechecks and builds —
+# there is no deploy job and it never needs repository secrets, so pushing
+# it carried no additional risk beyond the rest of the codebase.
 #
 # No real provider API keys anywhere in this workflow — every backend test
 # uses fake/mocked providers (see backend/tests/fake_providers.py) and an
