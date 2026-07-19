@@ -46,6 +46,7 @@ def _register_and_activate(db, monkeypatch, *, requested_by="founder"):
     monkeypatch.setattr(maintenance_code_access, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db)
     repo = maintenance_policy.register_repository(db, display_name="ECHO", requested_by=requested_by)
     repo = maintenance_policy.set_capability_mode(db, repo.id, "analyse_only", requested_by=requested_by)
@@ -243,3 +244,53 @@ def test_list_repository_files_handles_special_character_filename(db_session, mo
         assert "'" in matched[0].path and ";" in matched[0].path
     finally:
         fixture.unlink(missing_ok=True)
+
+
+# ---- Path-encoding tricks (from the independent test pass) ----
+#
+# Single URL-encoded traversal in a query string ("%2e%2e%2f") is decoded by
+# FastAPI/Starlette's query-parameter parsing *before* this service layer
+# ever sees it, so by the time read_repository_file() runs, it is already
+# plain ".." and caught by the existing check — not a distinct bypass to
+# test at this layer. Double-encoded and Unicode-lookalike traversal
+# attempts are the genuinely new cases: neither one decodes to a real ".."
+# or "/" by the time Python string operations run on it, so `_validate_and_
+# resolve()`'s traversal check does not (and does not need to) fire — the
+# request fails safely for a different reason: the literal weird string
+# never resolves to an existing file. These tests confirm that failure mode
+# empirically rather than assuming it.
+
+
+def test_read_file_rejects_double_encoded_traversal(db_session, monkeypatch):
+    repo = _register_and_activate(db_session, monkeypatch)
+    raised = False
+    try:
+        maintenance_code_access.read_repository_file(repo, "backend/tests/%252e%252e%252fetc%252fpasswd")
+    except maintenance_code_access.CodeAccessRejectedError:
+        raised = True
+    assert raised
+
+
+def test_read_file_rejects_unicode_lookalike_traversal(db_session, monkeypatch):
+    repo = _register_and_activate(db_session, monkeypatch)
+    # Fullwidth solidus (U+FF0F) instead of "/" — Python string operations
+    # never treat it as a path separator, so it can't smuggle ".." through
+    # the split("/") check, and it can't resolve to any real file either.
+    raised = False
+    try:
+        maintenance_code_access.read_repository_file(repo, "backend/tests／..／..／etc／passwd")
+    except maintenance_code_access.CodeAccessRejectedError:
+        raised = True
+    assert raised
+
+
+def test_read_file_rejects_unicode_lookalike_dot_traversal(db_session, monkeypatch):
+    repo = _register_and_activate(db_session, monkeypatch)
+    # Fullwidth full stop (U+FF0E) instead of "." — same reasoning: it is
+    # never equal to the literal ".." the traversal check looks for.
+    raised = False
+    try:
+        maintenance_code_access.read_repository_file(repo, "backend/tests/．．/．．/etc/passwd")
+    except maintenance_code_access.CodeAccessRejectedError:
+        raised = True
+    assert raised

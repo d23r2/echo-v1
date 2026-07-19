@@ -82,6 +82,7 @@ def _fake_deploy_success(monkeypatch):
 
 def test_analysis_originated_proposal_completes_the_full_unmodified_pipeline(db_session, monkeypatch):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings())
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     repo = maintenance_policy.set_capability_mode(db_session, repo.id, "human_approved_local_commit", requested_by="founder")
@@ -182,6 +183,7 @@ def test_critical_risk_analysis_originated_proposal_still_blocked_before_sandbox
     """CRITICAL-risk proposals never reach ready_for_sandbox regardless of
     origin — confirms the analysis path adds no bypass."""
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings())
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     repo = maintenance_policy.set_capability_mode(db_session, repo.id, "human_approved_local_commit", requested_by="founder")

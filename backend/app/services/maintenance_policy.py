@@ -19,6 +19,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.core.logging import log_event
 from app.models import ApprovedRepository, MaintenanceAuditEvent
 from app.self_improvement_verify import REPO_ROOT
@@ -84,6 +85,10 @@ def _compute_fingerprint(root: Path) -> str:
 def register_repository(
     db: Session, *, display_name: str, requested_by: str, approved_branches: list[str] | None = None,
 ) -> ApprovedRepository:
+    if not get_settings().supervised_maintenance_enabled:
+        raise MaintenancePermissionError(
+            "Supervised Maintenance is disabled (SUPERVISED_MAINTENANCE_ENABLED=false)."
+        )
     permission = permission_center.check(db, "supervised_maintenance_register_repository")
     if not permission.allowed:
         raise MaintenancePermissionError(permission.reason)
@@ -132,6 +137,10 @@ def list_repositories(db: Session) -> list[ApprovedRepository]:
 
 
 def set_capability_mode(db: Session, repository_id: str, mode: str, *, requested_by: str) -> ApprovedRepository:
+    if not get_settings().supervised_maintenance_enabled:
+        raise MaintenancePermissionError(
+            "Supervised Maintenance is disabled (SUPERVISED_MAINTENANCE_ENABLED=false)."
+        )
     if requested_by not in _HUMAN_APPROVER_ROLES:
         raise MaintenancePermissionError(
             "Capability-mode changes are owner-only; the model identity may not change its own access level."

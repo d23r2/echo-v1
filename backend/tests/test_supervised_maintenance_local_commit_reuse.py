@@ -123,6 +123,7 @@ def _run_pipeline_to_deploy_and_rollback(db_session, monkeypatch, proposal):
 
 def test_local_commit_and_rollback_are_identical_for_analysis_and_direct_proposals(db_session, monkeypatch):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings())
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     repo = maintenance_policy.set_capability_mode(db_session, repo.id, "human_approved_local_commit", requested_by="founder")

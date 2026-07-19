@@ -47,6 +47,7 @@ def _make_analysis(db, monkeypatch, *, mode="propose_only"):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db)
     repo = maintenance_policy.register_repository(db, display_name="ECHO", requested_by="founder")
     repo = maintenance_policy.set_capability_mode(db, repo.id, mode, requested_by="founder")

@@ -31,6 +31,7 @@ def _register_and_activate(db, monkeypatch, *, requested_by="founder"):
     monkeypatch.setattr(maintenance_code_access, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db)
     repo = maintenance_policy.register_repository(db, display_name="ECHO", requested_by=requested_by)
     repo = maintenance_policy.set_capability_mode(db, repo.id, "analyse_only", requested_by=requested_by)
@@ -40,7 +41,14 @@ def _register_and_activate(db, monkeypatch, *, requested_by="founder"):
 # ---- MaintenancePolicyService / ApprovedRepository ----
 
 
-def test_register_repository_requires_human_role(db_session):
+def _enable_policy(monkeypatch, **overrides):
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(
+        supervised_maintenance_enabled=True, **overrides,
+    ))
+
+
+def test_register_repository_requires_human_role(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     raised = False
     try:
@@ -50,7 +58,37 @@ def test_register_repository_requires_human_role(db_session):
     assert raised
 
 
-def test_register_repository_succeeds_for_founder(db_session):
+def test_register_repository_rejects_when_subsystem_disabled(db_session, monkeypatch):
+    """Reproduces and pins the fix for the gap found in this test pass:
+    register_repository()/set_capability_mode() previously had no
+    supervised_maintenance_enabled check at all — a repository could be
+    registered and raised all the way to human_approved_local_commit while
+    the whole subsystem was globally off. Confirms the fix fails closed."""
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings())
+    permission_center.ensure_defaults(db_session)
+    raised = False
+    try:
+        maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
+    except maintenance_policy.MaintenancePermissionError:
+        raised = True
+    assert raised
+
+
+def test_set_capability_mode_rejects_when_subsystem_disabled(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
+    permission_center.ensure_defaults(db_session)
+    repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings())
+    raised = False
+    try:
+        maintenance_policy.set_capability_mode(db_session, repo.id, "analyse_only", requested_by="founder")
+    except maintenance_policy.MaintenancePermissionError:
+        raised = True
+    assert raised
+
+
+def test_register_repository_succeeds_for_founder(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     assert repo.capability_mode == "disabled"
@@ -58,7 +96,8 @@ def test_register_repository_succeeds_for_founder(db_session):
     assert os.path.isdir(repo.root_path_reference)
 
 
-def test_register_repository_rejects_duplicate(db_session):
+def test_register_repository_rejects_duplicate(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     raised = False
@@ -69,7 +108,8 @@ def test_register_repository_rejects_duplicate(db_session):
     assert raised
 
 
-def test_set_capability_mode_requires_human_role(db_session):
+def test_set_capability_mode_requires_human_role(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     raised = False
@@ -80,7 +120,8 @@ def test_set_capability_mode_requires_human_role(db_session):
     assert raised
 
 
-def test_set_capability_mode_rejects_unknown_mode(db_session):
+def test_set_capability_mode_rejects_unknown_mode(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     raised = False
@@ -91,7 +132,8 @@ def test_set_capability_mode_rejects_unknown_mode(db_session):
     assert raised
 
 
-def test_verify_repository_reports_no_drift_immediately_after_registration(db_session):
+def test_verify_repository_reports_no_drift_immediately_after_registration(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     _repo, drifted = maintenance_policy.verify_repository(db_session, repo.id)
@@ -102,6 +144,7 @@ def test_verify_repository_reports_no_drift_immediately_after_registration(db_se
 
 
 def test_code_access_fails_closed_when_disabled_by_default(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     monkeypatch.setattr(maintenance_code_access, "get_settings", lambda: _settings())
@@ -114,6 +157,7 @@ def test_code_access_fails_closed_when_disabled_by_default(db_session, monkeypat
 
 
 def test_code_access_requires_active_capability_mode(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     monkeypatch.setattr(maintenance_code_access, "get_settings", lambda: _settings(
@@ -299,7 +343,8 @@ def test_inspect_git_commit_rejects_malformed_ref(db_session, monkeypatch):
 # ---- MaintenanceAnalysisService ----
 
 
-def test_create_analysis_requires_active_capability_mode(db_session):
+def test_create_analysis_requires_active_capability_mode(db_session, monkeypatch):
+    _enable_policy(monkeypatch)
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     raised = False
@@ -314,6 +359,7 @@ def test_create_analysis_and_add_finding(db_session, monkeypatch):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     repo = maintenance_policy.set_capability_mode(db_session, repo.id, "analyse_only", requested_by="founder")
@@ -343,6 +389,7 @@ def test_add_finding_rejects_invalid_epistemic_status(db_session, monkeypatch):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     maintenance_policy.set_capability_mode(db_session, repo.id, "analyse_only", requested_by="founder")
@@ -359,6 +406,7 @@ def test_cannot_add_finding_after_completion(db_session, monkeypatch):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     maintenance_policy.set_capability_mode(db_session, repo.id, "analyse_only", requested_by="founder")
@@ -376,6 +424,7 @@ def test_cancel_analysis(db_session, monkeypatch):
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     maintenance_policy.set_capability_mode(db_session, repo.id, "analyse_only", requested_by="founder")
@@ -391,6 +440,7 @@ def test_audit_events_recorded_for_registration_and_analysis(db_session, monkeyp
     monkeypatch.setattr(maintenance_analysis, "get_settings", lambda: _settings(
         supervised_maintenance_enabled=True, supervised_analysis_enabled=True,
     ))
+    monkeypatch.setattr(maintenance_policy, "get_settings", lambda: _settings(supervised_maintenance_enabled=True))
     permission_center.ensure_defaults(db_session)
     repo = maintenance_policy.register_repository(db_session, display_name="ECHO", requested_by="founder")
     maintenance_policy.set_capability_mode(db_session, repo.id, "analyse_only", requested_by="founder")
