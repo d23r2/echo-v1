@@ -89,9 +89,19 @@ function fileTypeIcon(mime: string): string {
 const SpeechRecognitionCtor: any =
   typeof window !== "undefined" && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
 const speechSynthesisSupported = typeof window !== "undefined" && "speechSynthesis" in window;
+// Most mobile browsers refuse microphone access outside a secure context
+// (HTTPS or localhost) even when the SpeechRecognition constructor itself
+// is present — without this check the mic control looks "supported" right
+// up until the user taps it and gets a silent failure.
+const isSecureContext = typeof window === "undefined" || window.isSecureContext !== false;
 
 const VOICE_LANG = "en-US";
 const SILENCE_STOP_MS = 1800;
+// If speechSynthesis.speak() doesn't fire onstart within this window, mobile
+// Safari-style autoplay blocking is the most likely explanation (utterance
+// onerror doesn't reliably fire "not-allowed" in every browser) — show a
+// manual replay control instead of silently doing nothing.
+const SPEECH_START_WATCHDOG_MS = 1200;
 
 // Strip markdown so SpeechSynthesis doesn't read out literal asterisks/backticks/
 // header hashes/link syntax — only the reply's actual words should be spoken.
@@ -131,6 +141,7 @@ export default function ChatView() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [blockedSpeechText, setBlockedSpeechText] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
   const [summary, setSummary] = useState<ConversationSummaryOut | null>(null);
@@ -140,6 +151,7 @@ export default function ChatView() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechWatchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const preferredVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
   const streamAbortRef = useRef<AbortController | null>(null);
 
@@ -244,6 +256,19 @@ export default function ChatView() {
       .catch(() => {});
   }, []);
 
+  // Distinguishes *why* voice input isn't available instead of just hiding
+  // the control — mirrors imageGenerationUnavailableReason's pattern below.
+  // Order matters: an explicit off-preference is checked first since it's
+  // the user's own choice, not a capability problem.
+  const voiceUnavailableReason: string | null =
+    voiceMode === "off"
+      ? "turned off in Settings"
+      : !SpeechRecognitionCtor
+        ? "not supported in this browser"
+        : !isSecureContext
+          ? "requires a secure connection (HTTPS) on mobile"
+          : null;
+
   const geminiAvailable = features ? features.vision.available : null;
   const hasImageAttached = attachedFiles.some((f) => f.type.startsWith("image/"));
   const visionWarning =
@@ -269,6 +294,7 @@ export default function ChatView() {
     return () => {
       if (speechSynthesisSupported) window.speechSynthesis.cancel();
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
       try {
         recognitionRef.current?.abort();
       } catch {
@@ -300,10 +326,63 @@ export default function ChatView() {
     };
   }, []);
 
+  function clearSpeechWatchdog() {
+    if (speechWatchdogRef.current) {
+      clearTimeout(speechWatchdogRef.current);
+      speechWatchdogRef.current = null;
+    }
+  }
+
   function speak(text: string) {
     if (!speakEnabled || !speechSynthesisSupported) return;
     const cleaned = stripMarkdownForSpeech(text);
     if (!cleaned) return;
+    setBlockedSpeechText(null);
+    window.speechSynthesis.cancel();
+    // Local to this call (not React state) so the watchdog below always
+    // checks the true outcome of *this* utterance, not a stale render's
+    // isSpeaking value from before onstart had a chance to fire.
+    let started = false;
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
+    utterance.rate = 0.97;
+    utterance.onstart = () => {
+      started = true;
+      clearSpeechWatchdog();
+      setIsSpeaking(true);
+    };
+    utterance.onend = () => {
+      clearSpeechWatchdog();
+      setIsSpeaking(false);
+    };
+    utterance.onerror = (event) => {
+      clearSpeechWatchdog();
+      setIsSpeaking(false);
+      // "not-allowed" is the spec value for autoplay/gesture-policy
+      // rejection; some browsers instead just never fire onstart at all
+      // (caught by the watchdog below), so both paths lead to the same
+      // manual-replay fallback rather than silently doing nothing.
+      if (event.error === "not-allowed") setBlockedSpeechText(cleaned);
+    };
+    window.speechSynthesis.speak(utterance);
+    // Text-to-speech playback can be silently blocked on mobile (most
+    // commonly iOS Safari) with neither onstart nor onerror ever firing —
+    // this watchdog is the only way to detect that and offer a manual
+    // "tap to hear" control instead of leaving the user with no reply audio
+    // and no explanation.
+    clearSpeechWatchdog();
+    speechWatchdogRef.current = setTimeout(() => {
+      if (!started) setBlockedSpeechText(cleaned);
+    }, SPEECH_START_WATCHDOG_MS);
+  }
+
+  function retryBlockedSpeech() {
+    if (!blockedSpeechText) return;
+    const cleaned = blockedSpeechText;
+    setBlockedSpeechText(null);
+    // Called directly from a click handler, so this speak() call is
+    // synchronously inside the user gesture that triggered it — the one
+    // guarantee mobile browsers require for audio to actually start.
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(cleaned);
     if (preferredVoiceRef.current) utterance.voice = preferredVoiceRef.current;
@@ -320,6 +399,7 @@ export default function ChatView() {
       setIsSpeaking(false);
       return;
     }
+    setBlockedSpeechText(null);
     setSpeakEnabled((v) => !v);
   }
 
@@ -412,7 +492,14 @@ export default function ChatView() {
   }
 
   function toggleListening() {
-    if (!SpeechRecognitionCtor) return;
+    if (!isSecureContext) {
+      setVoiceError("Voice input requires HTTPS on mobile. Open ECHO through its secure address.");
+      return;
+    }
+    if (voiceUnavailableReason) {
+      setVoiceError(`Voice input is unavailable (${voiceUnavailableReason}).`);
+      return;
+    }
     if (listening) {
       stopListening();
       return;
@@ -848,6 +935,17 @@ export default function ChatView() {
               {voiceError}
             </div>
           )}
+          {blockedSpeechText && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-900 bg-amber-950/30 px-3 py-1.5 text-xs text-amber-200">
+              <span>Your browser blocked automatic audio.</span>
+              <button
+                onClick={retryBlockedSpeech}
+                className="shrink-0 rounded-md border border-amber-700 px-2 py-0.5 font-medium text-amber-100 hover:bg-amber-900/50"
+              >
+                ▶ Tap to play
+              </button>
+            </div>
+          )}
           {attachedFiles.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-2">
               {attachedFiles.map((f, i) => (
@@ -889,7 +987,7 @@ export default function ChatView() {
               onAttachFile={() => fileInputRef.current?.click()}
               onToggleVoice={toggleListening}
               onGenerateImage={handleGenerateImage}
-              voiceSupported={!!SpeechRecognitionCtor && voiceMode !== "off"}
+              voiceUnavailableReason={voiceUnavailableReason}
               listening={listening}
               canGenerateImage={canGenerateImage}
               imageGenerationUnavailableReason={imageGenerationUnavailableReason}

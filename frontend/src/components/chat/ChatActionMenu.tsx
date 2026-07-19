@@ -4,7 +4,7 @@ interface ChatActionMenuProps {
   onAttachFile: () => void;
   onToggleVoice: () => void;
   onGenerateImage: () => void;
-  voiceSupported: boolean;
+  voiceUnavailableReason: string | null;
   listening: boolean;
   canGenerateImage: boolean;
   imageGenerationUnavailableReason: string | null;
@@ -19,7 +19,7 @@ export default function ChatActionMenu({
   onAttachFile,
   onToggleVoice,
   onGenerateImage,
-  voiceSupported,
+  voiceUnavailableReason,
   listening,
   canGenerateImage,
   imageGenerationUnavailableReason,
@@ -81,15 +81,15 @@ export default function ChatActionMenu({
             📎 Attach file
           </button>
 
-          {voiceSupported && (
-            <button
-              role="menuitem"
-              onClick={() => choose(onToggleVoice)}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800"
-            >
-              🎤 {listening ? "Stop voice input" : "Voice input"}
-            </button>
-          )}
+          <button
+            role="menuitem"
+            onClick={() => !voiceUnavailableReason && choose(onToggleVoice)}
+            disabled={!!voiceUnavailableReason}
+            title={voiceUnavailableReason || undefined}
+            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-zinc-200 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:text-zinc-600 disabled:hover:bg-transparent"
+          >
+            🎤 {voiceUnavailableReason ? `Voice input (${voiceUnavailableReason})` : listening ? "Stop voice input" : "Voice input"}
+          </button>
 
           <button
             role="menuitem"
