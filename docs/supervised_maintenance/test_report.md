@@ -175,6 +175,32 @@ number, re-confirmed as this pass's starting baseline).
 - **Status**: Documented, not fixed. Test (`test_propose_from_analysis_for_unknown_analysis_fails_closed`)
   pins the actual (safe) current behavior.
 
+### D-3 — HIGH (reliability, not security) — `sandbox_verify`'s baseline check cannot complete within its timeout
+
+- **Component**: `backend/app/services/self_modification_sandbox.py` — `run_patch_in_sandbox()`'s
+  baseline `backend-pytest` check, `selfmod_runner.py`'s fixed command, `_TIMEOUT_SECONDS` (600s)
+- **Discovered**: in a targeted follow-up investigation of this report's original "Residual Risk" entry
+  (which incorrectly hypothesized a stray build artifact — see the corrected Residual Risks section
+  below for the full evidence trail).
+- **Reproduction**: `governance.run_sandbox()` against a real analysis-originated proposal. The baseline
+  phase (runs the entire real backend test suite, ~1655 tests, before any patch is applied) returned
+  `status=failed, stderr_summary='Command timed out after 600s'` — confirmed via direct instrumentation,
+  not inference.
+- **Expected**: the baseline check should complete and report pass/fail for the *unpatched* codebase.
+- **Actual**: it times out under the sandbox's `--memory 2g --cpus 2` resource cap before the suite
+  finishes (the same suite takes ~11-14 minutes unconstrained on this host).
+- **Security impact**: none — this fails closed. `passed = baseline_passed and post_passed`, so a
+  timed-out baseline means the sandbox execution is correctly reported as not-passed; no unsafe patch
+  can be approved off the back of it.
+- **Reliability impact**: significant — as currently configured, `sandbox_verify` mode cannot produce a
+  *passing* result for any proposal at all, since the baseline phase alone exceeds the timeout
+  regardless of what the proposal's patch actually contains.
+- **Fix**: not applied this pass — see Recommended Fixes below; this is Part 2D governance/sandbox code
+  and the right resolution (longer timeout vs. scoped test selection vs. more container resources)
+  is a deliberate tradeoff, not a "smallest necessary fix" this pass should make unilaterally.
+- **Status**: Documented, not fixed. This is the corrected version of the "Residual Risk" this report
+  originally raised — the original text attributed the failure to the wrong cause.
+
 ## Tests Executed
 
 ```powershell
@@ -247,9 +273,11 @@ archive) in ~25s; the live Docker sandbox script's Docker container phase took u
   `selfmod_runner.py` dispatcher Part 2D already has; not touched this pass.
 - **Were protected systems editable?** No. No change to `PROTECTED_PATHS`/`PROTECTED_SYMBOL_PATTERNS`
   enforcement logic; this pass's new files are tests, not governance code.
-- **Did a sandbox escape occur?** No. The live Docker run's failure was a *false-positive-leaning*
-  integrity-check rejection (see Residual Risks), not an escape — if anything, it demonstrates the
-  isolation boundary triggered a stricter-than-necessary but safe rejection.
+- **Did a sandbox escape occur?** No. The live Docker run's failure was a baseline-check timeout under
+  the sandbox's resource caps (root-caused via direct instrumentation — see D-3/Residual Risks), not an
+  escape; the container's own isolation (`--network none`, `--cap-drop ALL`, resource limits) was never
+  breached, and the eventual `passed=False` result is exactly the fail-closed behavior expected when a
+  required check doesn't complete.
 - **Was a stale approval accepted?** Not applicable this pass (approval flow not exercised live); no
   change to that logic.
 - **Could test evidence be altered?** Not applicable this pass (evidence creation not reached, since
@@ -261,26 +289,51 @@ archive) in ~25s; the live Docker sandbox script's Docker container phase took u
 
 ## Residual Risks
 
-- **`sandbox_verify`'s live behavior with real check execution is not fully confirmed.** The one live,
-  non-mocked Docker sandbox run in this pass got through scope check, compliance check, and Docker
-  container invocation, but `_assert_exact_working_diff()` then rejected the result because the
-  post-execution working-tree diff didn't exactly match the approved patch. `_working_diff()` uses
-  `git add -N .` (intent-to-add) then `git diff` — any *untracked, non-gitignored* file left behind by
-  the checks that ran (pytest/ruff/etc.) inside that worktree would trigger this. This is either (a) a
-  narrow reliability gap between "the checks that run" and "the integrity check that verifies nothing
-  else changed" — worth a follow-up investigation specifically diagnosing what file triggered it — or
-  (b) entirely expected behavior for this particular fixture/check combination that a different
-  fixture wouldn't hit. This pass did not have time to root-cause it further via additional live Docker
-  runs (each takes real wall-clock time), and **deliberately did not weaken or bypass the check to make
-  this pass "succeed"** — per the explicit instruction not to weaken security checks to pass tests.
-  This is the reason the Final Recommendation below stays at `propose_only` rather than
-  `sandbox_verify`, even though `sandbox_verify`'s deterministic logic (scope/compliance/self-approval/
-  containment) all passed correctly.
+- **CONFIRMED ROOT CAUSE (follow-up investigation, same session): `sandbox_verify`'s baseline check
+  cannot currently complete within its own timeout.** A dedicated diagnostic script
+  (`_diagnose_sandbox_diff_mismatch.py`, since removed — its finding is captured here) instrumented
+  `run_patch_in_sandbox()`'s exact steps and printed the real intermediate state instead of theorizing.
+  Result: the baseline `backend-pytest` check — which runs the **entire real ~1655-test backend suite**
+  inside the sandbox, before any patch is even applied — returned
+  `status=failed, stderr_summary='Command timed out after 600s'`. The Docker container is resource-capped
+  to `--memory 2g --cpus 2`, and the full suite already takes ~11-14 minutes on this host's unconstrained
+  hardware; under that cap it does not finish inside `_TIMEOUT_SECONDS` (600s). Since
+  `passed = baseline_passed and post_passed` in `run_patch_in_sandbox()`, **this means `sandbox_verify`
+  mode cannot currently produce a passing result for *any* proposal, regardless of the proposal's own
+  content** — the baseline phase alone exceeds the allowed time before the patch-specific logic is even
+  reached. This is a genuine, previously mis-diagnosed reliability defect (see the corrected D-3 entry
+  below) — **not** the "stray build artifact" hypothesis this report originally proposed. Confirmed via
+  the same diagnostic: `git status --short`/`_working_diff()` immediately after the timed-out baseline
+  check were both empty (`''`) — the timeout left no stray files behind, ruling out that theory directly.
+- **Separately, the live sandbox check scripts' own synthetic patches used placeholder git blob hashes**
+  (`index 0000000..1111111`, hand-constructed rather than generated via a real `git diff`), which can
+  never match `git diff`'s real computed content hashes (e.g. `index 00000000..050358b0`) regardless of
+  the timeout issue above. This means `_assert_exact_working_diff()` was working correctly and would
+  have rejected these specific synthetic test patches even if the baseline check had completed in time —
+  a testing-methodology artifact of this pass's own fixtures, not a system defect. A real proposal's
+  patch (generated by `MaintenanceProposalService`/an actual diff, never hand-typed placeholder hashes)
+  would not hit this specific failure mode.
+- **Operational finding: a hung/timed-out sandboxed check does not guarantee the underlying Docker
+  container stops.** While root-causing the above, `docker ps` unexpectedly showed **two**
+  `echo-selfmod-sandbox:local` containers still running — one 9 minutes old (this investigation's own
+  run) and one **41 minutes old**, well past both the 600s check timeout and this pass's own earlier
+  "cleanup verified" claim (which only checked `git worktree list`/`git status`, never `docker ps`).
+  `docker top` showed the 41-minute container's `pytest` process alive but with only ~18s of accumulated
+  CPU time — consistent with a hung/blocked process rather than active work. Both orphaned containers
+  were found and stopped (`docker kill`) as part of this investigation; no repository state was affected
+  (`git worktree list`/`git status` were already clean, confirming `_remove_worktree()`'s `finally`-block
+  cleanup of the *worktree* runs independently of whether the *container* itself ever exits cleanly).
+  **This is a real, previously-undocumented gap**: `subprocess.run(argv, timeout=_TIMEOUT_SECONDS)`
+  around `docker run --rm ...` kills the host-side CLI process on timeout, but does not itself guarantee
+  the daemon-side container is stopped/removed — `--rm` only fires on the container's own exit, and if
+  its process is genuinely hung (as this instance appears to be) the container can outlive the host-side
+  timeout indefinitely. Test coverage's own "cleanup after timeout" claims should be revisited to check
+  `docker ps` directly, not just git state.
 - **Network egress from inside the sandbox was not independently re-probed this pass** (§17 of the
   original spec — attempting real internet/localhost/metadata-endpoint access from inside the running
   container). Part 2D's own architecture and tests document `--network none` as enforced and verified
-  via `network_disabled`; this pass's live run recorded that field but the run failed before reaching
-  a state where an egress attempt would have been meaningful to test.
+  via `network_disabled`; this pass's live runs recorded that field but never reached a state where an
+  egress attempt would have been meaningful to test.
 - **Concurrency/idempotency races** (duplicate submissions, simultaneous sandbox requests) were not
   exercised live this pass — no new gap is suspected given the existing DB-transaction-scoped design,
   but this remains formally unverified beyond Part 2D's own general claims.
@@ -291,16 +344,26 @@ archive) in ~25s; the live Docker sandbox script's Docker container phase took u
 
 Ordered by severity/dependency:
 
-1. Diagnose the exact file(s) that caused `_assert_exact_working_diff()` to reject the live sandbox
-   run (likely a specific untracked artifact from the sandbox's own check commands) and either exclude
-   known-safe build/test artifacts from the comparison in a principled way, or confirm the checks
-   themselves should be writing nothing outside the approved patch and fix whichever check is doing so.
-   **Do this before ever enabling `sandbox_verify` against a real analysis-originated proposal in a
-   live environment.**
-2. (Optional, low priority) Give `create_proposal_from_analysis()`'s unknown-analysis case a dedicated
+1. **(HIGH, do this before ever enabling `sandbox_verify` live)** Resolve the baseline-check timeout.
+   Options, not mutually exclusive: (a) raise `_TIMEOUT_SECONDS` for the `backend-pytest` check
+   specifically — a plain reliability tuning, not a security weakening, since the sandbox's isolation
+   (`--network none`, `--cap-drop ALL`, no-shell dispatcher) is unaffected by how long a check is allowed
+   to run; (b) scope the baseline/patched pytest invocation to only the directories/tests relevant to
+   `changed_paths` instead of always running the entire suite, cutting real wall-clock time
+   significantly; (c) raise the sandbox's `--memory`/`--cpus` caps if host resources allow — this one
+   *does* touch the resource/security posture and deserves a deliberate decision, not a silent change.
+   **Not applied in this pass** — this is Part 2D governance code (protected, cross-cutting, and used by
+   the existing Self-Modification workflow too), and the right fix depends on a resourcing/time-budget
+   tradeoff this report flags for a deliberate decision rather than assumes.
+2. **(MEDIUM)** Add explicit `docker ps`-based cleanup verification (not just `git worktree
+   list`/`git status`) to the sandbox's own test suite and to any future live-check tooling, and
+   consider whether `run_patch_in_sandbox()` should explicitly `docker kill`/`docker rm -f` the
+   container by name/ID on a host-side timeout rather than relying solely on `--rm` firing on the
+   container's own (possibly-hung) exit.
+3. (Optional, low priority) Give `create_proposal_from_analysis()`'s unknown-analysis case a dedicated
    not-found exception type mapped to 404, for consistency with sibling endpoints. Cosmetic only.
-3. (Optional) A future pass could independently re-verify network egress and concurrency behavior live,
-   closing the two residual items above with direct evidence rather than inherited Part 2D coverage.
+4. (Optional) A future pass could independently re-verify network egress and concurrency behavior live,
+   closing the residual items above with direct evidence rather than inherited Part 2D coverage.
 
 ## Final Recommendation
 
