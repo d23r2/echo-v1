@@ -2,6 +2,25 @@
 
 Last check-in: 2026-07-19
 
+## New since 2026-07-19 (later) — Repository stabilisation Passes 1-3 + mobile audio fixes
+
+Three-part session: (1) dug into the Supervised Maintenance sandbox integrity-check residual risk and
+corrected the report's root-cause finding (a baseline-check timeout, not a stray build artifact —
+`e289b542`); (2) diagnosed and fixed mobile voice input/output — mic control now shows an explicit
+unavailable-reason instead of silently vanishing, TTS gained an autoplay-block watchdog + "Tap to play"
+recovery banner, verified live in Browser-pane mobile emulation (`083ebc49`, YELLOW pending real-device
+testing, see `docs/audio/mobile_audio_test_report.md`); (3) a full three-pass repository stabilisation —
+Pass 1 found no incomplete implementations anywhere (every TODO/placeholder-style marker was already
+intentional and honestly labeled) but fixed three real, previously-flagged hygiene gaps: added
+`.gitattributes` (closing the CRLF-noise gap flagged 2026-07-16 through 19 and never fixed), corrected
+`.github/workflows/ci.yml`'s stale "never pushed" comment, and fixed `README.md`'s wrong dev-server port
+(5173 → 5174). Pass 3 re-verified Supervised Maintenance's self-approval/cloud-disclosure boundaries and
+mobile audio's MediaStream-free architecture directly against current source (not cited from memory),
+ran the full baseline (backend 1655/0 in 15:21, supervised-maintenance 67/0, frontend 10/10, ruff/build/
+typecheck clean), and wrote `docs/stabilisation/` + `docs/release/` (release report, one-week break
+checklist). Pushed as `c1a7523d`/`cf82b027`/`f466b13f`. See `docs/release/ECHO_stabilisation_release_report.md`
+for the full GREEN status and `docs/release/one_week_break_checklist.md` for the practical version.
+
 ## New since 2026-07-19 — ECHO Supervised Maintenance Workspace v1 (complete, Phases 1-8, GREEN)
 
 Built a read-only-first code analysis workspace that feeds the existing Layer 3A Part 2D self-
